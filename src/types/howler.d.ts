@@ -11,10 +11,10 @@ declare module 'howler' {
     rate?: number;
     pool?: number;
     format?: string[];
-    xhr?: Record<string, any>;
+    xhr?: Record<string, unknown>;
     onload?: () => void;
-    onloaderror?: (id: number, error: any) => void;
-    onplayerror?: (id: number, error: any) => void;
+    onloaderror?: (id: number, error: unknown) => void;
+    onplayerror?: (id: number, error: unknown) => void;
     onplay?: (id: number) => void;
     onend?: (id: number) => void;
     onpause?: (id: number) => void;
@@ -26,6 +26,8 @@ declare module 'howler' {
     onfade?: (id: number) => void;
     onunlock?: () => void;
   }
+
+  export type HowlCallback = (...args: unknown[]) => void;
 
   export class Howl {
     constructor(options?: HowlOptions);
@@ -41,9 +43,9 @@ declare module 'howler' {
     state(): 'unloaded' | 'loading' | 'loaded';
     playing(id?: number): boolean;
     duration(id?: number): number;
-    on(event: string, fn: Function, id?: number): this;
-    once(event: string, fn: Function, id?: number): this;
-    off(event: string, fn?: Function, id?: number): this;
+    on(event: string, fn: HowlCallback, id?: number): this;
+    once(event: string, fn: HowlCallback, id?: number): this;
+    off(event: string, fn?: HowlCallback, id?: number): this;
     load(): this;
     unload(): void;
   }
@@ -58,7 +60,7 @@ declare module 'howler' {
     noAudio: boolean;
     autoUnlock: boolean;
     autoSuspend: boolean;
-    ctx: AudioContext;
-    masterGain: GainNode;
+    ctx: unknown;
+    masterGain: unknown;
   };
 }

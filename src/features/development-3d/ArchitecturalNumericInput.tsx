@@ -25,18 +25,20 @@ export function ArchitecturalNumericInput({
   onChange,
   disabled = false
 }: ArchitecturalNumericInputProps) {
+  const [prevValue, setPrevValue] = useState<number>(value);
   const [draft, setDraft] = useState<string>(value.toString());
   const [isFocused, setIsFocused] = useState<boolean>(false);
   const [validationError, setValidationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Synchronize draft when incoming canonical value changes (and not actively editing)
-  useEffect(() => {
+  if (value !== prevValue) {
+    setPrevValue(value);
     if (!isFocused) {
       setDraft(value.toString());
       setValidationError(null);
     }
-  }, [value, isFocused]);
+  }
 
   const validateDraft = (str: string): { valid: boolean; num: number; error: string | null } => {
     const trimmed = str.trim();

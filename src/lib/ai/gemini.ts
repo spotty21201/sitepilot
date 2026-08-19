@@ -84,20 +84,20 @@ ${content.slice(0, 15000)}`;
       }
     });
 
-    const parsed = JSON.parse(response.text || '[]');
-    return parsed.map((item: any, idx: number) => ({
+    const parsed = JSON.parse(response.text || '[]') as Array<Record<string, unknown>>;
+    return parsed.map((item, idx: number) => ({
       id: `fnd-${Date.now()}-${idx}`,
       sourceId: sourceInfo.id,
       sourceName: sourceInfo.name,
-      pageLocation: item.pageLocation || 'Page 1',
-      statement: item.statement,
+      pageLocation: typeof item.pageLocation === 'string' ? item.pageLocation : 'Page 1',
+      statement: String(item.statement || ''),
       category: item.category as EvidenceCategory,
       classification: item.classification as EvidenceClassification,
-      confidence: item.confidence,
-      extractedValue: item.extractedNumericValue ? {
+      confidence: item.confidence as Finding['confidence'],
+      extractedValue: typeof item.extractedNumericValue === 'number' ? {
         numericValue: item.extractedNumericValue,
-        unit: item.extractedUnit || '',
-        key: item.extractedKey || ''
+        unit: typeof item.extractedUnit === 'string' ? item.extractedUnit : '',
+        key: typeof item.extractedKey === 'string' ? item.extractedKey : ''
       } : undefined,
       createdAt: new Date().toISOString()
     }));
