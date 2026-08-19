@@ -1,14 +1,13 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from '@google/genai';
 import { calculateDevelopmentMetrics, calculatePolygonAreaM2, checkConstraintViolations } from '@/lib/geometry/engine';
-import { extractDocumentFindings } from '@/lib/ai/gemini';
+import { extractDocumentFindings, createAiClient } from '@/lib/ai/gemini';
+import { getAiConfig } from '@/lib/ai/config';
 import { BuildingMass, Contradiction, EvidenceCategory, EvidenceClassification, Finding, GeoPolygon, Setbacks } from '@/types';
 
 export const runtime = 'nodejs';
 
 const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const DEFAULT_SETBACKS: Setbacks = { front: 0, rear: 0, sideLeft: 0, sideRight: 0 };
-const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
 
 type JsonRecord = Record<string, unknown>;
 type Source = { id: string; name: string; origin: string };
@@ -218,18 +217,19 @@ function recalculateGeometry(geometryValue: unknown, rootConstraints: unknown) {
 }
 
 async function multimodalExtract(content: string, source: Source, media: MediaPart[]): Promise<Partial<Finding>[]> {
-  if (!media.length || !apiKey) return extractDocumentFindings(content, source);
+  const { ai, model, provider } = createAiClient();
+  if (!media.length || provider === 'LOCAL_DEVELOPMENT') return extractDocumentFindings(content, source);
   try {
     const prompt = "You are SitePilot's Evidence Intelligence Engine. Extract only traceable findings from the attached document(s). Classify each item as FACT, CLAIM, ASSUMPTION, or INFERENCE. Never invent missing values or arithmetic. Source: " + source.origin + '; File: ' + source.name + '. Additional text: ' + content.slice(0, 15000);
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model,
       contents: [{ role: 'user', parts: [{ text: prompt }, ...media.map(part => ({ inlineData: part }))] }],
       config: { responseMimeType: 'application/json', responseSchema: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { statement: { type: Type.STRING }, pageLocation: { type: Type.STRING }, category: { type: Type.STRING, enum: categories }, classification: { type: Type.STRING, enum: ['FACT', 'CLAIM', 'ASSUMPTION', 'INFERENCE'] }, confidence: { type: Type.STRING, enum: ['HIGH', 'MEDIUM', 'LOW', 'UNVERIFIED'] }, extractedNumericValue: { type: Type.NUMBER }, extractedUnit: { type: Type.STRING }, extractedKey: { type: Type.STRING } }, required: ['statement', 'category', 'classification', 'confidence'] } } }
     });
     const parsed = JSON.parse(response.text || '[]') as Array<JsonRecord>;
     return parsed.map((item, index) => ({ id: 'fnd-' + Date.now() + '-' + index, sourceId: source.id, sourceName: source.name, pageLocation: stringValue(item.pageLocation) || 'Page 1', statement: stringValue(item.statement), category: item.category as EvidenceCategory, classification: item.classification as EvidenceClassification, confidence: item.confidence as Finding['confidence'], extractedValue: finiteNumber(item.extractedNumericValue) === undefined ? undefined : { numericValue: finiteNumber(item.extractedNumericValue), unit: stringValue(item.extractedUnit), key: normalizeKey(stringValue(item.extractedKey)) }, createdAt: new Date().toISOString() }));
   } catch (error) {
-    console.error('[SitePilot AI] multimodal extraction error:', error);
+    console.error(`[SitePilot AI] multimodal extraction error under ${provider}:`, error);
     return extractDocumentFindings(content, source);
   }
 }

@@ -1,18 +1,50 @@
 /**
- * Google GenAI (Gemini 3.7 Flash) Integration for SitePilot
- * Adheres to PRD Section 28, 29, 31:
+ * Google GenAI (Vertex AI & Gemini API) Integration for SitePilot
+ * 
+ * Complies with All Things Agentic Hackathon:
  * - Deterministic extraction of Facts, Claims, Assumptions
  * - Multimodal document & image understanding
  * - Strict structured outputs via Zod / JSON schema
- * - Never hallucinates arithmetic (delegated to Geometry engine)
+ * - Explicit error reporting without silent fallback in production
  */
 
-import { GoogleGenAI, Type, Schema } from '@google/genai';
-import { Finding, Contradiction, EvidenceClassification, EvidenceCategory } from '@/types';
+import { GoogleGenAI, Type } from '@google/genai';
+import { Finding, EvidenceClassification, EvidenceCategory } from '@/types';
+import { getAiConfig } from './config';
 
-// Initialize SDK client (picks up GEMINI_API_KEY / GOOGLE_API_KEY from env)
-const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
-const ai = new GoogleGenAI({ apiKey: apiKey || 'dummy-key' });
+/**
+ * Initialize Google GenAI client based on environment
+ */
+export function createAiClient(): { ai: GoogleGenAI; model: string; provider: string } {
+  const config = getAiConfig();
+
+  if (config.provider === 'VERTEX_AI' && config.projectId) {
+    return {
+      ai: new GoogleGenAI({
+        vertexai: true,
+        project: config.projectId,
+        location: config.location || 'asia-southeast2'
+      }),
+      model: config.model,
+      provider: 'VERTEX_AI'
+    };
+  }
+
+  if (config.provider === 'GEMINI_API' && config.apiKey) {
+    return {
+      ai: new GoogleGenAI({ apiKey: config.apiKey }),
+      model: config.model,
+      provider: 'GEMINI_API'
+    };
+  }
+
+  // Local fallback client
+  return {
+    ai: new GoogleGenAI({ apiKey: 'dummy-local-key' }),
+    model: config.model,
+    provider: 'LOCAL_DEVELOPMENT'
+  };
+}
 
 /**
  * Structured document extraction prompt & execution
@@ -21,8 +53,16 @@ export async function extractDocumentFindings(
   content: string,
   sourceInfo: { id: string; name: string; origin: string }
 ): Promise<Partial<Finding>[]> {
-  if (!apiKey) {
-    console.warn('[SitePilot AI] GEMINI_API_KEY not set, using deterministic heuristic parser.');
+  const config = getAiConfig();
+  const { ai, model, provider } = createAiClient();
+
+  if (provider === 'LOCAL_DEVELOPMENT') {
+    if (config.isProduction) {
+      throw new Error(
+        'Google Cloud Vertex AI is not configured. Set GOOGLE_CLOUD_PROJECT to enable Vertex AI in production.'
+      );
+    }
+    console.warn('[SitePilot AI] No Vertex AI / Gemini API key configured. Using local developmental heuristic parser.');
     return fallbackExtractFindings(content, sourceInfo);
   }
 
@@ -42,7 +82,7 @@ DOCUMENT CONTENT:
 ${content.slice(0, 15000)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -102,13 +142,16 @@ ${content.slice(0, 15000)}`;
       createdAt: new Date().toISOString()
     }));
   } catch (err) {
-    console.error('[SitePilot AI] Gemini extraction error:', err);
+    console.error(`[SitePilot AI] ${provider} extraction error:`, err);
+    if (config.isProduction) {
+      throw new Error(`AI extraction failed under ${provider}: ${err instanceof Error ? err.message : String(err)}`);
+    }
     return fallbackExtractFindings(content, sourceInfo);
   }
 }
 
 /**
- * Fallback heuristic extractor when running offline / during tests
+ * Fallback heuristic extractor when running offline / in local development
  */
 function fallbackExtractFindings(
   content: string,
@@ -116,18 +159,18 @@ function fallbackExtractFindings(
 ): Partial<Finding>[] {
   const findings: Partial<Finding>[] = [];
   
-  // Basic regex check for land area
+  // Regex check for land area in development mode
   const areaMatch = content.match(/(\d{1,3}(?:[.,]\d{3})*|\d+)\s*(?:m²|m2|sqm|hectares|ha)/i);
   if (areaMatch) {
     const rawVal = parseFloat(areaMatch[1].replace(/,/g, ''));
     findings.push({
-      id: `fnd-${Date.now()}-1`,
+      id: `fnd-dev-${Date.now()}-1`,
       sourceId: sourceInfo.id,
       sourceName: sourceInfo.name,
-      statement: `Extracted land area reference: ${areaMatch[0]}`,
+      statement: `[DEV HEURISTIC] Extracted land area reference: ${areaMatch[0]}`,
       category: 'LEGAL_TITLE',
       classification: sourceInfo.name.toLowerCase().includes('certificate') ? 'FACT' : 'CLAIM',
-      confidence: sourceInfo.name.toLowerCase().includes('certificate') ? 'HIGH' : 'LOW',
+      confidence: 'LOW',
       extractedValue: { numericValue: rawVal, unit: 'm2', key: 'gross_site_area' },
       createdAt: new Date().toISOString()
     });
