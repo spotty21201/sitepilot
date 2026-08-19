@@ -60,7 +60,7 @@ declare module 'howler' {
     noAudio: boolean;
     autoUnlock: boolean;
     autoSuspend: boolean;
-    ctx: unknown;
-    masterGain: unknown;
+    ctx: AudioContext | null;
+    masterGain: GainNode | null;
   };
 }
