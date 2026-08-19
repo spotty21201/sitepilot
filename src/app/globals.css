@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+:root {
+  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bg-primary: #0e1013;
+  --bg-secondary: #14171c;
+  --bg-tertiary: #1a1e24;
+  --border-subtle: #2a2d31;
+  --border-focus: #54585d;
+  --text-primary: #eeeae1;
+  --text-secondary: #a6a29a;
+  --text-muted: #706f6a;
+  --accent-gold: #d2af78;
+  --accent-blue: #8db8c5;
+  --status-verified: #91b89f;
+  --status-claim: #d2af78;
+  --status-assumption: #a7a0c4;
+  --status-warning: #c77b72;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  height: 100vh;
+  margin: 0;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-focus);
+}
+
+/* Quiet drafting grid for spatial views. */
+.spatial-canvas-grid {
+  background-image:
+    linear-gradient(to right, rgba(219, 207, 181, 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(219, 207, 181, 0.055) 1px, transparent 1px),
+    linear-gradient(to right, rgba(219, 207, 181, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(219, 207, 181, 0.025) 1px, transparent 1px);
+  background-size: 64px 64px, 64px 64px, 16px 16px, 16px 16px;
+}
+
+.font-editorial {
+  font-family: var(--font-display);
+}
+
+.font-metadata {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.panel-shell {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 2px;
+}
+
+.hairline-rule {
+  border-color: rgba(215, 208, 192, 0.14);
+}
+
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.18rem 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+.evidence-badge--fact {
+  color: var(--status-verified);
+  background: rgba(145, 184, 159, 0.08);
+}
+
+.evidence-badge--claim {
+  color: var(--status-claim);
+  background: rgba(210, 175, 120, 0.08);
+}
+
+.evidence-badge--assumption {
+  color: var(--status-assumption);
+  background: rgba(167, 160, 196, 0.08);
+}
+
+.evidence-badge--inference {
+  color: var(--accent-blue);
+  background: rgba(141, 184, 197, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
