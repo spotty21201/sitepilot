@@ -1,7 +1,6 @@
 import { Type } from '@google/genai';
 import { calculateDevelopmentMetrics, calculatePolygonAreaM2, checkConstraintViolations } from '@/lib/geometry/engine';
 import { extractDocumentFindings, createAiClient } from '@/lib/ai/gemini';
-import { getAiConfig } from '@/lib/ai/config';
 import { BuildingMass, Contradiction, EvidenceCategory, EvidenceClassification, Finding, GeoPolygon, Setbacks } from '@/types';
 
 export const runtime = 'nodejs';

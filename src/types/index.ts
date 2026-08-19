@@ -285,3 +285,19 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
 }
+
+// ==========================================
+// 7. AI Planning Assessment Model
+// ==========================================
+export interface PlanningAssessment {
+  scenarioId: string;
+  scenarioName: string;
+  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_SETBACK' | 'COLLISION_DETECTED' | 'WARNING';
+  decision: string;
+  supportingEvidence: string[];
+  identifiedRisks: string[];
+  recommendedAction: string;
+  model: string;
+  generatedAt: string;
+  authenticated: boolean;
+}

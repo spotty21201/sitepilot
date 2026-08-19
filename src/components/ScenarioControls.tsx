@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { DevelopmentScenario, SiteGeometry } from '@/types';
+import { DevelopmentScenario, SiteGeometry, PlanningAssessment } from '@/types';
 import { checkSetbackEncroachments, exportToColladaDAE } from '@/lib/geometry/engine';
 import { 
   Building2, 
@@ -15,7 +15,9 @@ import {
   Code2, 
   X, 
   RotateCcw, 
-  AlertTriangle 
+  AlertTriangle,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 
 interface ScenarioControlsProps {
@@ -40,9 +42,19 @@ export function ScenarioControls({
   const [copied, setCopied] = useState(false);
   const [showXmlModal, setShowXmlModal] = useState(false);
   const [rawXml, setRawXml] = useState('');
+  const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
+  const [assessment, setAssessment] = useState<PlanningAssessment | null>(null);
+  const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
+  const [assessmentError, setAssessmentError] = useState<string | null>(null);
   
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+
+  if (activeScenarioId !== prevScenarioId) {
+    setPrevScenarioId(activeScenarioId);
+    setAssessment(null);
+    setAssessmentError(null);
+  }
 
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
   const metrics = activeScenario.metrics;
@@ -148,6 +160,43 @@ export function ScenarioControls({
       triggerRef.current?.focus();
     }, 0);
   }, []);
+
+  const handleGenerateAssessment = async () => {
+    setIsLoadingAssessment(true);
+    setAssessmentError(null);
+    try {
+      const res = await fetch('/api/assessment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scenarioId: activeScenario.id,
+          scenarioName: activeScenario.name,
+          floors: metrics.totalFloors,
+          heightMeters: metrics.totalHeightMeters,
+          heightCap: 32.0,
+          heightOverrun: metrics.totalHeightMeters > 32.0 ? Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10 : 0,
+          far: metrics.farKLB,
+          gfa: metrics.totalGFA,
+          siteCoverage: metrics.siteCoveragePercentage,
+          openSpace: metrics.openSpaceArea,
+          setbacks: activeScenario.assumptionsUsed.setbacks,
+          isOverridden: isOverridden,
+          hasCollision: hasCollision,
+          collisionVolume: activeScenario.pairwiseOverlap?.overlapVolumeM3 || 0,
+          encroachments: encroachments.map(e => ({ side: e.edge, description: e.description, encroachmentMeters: e.distanceMeters }))
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to generate assessment');
+      }
+      setAssessment(data);
+    } catch (err) {
+      setAssessmentError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsLoadingAssessment(false);
+    }
+  };
 
   // Keyboard Trap & Escape Dismiss for Accessible Modal
   useEffect(() => {
@@ -497,6 +546,104 @@ export function ScenarioControls({
               <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
             </div>
           </div>
+        </div>
+
+        {/* Evidence-Backed AI Planning Assessment */}
+        <div className="pt-2 border-t border-[#232938] space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-purple-300 text-xs font-bold uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>AI Planning Advisor</span>
+            </div>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800/60 text-purple-300">
+              gemini-3.7-flash
+            </span>
+          </div>
+
+          <button
+            onClick={handleGenerateAssessment}
+            disabled={isLoadingAssessment}
+            aria-label="Generate AI Planning Assessment"
+            className="w-full py-2 px-3 bg-gradient-to-r from-purple-900/70 via-indigo-900/70 to-blue-900/70 hover:from-purple-800/90 hover:via-indigo-800/90 hover:to-blue-800/90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border border-purple-500/40 shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+          >
+            {isLoadingAssessment ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-300" />
+                <span>Evaluating with Gemini 3.7 Flash...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                <span>Generate Planning Assessment</span>
+              </>
+            )}
+          </button>
+
+          {assessmentError && (
+            <div className="p-2.5 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300">
+              {assessmentError}
+            </div>
+          )}
+
+          {assessment && (
+            <div className="p-3 bg-[#151926] border border-[#2b374e] rounded-xl space-y-2 text-xs shadow-inner">
+              <div className="flex items-center justify-between pb-1.5 border-b border-[#222c40]">
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Executive Verdict</span>
+                <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${
+                  assessment.status === 'COMPLIANT' 
+                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60' 
+                    : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                }`}>
+                  [{assessment.status}]
+                </span>
+              </div>
+
+              <p className="text-slate-200 font-medium leading-relaxed text-[11px]">
+                {assessment.decision}
+              </p>
+
+              {assessment.supportingEvidence.length > 0 && (
+                <div className="space-y-1 pt-1">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                    Supporting Evidence:
+                  </span>
+                  <ul className="space-y-0.5 text-[11px] text-slate-300 list-disc list-inside">
+                    {assessment.supportingEvidence.map((ev, idx) => (
+                      <li key={idx} className="leading-snug">{ev}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {assessment.identifiedRisks.length > 0 && (
+                <div className="space-y-1 pt-1">
+                  <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider block">
+                    Identified Risks:
+                  </span>
+                  <ul className="space-y-0.5 text-[11px] text-amber-200/90 list-disc list-inside">
+                    {assessment.identifiedRisks.map((rk, idx) => (
+                      <li key={idx} className="leading-snug">{rk}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="pt-1.5 border-t border-[#222c40]">
+                <span className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider block mb-0.5">
+                  Recommended Action:
+                </span>
+                <div className="p-2 bg-[#1b2333] rounded border border-[#2d3a52] text-[11px] text-sky-200 flex items-start gap-1.5">
+                  <ArrowRight className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+                  <span>{assessment.recommendedAction}</span>
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                <span>Model: {assessment.model}</span>
+                <span>{new Date(assessment.generatedAt).toLocaleTimeString()}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Building Mass Composition */}
