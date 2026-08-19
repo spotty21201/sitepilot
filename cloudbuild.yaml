@@ -1,0 +1,75 @@
+# ==============================================================================
+# Google Cloud Build CI/CD Pipeline for SitePilot
+# Multi-stage automated verification, container build, and Cloud Run deployment
+# ==============================================================================
+
+steps:
+  # Step 1: Install Dependencies
+  - name: 'node:20-alpine'
+    id: 'install-deps'
+    entrypoint: 'npm'
+    args: ['ci']
+
+  # Step 2: Quality Gate — Repository-Wide Lint
+  - name: 'node:20-alpine'
+    id: 'lint-check'
+    entrypoint: 'npx'
+    args: ['eslint', 'src/']
+
+  # Step 3: Quality Gate — Automated Unit & Integration Tests
+  - name: 'node:20-alpine'
+    id: 'unit-tests'
+    entrypoint: 'npx'
+    args: ['vitest', 'run']
+
+  # Step 4: Build Container Image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-image'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:${COMMIT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:latest'
+      - '.'
+
+  # Step 5: Push Container Image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-image'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:${COMMIT_SHA}'
+
+  # Step 6: Deploy Verified Container to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-cloud-run'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:${COMMIT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=0'
+      - '--max-instances=2'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--timeout=120s'
+      - '--service-account=${_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${_REGION},GEMINI_MODEL=${_GEMINI_MODEL},NODE_ENV=production'
+
+substitutions:
+  _REGION: 'asia-southeast2'
+  _REPO_NAME: 'sitepilot-repo'
+  _SERVICE_NAME: 'sitepilot'
+  _SERVICE_ACCOUNT: 'sitepilot-runner'
+  _GEMINI_MODEL: 'gemini-2.5-flash'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:${COMMIT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:latest'
