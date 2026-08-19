@@ -23,8 +23,8 @@ export function getAiConfig(): AiConfig {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || '';
   const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.GCP_REGION || 'asia-southeast2';
   
-  // Model selection: Gemini 2.5 Flash / Pro (or configured override)
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  // Verified Gemini 3.5+ model (Gemini 3.7 Flash) for Hackathon Compliance
+  const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 
   if (projectId) {
     return {
