@@ -20,7 +20,8 @@ describe('AI Planning Assessment API & Security Suite', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'origin': 'https://malicious-external-site.com'
+        'origin': 'https://malicious-external-site.com',
+        'host': 'sitepilot.vercel.app'
       },
       body: JSON.stringify({
         scenarioId: GOLDEN_PROJECT.scenarios[1].id,
@@ -37,11 +38,13 @@ describe('AI Planning Assessment API & Security Suite', () => {
     expect(body.error).toContain('Unauthorized');
   });
 
-  it('accepts authorized requests and returns structured planning assessment', async () => {
+  it('accepts authorized same-origin requests and returns structured planning assessment', async () => {
     const req = new NextRequest('http://localhost:3000/api/assessment', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'origin': 'http://localhost:3000',
+        'host': 'localhost:3000'
       },
       body: JSON.stringify({
         scenarioId: GOLDEN_PROJECT.scenarios[1].id,
@@ -62,15 +65,17 @@ describe('AI Planning Assessment API & Security Suite', () => {
     expect(body.supportingEvidence.length).toBeGreaterThan(0);
     expect(body.identifiedRisks.length).toBeGreaterThan(0);
     expect(body.recommendedAction).toBeDefined();
-    expect(body.model).toContain('gemini-3.7-flash');
-    expect(body.authenticated).toBe(true);
+    expect(body.accessPath).toBe('same_origin_browser');
+    expect(body.userAuthenticated).toBe(false);
   });
 
   it('correctly assesses non-compliant height overrun scenario (Scenario C: 12 Storeys)', async () => {
     const req = new NextRequest('http://localhost:3000/api/assessment', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'origin': 'http://localhost:3000',
+        'host': 'localhost:3000'
       },
       body: JSON.stringify({
         scenarioId: GOLDEN_PROJECT.scenarios[2].id,
@@ -89,5 +94,6 @@ describe('AI Planning Assessment API & Security Suite', () => {
     expect(body.status).toBe('NON_COMPLIANT_HEIGHT');
     expect(body.decision).toContain('Non-compliant');
     expect(body.decision).toContain('+11.2m');
+    expect(body.decision).toContain('43.2m');
   });
 });
