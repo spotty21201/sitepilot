@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 3. Deterministic Authority (Recompute on Server — Single Source of Truth)
+    // 3. Deterministic Authority (Recomputed on Server using Single Authoritative Geometry Engine)
     const canonicalSetbacks: Setbacks = { front, rear, sideLeft, sideRight };
     const grossSiteArea = body.grossSiteArea;
     const masses = body.masses;
@@ -217,57 +217,25 @@ export async function POST(request: NextRequest) {
     const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks);
     const overlaps = calculateMassPairwiseIntersections(masses);
     const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses);
-    const complianceReport = evaluateScenarioCompliance(grossSiteArea, canonicalSetbacks, masses, metrics, overlaps);
+    const complianceReport = evaluateScenarioCompliance(
+      grossSiteArea, 
+      canonicalSetbacks, 
+      masses, 
+      metrics, 
+      overlaps, 
+      body.scenarioName
+    );
 
-    // Statutory Limits for Subzone R.9
     const STATUTORY_HEIGHT_CAP_METERS = 32.0;
     const STATUTORY_MAX_FAR = 3.20;
     const STATUTORY_MAX_KDB_PERCENT = 55.0;
 
-    const heightOverrunMeters = Math.max(
-      0, 
-      Math.round((metrics.totalHeightMeters - STATUTORY_HEIGHT_CAP_METERS) * 10) / 10
-    );
-
-    // Derive Authoritative Status strictly from geometry evaluation
-    let authoritativeStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'COLLISION_DETECTED';
-    let decisionText: string;
-    let recommendedActionText: string;
-
-    if (metrics.totalHeightMeters > 32.05 || metrics.totalFloors > 8) {
-      authoritativeStatus = 'NON_COMPLIANT_HEIGHT';
-      decisionText = `Non-compliant: Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 statutory cap (${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) by +${heightOverrunMeters.toFixed(1)}m.`;
-      recommendedActionText = `Reduce massing storeys to 8 floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal RDTR height variance application.`;
-    } else if (metrics.farKLB > 3.205) {
-      authoritativeStatus = 'NON_COMPLIANT_FAR';
-      const farOverrun = Math.round((metrics.farKLB - STATUTORY_MAX_FAR) * 100) / 100;
-      decisionText = `Non-compliant: Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_FAR.toFixed(2)}x) by +${farOverrun.toFixed(2)}x.`;
-      recommendedActionText = `Reduce total gross floor area by ${(metrics.totalGFA - grossSiteArea * STATUTORY_MAX_FAR).toLocaleString()} m² to conform to 3.20x FAR limit.`;
-    } else if (metrics.siteCoveragePercentage > 55.05) {
-      authoritativeStatus = 'NON_COMPLIANT_COVERAGE';
-      const kdbOverrun = Math.round((metrics.siteCoveragePercentage - STATUTORY_MAX_KDB_PERCENT) * 10) / 10;
-      decisionText = `Non-compliant: Building footprint coverage (${metrics.siteCoveragePercentage}%) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_KDB_PERCENT}%) by +${kdbOverrun.toFixed(1)}%.`;
-      recommendedActionText = `Reduce ground footprint area to stay within 55.0% KDB limit.`;
-    } else if (encroachments.length > 0) {
-      authoritativeStatus = 'NON_COMPLIANT_SETBACK';
-      decisionText = `Non-compliant: ${encroachments[0].description}`;
-      recommendedActionText = `Adjust building mass position inward to clear statutory setback boundaries.`;
-    } else if (overlaps.hasOverlap) {
-      authoritativeStatus = 'COLLISION_DETECTED';
-      decisionText = `Non-compliant: Active 3D mass collision (${overlaps.overlapVolumeM3.toLocaleString()} m³ overlap volume).`;
-      recommendedActionText = `Separate intersecting building masses to eliminate volumetric clash.`;
-    } else {
-      authoritativeStatus = 'COMPLIANT';
-      decisionText = `Compliant: Fully conforms to Subzone R.9 height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m), FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x), and setback envelopes.`;
-      recommendedActionText = `Proceed with architectural schematic design and preliminary zoning verification for "${body.scenarioName}".`;
-    }
-
-    // 4. Construct Deterministic Grounded Prompt for Vertex AI
+    // 4. Construct Grounded Prompt for Vertex AI
     const deterministicFacts = [
       `- Scenario: "${body.scenarioName}" (ID: ${body.scenarioId})`,
       `- Total Building Height: ${metrics.totalHeightMeters.toFixed(1)}m (${metrics.totalFloors} Storeys)`,
       `- Subzone R.9 Height Limit: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m (8 Storeys)`,
-      `- Height Overrun: ${heightOverrunMeters > 0 ? `+${heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Compliant)'}`,
+      `- Height Overrun: ${complianceReport.metrics.heightOverrunMeters > 0 ? `+${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Compliant)'}`,
       `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Statutory Max: ${STATUTORY_MAX_FAR.toFixed(2)}x)`,
       `- Total Gross Floor Area (GFA): ${metrics.totalGFA.toLocaleString()} m²`,
       `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Statutory Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
@@ -275,7 +243,9 @@ export async function POST(request: NextRequest) {
       `- Setbacks: Front ${canonicalSetbacks.front}m (Standard 10m), Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
       `- Setback Encroachments: ${encroachments.length > 0 ? encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}`,
       `- 3D Mass Overlaps: ${overlaps.hasOverlap ? `ACTIVE COLLISION (${overlaps.overlapVolumeM3} m³ overlap)` : 'Zero Collisions'}`,
-      `- Authoritative Deterministic Status: ${complianceReport.status} (${authoritativeStatus})`
+      `- Out of Bounds Footprint: ${(metrics.outOfBoundsAreaM2 || 0) > 0.5 ? `${metrics.outOfBoundsAreaM2} m² beyond parcel` : 'None'}`,
+      `- Authoritative Compliance Verdict: ${complianceReport.status} (${complianceReport.assessmentStatus})`,
+      `- Primary Summary: ${complianceReport.summaryText}`
     ].join('\n');
 
     const prompt = `You are the Senior Planning Advisor for SitePilot (intelligent site due diligence workspace).
@@ -296,9 +266,8 @@ Provide a professional, clear assessment.`;
 
     let assessment: PlanningAssessment;
 
-    // 5. Invoke Cloud Run Backend or Development Heuristic
+    // 5. Invoke Cloud Run Backend with Strict Provenance Validation
     if (cloudRunUrl) {
-      // Production path: Invoke Cloud Run /analyze endpoint with server-to-server authorization
       const cloudRunHeaders: Record<string, string> = {
         'Content-Type': 'application/json'
       };
@@ -325,36 +294,59 @@ Provide a professional, clear assessment.`;
       }
 
       const cloudRunData = await cloudRunRes.json();
-      const rawText = cloudRunData.response || '';
 
-      // Parse bullet points from response text
+      // Strict Provenance Validation: Return 502 if required fields are missing or inconsistent
+      if (
+        !cloudRunData ||
+        typeof cloudRunData !== 'object' ||
+        cloudRunData.ok !== true ||
+        cloudRunData.authenticated !== true ||
+        !cloudRunData.model ||
+        typeof cloudRunData.model !== 'string' ||
+        !cloudRunData.project ||
+        typeof cloudRunData.project !== 'string' ||
+        !cloudRunData.vertexLocation ||
+        typeof cloudRunData.vertexLocation !== 'string' ||
+        !cloudRunData.revision ||
+        typeof cloudRunData.revision !== 'string' ||
+        !cloudRunData.correlationId ||
+        typeof cloudRunData.correlationId !== 'string'
+      ) {
+        console.error('[SitePilot Assessment API] Invalid or incomplete provenance from Cloud Run:', cloudRunData);
+        return NextResponse.json(
+          { error: 'Invalid or incomplete provenance received from Cloud Run service.', ok: false },
+          { status: 502 }
+        );
+      }
+
+      const rawText = cloudRunData.response || '';
       const lines = rawText.split('\n').map((l: string) => l.trim()).filter(Boolean);
       const evidenceLines = lines.filter((l: string) => l.startsWith('*') || l.startsWith('-')).slice(0, 4).map((l: string) => l.replace(/^[-*]\s*/, ''));
 
       assessment = {
         scenarioId: body.scenarioId,
         scenarioName: body.scenarioName,
-        status: authoritativeStatus,
-        decision: decisionText,
+        status: complianceReport.assessmentStatus,
+        decision: complianceReport.decisionText,
         supportingEvidence: evidenceLines.length > 0 ? evidenceLines : [
           `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (Subzone R.9 Cap: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m)`,
           `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (Zoning Max: ${STATUTORY_MAX_FAR.toFixed(2)}x)`,
           `Site Coverage (KDB): ${metrics.siteCoveragePercentage}% (Zoning Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
           `Setbacks: Front ${canonicalSetbacks.front}m (Standard 10m)`
         ],
-        identifiedRisks: heightOverrunMeters > 0
-          ? [`Height overrun of +${heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'High probability of building permit rejection by DKI Jakarta planning bureau.']
+        identifiedRisks: complianceReport.metrics.heightOverrunMeters > 0
+          ? [`Height overrun of +${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'High probability of building permit rejection by DKI Jakarta planning bureau.']
           : ['Northern access corridor (6.5m width) requires traffic management for residential volume.', 'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'],
-        recommendedAction: recommendedActionText,
-        model: `${cloudRunData.model || 'gemini-3.7-flash'} (Cloud Run / Vertex AI)`,
+        recommendedAction: complianceReport.recommendedAction,
+        model: `${cloudRunData.model} (Cloud Run / Vertex AI)`,
         generatedAt: new Date().toISOString(),
         accessPath,
         userAuthenticated: false,
         backendAuthenticated: true,
         provenance: {
-          model: cloudRunData.model || 'gemini-3.7-flash',
-          project: cloudRunData.project || 'project-528f858c-325a-45aa-ac0',
-          vertexLocation: cloudRunData.vertexLocation || 'global',
+          model: cloudRunData.model,
+          project: cloudRunData.project,
+          vertexLocation: cloudRunData.vertexLocation,
           revision: cloudRunData.revision,
           correlationId: cloudRunData.correlationId
         }
@@ -371,18 +363,18 @@ Provide a professional, clear assessment.`;
       assessment = {
         scenarioId: body.scenarioId,
         scenarioName: body.scenarioName,
-        status: authoritativeStatus,
-        decision: decisionText,
+        status: complianceReport.assessmentStatus,
+        decision: complianceReport.decisionText,
         supportingEvidence: [
           `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (Cap: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m)`,
           `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (Max: ${STATUTORY_MAX_FAR.toFixed(2)}x)`,
           `Site Coverage: ${metrics.siteCoveragePercentage}% (Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
-        identifiedRisks: heightOverrunMeters > 0 
-          ? [`Height overrun of +${heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'Potential permit denial from DKI Jakarta spatial planning bureau.']
+        identifiedRisks: complianceReport.metrics.heightOverrunMeters > 0 
+          ? [`Height overrun of +${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'Potential permit denial from DKI Jakarta spatial planning bureau.']
           : ['Northern access corridor (6.5m width) requires traffic management for residential volumes.'],
-        recommendedAction: recommendedActionText,
+        recommendedAction: complianceReport.recommendedAction,
         model: 'gemini-3.7-flash (DEV_HEURISTIC)',
         generatedAt: new Date().toISOString(),
         accessPath,

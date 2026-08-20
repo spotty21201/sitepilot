@@ -649,14 +649,34 @@ export function checkConstraintViolations(
   };
 }
 
+export type ComplianceViolationCategory = 
+  | 'NONE'
+  | 'HEIGHT'
+  | 'FAR'
+  | 'COVERAGE'
+  | 'SETBACK'
+  | 'COLLISION'
+  | 'OUT_OF_BOUNDS';
+
 export interface CanonicalComplianceReport {
   isCompliant: boolean;
   status: 'VALID' | 'WARNING_EXCEEDS_CONSTRAINT';
+  violationCategory: ComplianceViolationCategory;
+  assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED';
   statusPillLabel: string;
   isGreen: boolean;
   summaryText: string;
+  decisionText: string;
+  recommendedAction: string;
   primaryWarning?: string;
   violations: string[];
+  metrics: {
+    heightOverrunMeters: number;
+    farOverrun: number;
+    coverageOverrunPercent: number;
+    outOfBoundsAreaM2: number;
+    collisionVolumeM3: number;
+  };
 }
 
 /**
@@ -667,26 +687,33 @@ export function evaluateScenarioCompliance(
   setbacks: Setbacks,
   masses: BuildingMass[],
   metrics: DevelopmentMetrics,
-  pairwiseOverlap?: { hasOverlap: boolean; overlapVolumeM3: number; overlaps: { massA: string; massB: string }[] }
+  pairwiseOverlap?: { hasOverlap: boolean; overlapVolumeM3: number; overlaps: { massA: string; massB: string }[], maxIntersectionDepthM?: number },
+  scenarioName?: string
 ): CanonicalComplianceReport {
   const warnings: string[] = [];
+  const STATUTORY_HEIGHT_CAP_METERS = 32.0;
+  const STATUTORY_MAX_FAR = 3.20;
+  const STATUTORY_MAX_KDB_PERCENT = 55.0;
+
+  const heightOverrunM = Math.max(0, Math.round((metrics.totalHeightMeters - STATUTORY_HEIGHT_CAP_METERS) * 10) / 10);
+  const farOverrun = Math.max(0, Math.round((metrics.farKLB - STATUTORY_MAX_FAR) * 100) / 100);
+  const coverageOverrunPercent = Math.max(0, Math.round((metrics.siteCoveragePercentage - STATUTORY_MAX_KDB_PERCENT) * 10) / 10);
+  const outOfBoundsAreaM2 = metrics.outOfBoundsAreaM2 || 0;
+  const collisionVolumeM3 = pairwiseOverlap?.overlapVolumeM3 || 0;
 
   // 1. Height checks (both absolute meters and floor count)
   if (metrics.totalHeightMeters > 32.05 || metrics.totalFloors > 8) {
-    const overrunM = Math.max(0, Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10);
-    warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 32.0m cap by +${overrunM.toFixed(1)}m.`);
+    warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m cap by +${heightOverrunM.toFixed(1)}m.`);
   }
 
   // 2. FAR check
   if (metrics.farKLB > 3.205) {
-    const overrunFAR = Math.round((metrics.farKLB - 3.2) * 100) / 100;
-    warnings.push(`FAR / KLB (${metrics.farKLB.toFixed(2)}x) exceeds allowable 3.20x by +${overrunFAR.toFixed(2)}x.`);
+    warnings.push(`FAR / KLB (${metrics.farKLB.toFixed(2)}x) exceeds allowable ${STATUTORY_MAX_FAR.toFixed(2)}x by +${farOverrun.toFixed(2)}x.`);
   }
 
   // 3. KDB Site Coverage check
   if (metrics.siteCoveragePercentage > 55.05) {
-    const overrunKDB = Math.round((metrics.siteCoveragePercentage - 55.0) * 10) / 10;
-    warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds 55% KDB limit by +${overrunKDB}%.`);
+    warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds 55% KDB limit by +${coverageOverrunPercent.toFixed(1)}%.`);
   }
 
   // 4. Setback Encroachments
@@ -698,42 +725,87 @@ export function evaluateScenarioCompliance(
   // 5. Mass Pairwise Collision
   if (pairwiseOverlap && pairwiseOverlap.hasOverlap) {
     const ov = pairwiseOverlap.overlaps[0];
-    warnings.push(`Mass collision active: ${ov?.massA || 'Mass'} intersects ${ov?.massB || 'Mass'} (${pairwiseOverlap.overlapVolumeM3.toLocaleString()} m³ overlap volume).`);
+    warnings.push(`Mass collision active: ${ov?.massA || 'Mass'} intersects ${ov?.massB || 'Mass'} (${collisionVolumeM3.toLocaleString()} m³ overlap volume).`);
   }
 
   // 6. Out-of-bounds Footprint
-  if (metrics.outOfBoundsAreaM2 && metrics.outOfBoundsAreaM2 > 0.5) {
-    warnings.push(`Footprint extends ${metrics.outOfBoundsAreaM2.toLocaleString()} m² beyond parcel perimeter.`);
+  if (outOfBoundsAreaM2 > 0.5) {
+    warnings.push(`Footprint extends ${outOfBoundsAreaM2.toLocaleString()} m² beyond parcel perimeter.`);
   }
 
   const isCompliant = warnings.length === 0;
 
+  // Determine primary violation category and labels
+  let violationCategory: ComplianceViolationCategory = 'NONE';
+  let assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' = 'COMPLIANT';
   let statusPillLabel = 'Zoning: Compliant · Within Envelope';
+  let decisionText = `Compliant: Fully conforms to Subzone R.9 height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m), FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x), and setback envelopes.`;
+  let recommendedAction = scenarioName 
+    ? `Proceed with architectural schematic design and preliminary zoning verification for "${scenarioName}".`
+    : 'Proceed with architectural schematic design and preliminary zoning verification.';
+
   if (!isCompliant) {
     if (pairwiseOverlap && pairwiseOverlap.hasOverlap) {
-      statusPillLabel = `Collision: ${pairwiseOverlap.overlapVolumeM3.toLocaleString()} m³ overlap`;
-    } else if (metrics.totalHeightMeters > 32.05) {
-      const overrunM = Math.max(0, Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10);
-      statusPillLabel = `Height Overrun: +${overrunM.toFixed(1)}m (>32m cap)`;
+      violationCategory = 'COLLISION';
+      assessmentStatus = 'COLLISION_DETECTED';
+      statusPillLabel = `Collision: ${collisionVolumeM3.toLocaleString()} m³ overlap`;
+      decisionText = `Non-compliant: Active 3D mass collision (${collisionVolumeM3.toLocaleString()} m³ overlap volume).`;
+      recommendedAction = 'Separate intersecting building masses to eliminate volumetric clash.';
+    } else if (metrics.totalHeightMeters > 32.05 || metrics.totalFloors > 8) {
+      violationCategory = 'HEIGHT';
+      assessmentStatus = 'NON_COMPLIANT_HEIGHT';
+      statusPillLabel = `Height Overrun: +${heightOverrunM.toFixed(1)}m (>32m cap)`;
+      decisionText = `Non-compliant: Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 statutory cap (${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) by +${heightOverrunM.toFixed(1)}m.`;
+      recommendedAction = `Reduce massing storeys to 8 floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal RDTR height variance application.`;
+    } else if (outOfBoundsAreaM2 > 0.5) {
+      violationCategory = 'OUT_OF_BOUNDS';
+      assessmentStatus = 'NON_COMPLIANT_OUT_OF_BOUNDS';
+      statusPillLabel = `Out of Bounds: ${outOfBoundsAreaM2.toLocaleString()} m²`;
+      decisionText = `Non-compliant: Building footprint extends ${outOfBoundsAreaM2.toLocaleString()} m² beyond official property boundary.`;
+      recommendedAction = 'Adjust mass footprint to reside entirely within cadastral parcel boundaries.';
     } else if (encroachments.length > 0) {
+      violationCategory = 'SETBACK';
+      assessmentStatus = 'NON_COMPLIANT_SETBACK';
       statusPillLabel = `Setback Encroachment (${encroachments[0].edge})`;
-    } else if (metrics.outOfBoundsAreaM2 && metrics.outOfBoundsAreaM2 > 0.5) {
-      statusPillLabel = `Out of Bounds: ${metrics.outOfBoundsAreaM2.toLocaleString()} m²`;
+      decisionText = `Non-compliant: ${encroachments[0].description}`;
+      recommendedAction = 'Adjust building mass position inward to clear statutory setback boundaries.';
     } else if (metrics.farKLB > 3.205) {
+      violationCategory = 'FAR';
+      assessmentStatus = 'NON_COMPLIANT_FAR';
       statusPillLabel = `FAR Limit Exceeded (${metrics.farKLB.toFixed(2)}x)`;
+      decisionText = `Non-compliant: Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_FAR.toFixed(2)}x) by +${farOverrun.toFixed(2)}x.`;
+      recommendedAction = `Reduce total gross floor area by ${(metrics.totalGFA - grossSiteArea * STATUTORY_MAX_FAR).toLocaleString()} m² to conform to 3.20x FAR limit.`;
+    } else if (metrics.siteCoveragePercentage > 55.05) {
+      violationCategory = 'COVERAGE';
+      assessmentStatus = 'NON_COMPLIANT_COVERAGE';
+      statusPillLabel = `Coverage Exceeded (${metrics.siteCoveragePercentage}%)`;
+      decisionText = `Non-compliant: Building footprint coverage (${metrics.siteCoveragePercentage}%) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_KDB_PERCENT}%) by +${coverageOverrunPercent.toFixed(1)}%.`;
+      recommendedAction = 'Reduce ground footprint area to stay within 55.0% KDB limit.';
     } else {
       statusPillLabel = 'Non-compliant: Exceeds Constraints';
+      decisionText = `Non-compliant: ${warnings[0]}`;
     }
   }
 
   return {
     isCompliant,
     status: isCompliant ? 'VALID' : 'WARNING_EXCEEDS_CONSTRAINT',
+    violationCategory,
+    assessmentStatus,
     statusPillLabel,
     isGreen: isCompliant,
     summaryText: isCompliant ? 'Fully complies with Subzone R.9 zoning limits.' : warnings[0],
+    decisionText,
+    recommendedAction,
     primaryWarning: warnings[0],
-    violations: warnings
+    violations: warnings,
+    metrics: {
+      heightOverrunMeters: heightOverrunM,
+      farOverrun,
+      coverageOverrunPercent,
+      outOfBoundsAreaM2,
+      collisionVolumeM3
+    }
   };
 }
 

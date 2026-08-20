@@ -289,7 +289,7 @@ export interface Project {
 export interface PlanningAssessment {
   scenarioId: string;
   scenarioName: string;
-  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'COLLISION_DETECTED' | 'WARNING';
+  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
   decision: string;
   supportingEvidence: string[];
   identifiedRisks: string[];

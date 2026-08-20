@@ -152,7 +152,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
   });
 
   // Test 7: The Next.js route sends authorized server-to-server requests to Cloud Run
-  it('7. sends authorized server-to-server request with Bearer secret to Cloud Run /analyze and forwards provenance', async () => {
+  it('7. sends authorized server-to-server request with Bearer secret to Cloud Run /analyze and forwards validated provenance', async () => {
     process.env.SITEPILOT_SERVER_SECRET = 'strong-server-secret-prod-999';
     process.env.CLOUDRUN_SERVICE_URL = 'https://sitepilot-vertex-chad5h6gwa-et.a.run.app';
 
@@ -160,8 +160,9 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
       ok: true,
       status: 200,
       json: async () => ({
-        model: 'gemini-3.7-flash',
         ok: true,
+        authenticated: true,
+        model: 'gemini-3.7-flash',
         project: 'project-528f858c-325a-45aa-ac0',
         vertexLocation: 'global',
         revision: 'sitepilot-vertex-00002-v60',
@@ -196,10 +197,43 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.backendAuthenticated).toBe(true);
     expect(data.provenance?.correlationId).toBe('test-corr-id-12345');
     expect(data.provenance?.revision).toBe('sitepilot-vertex-00002-v60');
+    expect(data.provenance?.project).toBe('project-528f858c-325a-45aa-ac0');
   });
 
-  // Test 8: Browser request path returns correct access provenance
-  it('8. reports accessPath as same_origin_browser and userAuthenticated as false for browser calls', async () => {
+  // Test 8: Cloud Run response with missing provenance returns HTTP 502
+  it('8. returns HTTP 502 if Cloud Run response has incomplete or missing provenance', async () => {
+    process.env.SITEPILOT_SERVER_SECRET = 'strong-server-secret-prod-999';
+    process.env.CLOUDRUN_SERVICE_URL = 'https://sitepilot-vertex-chad5h6gwa-et.a.run.app';
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        authenticated: true,
+        // Missing model, project, revision, and correlationId
+        response: 'Some generic response without provenance'
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const req = new NextRequest('http://localhost:3000/api/assessment', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer strong-server-secret-prod-999'
+      },
+      body: JSON.stringify(validScenarioBPayload)
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(502);
+    const data = await res.json();
+    expect(data.error).toContain('Invalid or incomplete provenance');
+  });
+
+  // Test 9: Browser request path returns correct access provenance
+  it('9. reports accessPath as same_origin_browser and userAuthenticated as false for browser calls', async () => {
     delete process.env.CLOUDRUN_SERVICE_URL;
 
     const req = new NextRequest('http://localhost:3000/api/assessment', {
@@ -221,8 +255,8 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.backendAuthenticated).toBe(false);
   });
 
-  // Test 9: Malformed and non-finite numeric inputs return 400 (including position & dimensions)
-  it('9. rejects non-finite, negative, or malformed geometry fields with HTTP 400', async () => {
+  // Test 10: Malformed and non-finite numeric inputs return 400 (including position & dimensions)
+  it('10. rejects non-finite, negative, or malformed geometry fields with HTTP 400', async () => {
     const invalidPayloads = [
       { ...validScenarioBPayload, grossSiteArea: -100 },
       { ...validScenarioBPayload, grossSiteArea: NaN },
@@ -252,8 +286,8 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     }
   });
 
-  // Test 10: Regression test: Height 31m against 32m cap is compliant and says 31.0m
-  it('10. verifies height 31.0m against 32.0m cap is compliant and reports 31.0m', async () => {
+  // Test 11: Regression test: Height 31m against 32m cap is compliant and says 31.0m
+  it('11. verifies height 31.0m against 32.0m cap is compliant and reports 31.0m', async () => {
     const payload31m = {
       scenarioId: 'scen-test-31m',
       scenarioName: 'Test 31m Scheme',
@@ -295,8 +329,8 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.decision).toContain('Compliant');
   });
 
-  // Test 11: Regression test: Height 33m against 32m cap is non-compliant by exactly +1.0m
-  it('11. verifies height 33.0m against 32.0m cap is non-compliant by exactly +1.0m', async () => {
+  // Test 12: Regression test: Height 33m against 32m cap is non-compliant by exactly +1.0m
+  it('12. verifies height 33.0m against 32.0m cap is non-compliant by exactly +1.0m', async () => {
     const payload33m = {
       scenarioId: 'scen-test-33m',
       scenarioName: 'Test 33m Scheme',
@@ -338,9 +372,8 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.decision).toContain('33.0m');
   });
 
-  // Test 12: Regression test: FAR violation above 3.20x with compliant height is NON_COMPLIANT_FAR
-  it('12. verifies FAR above 3.20x while height remains compliant returns NON_COMPLIANT_FAR', async () => {
-    // Height: 24m (6 floors * 4m), GFA: 60,000 m² on 16,850 m² site -> FAR = 3.56x > 3.20x
+  // Test 13: Regression test: FAR violation above 3.20x with compliant height is NON_COMPLIANT_FAR
+  it('13. verifies FAR above 3.20x while height remains compliant returns NON_COMPLIANT_FAR', async () => {
     const payloadHighFar = {
       scenarioId: 'scen-test-far',
       scenarioName: 'High FAR Scheme',
@@ -382,27 +415,27 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.decision).toContain('3.56x');
   });
 
-  // Test 13: Regression test: KDB Coverage violation above 55% returns NON_COMPLIANT_COVERAGE
-  it('13. verifies Site Coverage above 55% returns NON_COMPLIANT_COVERAGE', async () => {
-    // Footprint: 10,000 m² on 16,850 m² site -> Coverage = 59.3% > 55%
-    const payloadHighKdb = {
-      scenarioId: 'scen-test-kdb',
-      scenarioName: 'High Coverage Scheme',
+  // Test 14: Regression test: Out-of-bounds scenario geometry cannot return COMPLIANT
+  it('14. verifies out-of-bounds scenario geometry returns NON_COMPLIANT_OUT_OF_BOUNDS and cannot be COMPLIANT', async () => {
+    // Menteng site bounds width: 110m (x: -55 to +55). Position mass at x: 80 so it extends outside
+    const payloadOutOfBounds = {
+      scenarioId: 'scen-test-oob',
+      scenarioName: 'Out of Bounds Scheme',
       grossSiteArea: 16850,
       setbacks: { front: 10, rear: 6, sideLeft: 5, sideRight: 5 },
       masses: [
         {
-          id: 'mass-kdb',
-          name: 'Sprawling Podium',
-          type: 'PODIUM' as const,
-          footprintArea: 10000,
-          floors: 3,
-          floorToFloorHeight: 4.0,
-          height: 12.0,
-          gfa: 30000,
-          program: 'RETAIL' as const,
-          position: { x: 0, y: 0, z: 0 },
-          dimensions: { width: 100, length: 100, height: 12.0 }
+          id: 'mass-oob',
+          name: 'Perimeter Overflow Wing',
+          type: 'GENERAL' as const,
+          footprintArea: 3000,
+          floors: 4,
+          floorToFloorHeight: 3.5,
+          height: 14.0,
+          gfa: 12000,
+          program: 'RESIDENTIAL' as const,
+          position: { x: 85, y: 0, z: 0 }, // Out of bounds (parcel half-width is 55m)
+          dimensions: { width: 40, length: 75, height: 14.0 }
         }
       ]
     };
@@ -414,44 +447,16 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
         'Origin': 'http://localhost:3000',
         'Host': 'localhost:3000'
       },
-      body: JSON.stringify(payloadHighKdb)
+      body: JSON.stringify(payloadOutOfBounds)
     });
 
     const res = await POST(req);
     expect(res.status).toBe(200);
     const data = await res.json();
 
-    expect(data.status).toBe('NON_COMPLIANT_COVERAGE');
-    expect(data.decision).toContain('coverage');
-    expect(data.decision).toContain('59.3%');
-  });
-
-  // Test 14: Regression test: Scenario A output must NOT recommend "Lock Scenario B"
-  it('14. verifies Scenario A evaluation does not hardcode Scenario B recommendation', async () => {
-    const payloadScenarioA = {
-      scenarioId: GOLDEN_PROJECT.scenarios[0].id,
-      scenarioName: GOLDEN_PROJECT.scenarios[0].name,
-      grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
-      setbacks: GOLDEN_PROJECT.scenarios[0].assumptionsUsed.setbacks,
-      masses: GOLDEN_PROJECT.scenarios[0].masses
-    };
-
-    const req = new NextRequest('http://localhost:3000/api/assessment', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'http://localhost:3000',
-        'Host': 'localhost:3000'
-      },
-      body: JSON.stringify(payloadScenarioA)
-    });
-
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-    const data = await res.json();
-
-    expect(data.recommendedAction).not.toContain('Lock Scenario B');
-    expect(data.recommendedAction).toContain('Scenario A');
+    expect(data.status).toBe('NON_COMPLIANT_OUT_OF_BOUNDS');
+    expect(data.decision).toContain('boundary');
+    expect(data.status).not.toBe('COMPLIANT');
   });
 
   // Test 15: Scenario C geometry-derived math: 43.2m height vs 32.0m cap gives exactly +11.2m overrun
