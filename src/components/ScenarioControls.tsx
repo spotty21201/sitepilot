@@ -171,19 +171,9 @@ export function ScenarioControls({
         body: JSON.stringify({
           scenarioId: activeScenario.id,
           scenarioName: activeScenario.name,
-          floors: metrics.totalFloors,
-          heightMeters: metrics.totalHeightMeters,
-          heightCap: 32.0,
-          heightOverrun: metrics.totalHeightMeters > 32.0 ? Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10 : 0,
-          far: metrics.farKLB,
-          gfa: metrics.totalGFA,
-          siteCoverage: metrics.siteCoveragePercentage,
-          openSpace: metrics.openSpaceArea,
+          grossSiteArea: site.grossSiteArea,
           setbacks: activeScenario.assumptionsUsed.setbacks,
-          isOverridden: isOverridden,
-          hasCollision: hasCollision,
-          collisionVolume: activeScenario.pairwiseOverlap?.overlapVolumeM3 || 0,
-          encroachments: encroachments.map(e => ({ side: e.edge, description: e.description, encroachmentMeters: e.distanceMeters }))
+          masses: activeScenario.masses
         })
       });
       const data = await res.json();
