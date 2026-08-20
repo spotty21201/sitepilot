@@ -668,6 +668,7 @@ export interface CanonicalComplianceReport {
   summaryText: string;
   decisionText: string;
   recommendedAction: string;
+  identifiedRisks: string[];
   primaryWarning?: string;
   violations: string[];
   metrics: {
@@ -787,6 +788,45 @@ export function evaluateScenarioCompliance(
     }
   }
 
+  // Derive tailored identified risks strictly from violationCategory
+  let identifiedRisks: string[] = [];
+  if (violationCategory === 'NONE') {
+    identifiedRisks = [
+      'Northern access corridor (6.5m width) requires traffic management for residential volume.',
+      'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'
+    ];
+  } else if (violationCategory === 'HEIGHT') {
+    identifiedRisks = [
+      `Height overrun of +${heightOverrunM.toFixed(1)}m requires municipal RDTR rezoning variance.`,
+      'High probability of building permit rejection by DKI Jakarta planning bureau.'
+    ];
+  } else if (violationCategory === 'FAR') {
+    identifiedRisks = [
+      `Floor Area Ratio of ${metrics.farKLB.toFixed(2)}x exceeds 3.20x statutory limit (+${farOverrun.toFixed(2)}x overrun), triggering density penalty or municipal rejection.`,
+      'Requires reduction of buildable area or acquisition of transferable development rights.'
+    ];
+  } else if (violationCategory === 'COVERAGE') {
+    identifiedRisks = [
+      `Building footprint coverage of ${metrics.siteCoveragePercentage}% exceeds 55.0% KDB statutory limit (+${coverageOverrunPercent.toFixed(1)}% overrun).`,
+      'Violates open space ratio and reduces permeable ground surface required for municipal stormwater drainage compliance.'
+    ];
+  } else if (violationCategory === 'SETBACK') {
+    identifiedRisks = [
+      `${encroachments[0]?.description || 'Building mass penetrates statutory setback envelope.'}`,
+      'Encroachment creates statutory non-compliance, risking municipal stop-work order or mandatory demolition.'
+    ];
+  } else if (violationCategory === 'COLLISION') {
+    identifiedRisks = [
+      `Active physical 3D mass clash (${collisionVolumeM3.toLocaleString()} m³ overlap) represents invalid spatial geometry.`,
+      'Volumetric intersection causes structural calculation errors and architectural infeasibility.'
+    ];
+  } else if (violationCategory === 'OUT_OF_BOUNDS') {
+    identifiedRisks = [
+      `Building footprint extends ${outOfBoundsAreaM2.toLocaleString()} m² outside registered parcel boundary.`,
+      'Critical legal liability: Construction outside cadastral title constitutes unauthorized encroachment on adjacent land.'
+    ];
+  }
+
   return {
     isCompliant,
     status: isCompliant ? 'VALID' : 'WARNING_EXCEEDS_CONSTRAINT',
@@ -797,6 +837,7 @@ export function evaluateScenarioCompliance(
     summaryText: isCompliant ? 'Fully complies with Subzone R.9 zoning limits.' : warnings[0],
     decisionText,
     recommendedAction,
+    identifiedRisks,
     primaryWarning: warnings[0],
     violations: warnings,
     metrics: {

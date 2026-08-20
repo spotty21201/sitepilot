@@ -10,6 +10,10 @@ import { BuildingMass, PlanningAssessment, Setbacks } from '@/types';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const REQUIRED_CLOUD_RUN_MODEL = 'gemini-3.7-flash';
+const REQUIRED_CLOUD_RUN_PROJECT = 'project-528f858c-325a-45aa-ac0';
+const REQUIRED_CLOUD_RUN_LOCATION = 'global';
+
 interface AssessmentRequestBody {
   scenarioId: string;
   scenarioName: string;
@@ -295,26 +299,23 @@ Provide a professional, clear assessment.`;
 
       const cloudRunData = await cloudRunRes.json();
 
-      // Strict Provenance Validation: Return 502 if required fields are missing or inconsistent
+      // Strict Provenance Validation: require exact model, project, location, and non-empty revision/correlationId
       if (
         !cloudRunData ||
         typeof cloudRunData !== 'object' ||
         cloudRunData.ok !== true ||
         cloudRunData.authenticated !== true ||
-        !cloudRunData.model ||
-        typeof cloudRunData.model !== 'string' ||
-        !cloudRunData.project ||
-        typeof cloudRunData.project !== 'string' ||
-        !cloudRunData.vertexLocation ||
-        typeof cloudRunData.vertexLocation !== 'string' ||
-        !cloudRunData.revision ||
+        cloudRunData.model !== REQUIRED_CLOUD_RUN_MODEL ||
+        cloudRunData.project !== REQUIRED_CLOUD_RUN_PROJECT ||
+        cloudRunData.vertexLocation !== REQUIRED_CLOUD_RUN_LOCATION ||
         typeof cloudRunData.revision !== 'string' ||
-        !cloudRunData.correlationId ||
-        typeof cloudRunData.correlationId !== 'string'
+        cloudRunData.revision.length === 0 ||
+        typeof cloudRunData.correlationId !== 'string' ||
+        cloudRunData.correlationId.length === 0
       ) {
-        console.error('[SitePilot Assessment API] Invalid or incomplete provenance from Cloud Run:', cloudRunData);
+        console.error('[SitePilot Assessment API] Invalid or inconsistent provenance from Cloud Run:', cloudRunData);
         return NextResponse.json(
-          { error: 'Invalid or incomplete provenance received from Cloud Run service.', ok: false },
+          { error: 'Invalid or inconsistent provenance received from Cloud Run service.', ok: false },
           { status: 502 }
         );
       }
@@ -334,9 +335,7 @@ Provide a professional, clear assessment.`;
           `Site Coverage (KDB): ${metrics.siteCoveragePercentage}% (Zoning Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
           `Setbacks: Front ${canonicalSetbacks.front}m (Standard 10m)`
         ],
-        identifiedRisks: complianceReport.metrics.heightOverrunMeters > 0
-          ? [`Height overrun of +${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'High probability of building permit rejection by DKI Jakarta planning bureau.']
-          : ['Northern access corridor (6.5m width) requires traffic management for residential volume.', 'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'],
+        identifiedRisks: complianceReport.identifiedRisks,
         recommendedAction: complianceReport.recommendedAction,
         model: `${cloudRunData.model} (Cloud Run / Vertex AI)`,
         generatedAt: new Date().toISOString(),
@@ -371,9 +370,7 @@ Provide a professional, clear assessment.`;
           `Site Coverage: ${metrics.siteCoveragePercentage}% (Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
-        identifiedRisks: complianceReport.metrics.heightOverrunMeters > 0 
-          ? [`Height overrun of +${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m requires municipal RDTR rezoning variance.`, 'Potential permit denial from DKI Jakarta spatial planning bureau.']
-          : ['Northern access corridor (6.5m width) requires traffic management for residential volumes.'],
+        identifiedRisks: complianceReport.identifiedRisks,
         recommendedAction: complianceReport.recommendedAction,
         model: 'gemini-3.7-flash (DEV_HEURISTIC)',
         generatedAt: new Date().toISOString(),
