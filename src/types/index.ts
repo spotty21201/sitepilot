@@ -286,18 +286,24 @@ export interface Project {
   updatedAt: string;
 }
 
-// ==========================================
-// 7. AI Planning Assessment Model
-// ==========================================
 export interface PlanningAssessment {
   scenarioId: string;
   scenarioName: string;
-  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_SETBACK' | 'COLLISION_DETECTED' | 'WARNING';
+  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
   decision: string;
   supportingEvidence: string[];
   identifiedRisks: string[];
   recommendedAction: string;
   model: string;
   generatedAt: string;
-  authenticated: boolean;
+  accessPath: 'same_origin_browser' | 'authorized_server';
+  userAuthenticated: boolean;
+  backendAuthenticated: boolean;
+  provenance?: {
+    model: string;
+    project: string;
+    vertexLocation: string;
+    revision?: string;
+    correlationId?: string;
+  };
 }

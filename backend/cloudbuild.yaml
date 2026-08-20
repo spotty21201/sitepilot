@@ -1,0 +1,55 @@
+# ==============================================================================
+# Google Cloud Build CI/CD Pipeline for SitePilot Cloud Run Backend
+# ==============================================================================
+
+steps:
+  # Step 1: Build Backend Container Image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-backend-image'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:${COMMIT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:latest'
+      - './backend'
+
+  # Step 2: Push Backend Container Image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-backend-image'
+    args:
+      - 'push'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:${COMMIT_SHA}'
+
+  # Step 3: Deploy Verified Container to Cloud Run with Secret Manager Binding
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: 'deploy-cloud-run'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'sitepilot-vertex'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:${COMMIT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=0'
+      - '--max-instances=2'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--timeout=120s'
+      - '--service-account=${_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com'
+      - '--set-secrets=SITEPILOT_SERVER_SECRET=sitepilot-server-secret:latest'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-3.7-flash,NODE_ENV=production'
+
+substitutions:
+  _REGION: 'asia-southeast2'
+  _REPO_NAME: 'sitepilot-repo'
+  _SERVICE_ACCOUNT: 'sitepilot-runner'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:${COMMIT_SHA}'
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:latest'
