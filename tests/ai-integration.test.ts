@@ -58,7 +58,7 @@ describe('Google GenAI & Vertex AI Integration Suite', () => {
     delete process.env.GCP_PROJECT;
     delete process.env.GEMINI_API_KEY;
     delete process.env.GOOGLE_API_KEY;
-    (process.env as any).NODE_ENV = 'development';
+    (process.env as Record<string, string | undefined>).NODE_ENV = 'development';
 
     const config = getAiConfig();
     expect(config.provider).toBe('LOCAL_DEVELOPMENT');
@@ -79,7 +79,7 @@ describe('Google GenAI & Vertex AI Integration Suite', () => {
     delete process.env.GCP_PROJECT;
     delete process.env.GEMINI_API_KEY;
     delete process.env.GOOGLE_API_KEY;
-    (process.env as any).NODE_ENV = 'production';
+    (process.env as Record<string, string | undefined>).NODE_ENV = 'production';
 
     await expect(
       extractDocumentFindings('Sample land document', {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exportToColladaDAE, calculateDevelopmentMetrics, fitMassesToBuildableEnvelope } from '@/lib/geometry/engine';
+import { exportToColladaDAE } from '@/lib/geometry/engine';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { BuildingMass } from '@/types';
 
@@ -21,7 +21,6 @@ export async function GET(request: NextRequest) {
     if (floorsParam) {
       const floors = parseInt(floorsParam, 10);
       masses = masses.map(m => {
-        const basePodiumFloors = m.type === 'PODIUM' ? Math.min(2, floors) : 0;
         const newFloors = m.type === 'PODIUM' ? Math.min(2, floors) : Math.max(1, floors - (scenario.masses.some(x => x.type === 'PODIUM') ? 2 : 0));
         const h = newFloors * (m.floorToFloorHeight || 3.5);
         return {

@@ -1,17 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { 
   getCanonicalParcelBounds,
-  calculateBuildableArea, 
-  calculateDevelopmentMetrics, 
-  checkConstraintViolations,
   checkSetbackEncroachments,
   fitMassesToBuildableEnvelope,
   calculateMassPairwiseIntersections,
   calculateGroundFootprintUnion,
   detectScenarioEditClassification,
   findNonOverlappingDuplicatePosition,
-  evaluateScenarioCompliance,
-  exportToColladaDAE
+  evaluateScenarioCompliance
 } from '@/lib/geometry/engine';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 

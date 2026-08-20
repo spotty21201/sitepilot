@@ -229,14 +229,14 @@ export function DevelopmentWorkspace({
           <div className="flex items-center gap-1.5 bg-[#161c2b] p-1 rounded-lg border border-[#2b3548]">
             <button
               onClick={() => setViewType('2D')}
-              aria-label="2D Cadastral Map view"
+              aria-label="2D Site Plan (Illustrative) view"
               aria-pressed={viewType === '2D'}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 viewType === '2D' ? 'bg-[#2563eb] text-white shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-[#1f2738]'
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>2D Cadastral Map</span>
+              <span>2D Site Plan (Illustrative)</span>
             </button>
             <button
               onClick={() => setViewType('3D')}

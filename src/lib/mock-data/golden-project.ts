@@ -10,6 +10,7 @@ import { calculateDevelopmentMetrics } from '../geometry/engine';
 export const GOLDEN_PROJECT: Project = {
   id: 'proj-menteng-001',
   name: 'Menteng Heritage Quarter',
+  isTemplate: true,
   objective: 'Evaluate 1.68 ha site for premium boutique residential and lifestyle retail development.',
   location: {
     address: 'Jl. Teuku Umar No. 42-46, Menteng, Central Jakarta',
@@ -26,6 +27,15 @@ export const GOLDEN_PROJECT: Project = {
   recommendation: 'CONDITIONAL_PROCEED',
   siteReadinessPercentage: 68,
   evidenceConfidence: 'MEDIUM',
+  areaProvenance: {
+    value: 16850,
+    sourceType: 'VERIFIED_TITLE',
+    sourceDocumentId: 'src-002',
+    sourceName: 'SHGB Certificate No. 1842',
+    confidence: 'HIGH',
+    adoptedAt: '2026-08-12T09:20:00Z',
+    notes: 'Verified cadastral parcel measurement from BPN certificate'
+  },
   
   site: {
     grossSiteArea: 16850, // Confirmed Certificate Fact

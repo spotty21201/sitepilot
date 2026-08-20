@@ -9,7 +9,7 @@ import { SpatialCanvas } from '@/components/SpatialCanvas';
 
 // Mock Three.js and WebGL constructor
 vi.mock('three', async () => {
-  const actual = await vi.importActual<any>('three');
+  const actual = await vi.importActual<Record<string, unknown>>('three');
   function MockWebGLRenderer() {
     return {
       setSize: vi.fn(),
@@ -94,7 +94,7 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
     expect(onSetCameraPreset).toHaveBeenCalledWith('RESET');
   });
 
-  it('renders 2D Cadastral legend with exact normalized labels [1] Podium, [2] East Wing, [3] West Wing', () => {
+  it('renders 2D Site Plan legend with exact normalized labels [1] Podium, [2] East Wing, [3] West Wing', () => {
     const scenarioB = GOLDEN_PROJECT.scenarios[1];
     const { getByText } = render(
       <DevelopmentWorkspace
@@ -104,8 +104,8 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
       />
     );
 
-    // Switch to 2D Cadastral view
-    const cadastralBtn = getByText('2D Cadastral Map');
+    // Switch to 2D Site Plan view
+    const cadastralBtn = getByText('2D Site Plan (Illustrative)');
     fireEvent.click(cadastralBtn);
 
     // Verify exact indexed markers and normalized legend labels

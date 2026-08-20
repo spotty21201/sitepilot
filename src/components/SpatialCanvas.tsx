@@ -342,7 +342,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            2D Cadastral Map
+            2D Site Plan (Illustrative)
           </button>
           <button
             onClick={() => setViewMode('CONSTRAINTS')}

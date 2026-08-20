@@ -44,6 +44,7 @@ export function ScenarioControls({
   const [rawXml, setRawXml] = useState('');
   const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
   const [assessment, setAssessment] = useState<PlanningAssessment | null>(null);
+  const [assessedSnapshot, setAssessedSnapshot] = useState<string | null>(null);
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
   
@@ -53,6 +54,7 @@ export function ScenarioControls({
   if (activeScenarioId !== prevScenarioId) {
     setPrevScenarioId(activeScenarioId);
     setAssessment(null);
+    setAssessedSnapshot(null);
     setAssessmentError(null);
   }
 
@@ -161,9 +163,21 @@ export function ScenarioControls({
     }, 0);
   }, []);
 
+  const getCurrentSnapshot = () => JSON.stringify({
+    scenarioId: activeScenario.id,
+    grossSiteArea: site.grossSiteArea,
+    setbacks: activeScenario.assumptionsUsed.setbacks,
+    floors: metrics.totalFloors,
+    gfa: metrics.totalGFA,
+    masses: activeScenario.masses.map(m => ({ id: m.id, floors: m.floors, pos: m.position, dim: m.dimensions }))
+  });
+
+  const isAssessmentStale = Boolean(assessment && assessedSnapshot && assessedSnapshot !== getCurrentSnapshot());
+
   const handleGenerateAssessment = async () => {
     setIsLoadingAssessment(true);
     setAssessmentError(null);
+    const snapshot = getCurrentSnapshot();
     try {
       const res = await fetch('/api/assessment', {
         method: 'POST',
@@ -181,6 +195,7 @@ export function ScenarioControls({
         throw new Error(data.error || 'Failed to generate assessment');
       }
       setAssessment(data);
+      setAssessedSnapshot(snapshot);
     } catch (err) {
       setAssessmentError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -447,7 +462,7 @@ export function ScenarioControls({
               />
               <div className="flex justify-between text-[9px] text-slate-500 font-mono mt-0.5">
                 <span>Min: 2 Fl</span>
-                <span className="text-amber-400 font-semibold">Subzone R.9 Cap: 8 Fl (32m)</span>
+                <span className="text-amber-400 font-semibold">Zoning Cap: 8 Fl (32m)</span>
                 <span>Max: 16 Fl</span>
               </div>
             </div>
@@ -455,7 +470,7 @@ export function ScenarioControls({
             {/* Front Setback Slider */}
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-slate-300">Front Setback (Teuku Umar Frontage)</span>
+                <span className="text-slate-300">Front Setback</span>
                 <span className="font-mono font-bold text-slate-100 bg-[#1f283d] px-2 py-0.5 rounded text-[11px]">
                   {currentSetback} Meters
                 </span>
@@ -570,13 +585,42 @@ export function ScenarioControls({
           </button>
 
           {assessmentError && (
-            <div className="p-2.5 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300">
-              {assessmentError}
+            <div className="p-3 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300 space-y-2">
+              <div className="flex items-center gap-1.5 font-semibold text-rose-200">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>Assessment Request Failed</span>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                {assessmentError}
+              </p>
+              <button
+                onClick={handleGenerateAssessment}
+                className="px-2.5 py-1 bg-rose-900/70 hover:bg-rose-800 text-white rounded text-[11px] font-semibold border border-rose-600/60 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Retry Assessment</span>
+              </button>
             </div>
           )}
 
           {assessment && (
             <div className="p-3 bg-[#151926] border border-[#2b374e] rounded-xl space-y-2 text-xs shadow-inner">
+              {isAssessmentStale && (
+                <div className="p-2 bg-amber-950/80 border border-amber-600/70 rounded-lg flex items-center justify-between gap-2 text-amber-200 text-[11px]">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>[STALE] Inputs changed since assessment</span>
+                  </div>
+                  <button
+                    onClick={handleGenerateAssessment}
+                    disabled={isLoadingAssessment}
+                    className="px-2 py-0.5 bg-amber-800/80 hover:bg-amber-700 text-white rounded text-[10px] font-semibold cursor-pointer shrink-0"
+                  >
+                    Re-evaluate
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pb-1.5 border-b border-[#222c40]">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Executive Verdict</span>
                 <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${

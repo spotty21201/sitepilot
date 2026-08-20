@@ -243,12 +243,41 @@ export interface DevelopmentScenario {
   updatedAt: string;
 }
 
+export type AreaProvenanceType = 
+  | 'VERIFIED_TITLE'            // e.g. BPN Certificate
+  | 'EXTRACTED_CLAIM'           // e.g. Broker Brochure
+  | 'CALCULATED_GEOMETRY'       // e.g. User drawn polygon
+  | 'USER_ENTERED_ASSUMPTION'   // e.g. Opportunity Intake Form
+  | 'ILLUSTRATIVE_STUDY';       // e.g. Generated massing model
+
+export interface AreaProvenance {
+  value: number;                  // Area in m²
+  sourceType: AreaProvenanceType;
+  sourceDocumentId?: string;
+  sourceName: string;             // e.g. "User Intake Form", "SHGB Certificate #1842"
+  confidence: ConfidenceLevel;
+  adoptedAt?: string;
+  adoptedBy?: string;
+  notes?: string;
+}
+
+export interface CaseSummary {
+  id: string;
+  name: string;
+  address: string;
+  grossSiteArea: number;
+  isTemplate?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ==========================================
 // 6. Project Aggregate Root (PRD Sec 11 & 35)
 // ==========================================
 export interface Project {
   id: string;
   name: string;
+  isTemplate?: boolean;        // If true, represents read-only Golden Project demonstration
   objective: string;           // e.g. "Evaluate site for luxury residential or boutique mixed-use"
   location: {
     address: string;
@@ -265,6 +294,7 @@ export interface Project {
   recommendation: RecommendationStatus;
   siteReadinessPercentage: number; // 0 - 100%
   evidenceConfidence: ConfidenceLevel;
+  areaProvenance?: AreaProvenance;
   
   site: SiteGeometry;
   sources: SourceDocument[];
