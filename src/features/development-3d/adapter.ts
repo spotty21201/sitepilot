@@ -1,4 +1,4 @@
-import { BuildingMass, DevelopmentScenario, Setbacks, SiteGeometry } from '@/types';
+import { DevelopmentScenario, SiteGeometry } from '@/types';
 import { getCanonicalParcelBounds } from '@/lib/geometry/engine';
 import { PascalSceneModel, PascalSceneNode } from './types';
 
@@ -46,11 +46,11 @@ export function adaptSitePilotToPascalScene(
     }
   });
 
-  // 3. Arterial Access: Jl. Teuku Umar Frontage (South at positive Y)
+  // 3. Arterial Access: Street Frontage (South at positive Y)
   nodes.push({
     id: 'node-access-arterial',
     kind: 'sitepilot:access-arterial',
-    name: 'Jl. Teuku Umar Frontage (110m)',
+    name: `Street Frontage (${bounds.width}m)`,
     position: [0, 0.02, bounds.maxY + 10],
     dimensions: [bounds.width + 40, 0.05, 20],
     properties: {
@@ -59,15 +59,16 @@ export function adaptSitePilotToPascalScene(
     }
   });
 
-  // 4. Secondary Access: Continuous 6.5m Northern Corridor (North at negative Y)
+  // 4. Secondary Access: Continuous Access Corridor (North at negative Y)
+  const corridorW = site.accessRoadWidth || 6.5;
   nodes.push({
     id: 'node-access-corridor',
     kind: 'sitepilot:access-corridor',
-    name: 'Northern Secondary Access Corridor (6.5m)',
-    position: [bounds.minX + 3.25, 0.03, bounds.minY + 5],
-    dimensions: [6.5, 0.05, 40],
+    name: `Secondary Access Corridor (${corridorW}m)`,
+    position: [bounds.minX + corridorW / 2, 0.03, bounds.minY + 5],
+    dimensions: [corridorW, 0.05, 40],
     properties: {
-      corridorWidth: 6.5,
+      corridorWidth: corridorW,
       length: 40.0
     }
   });
@@ -76,7 +77,7 @@ export function adaptSitePilotToPascalScene(
   nodes.push({
     id: 'node-zoning-envelope',
     kind: 'sitepilot:zoning-envelope',
-    name: `Subzone R.9 Height Envelope (32.0m / 8 Fl)`,
+    name: `Regulatory Height Envelope (${zoningHeightCapMeters.toFixed(1)}m)`,
     position: [bCenterX, zoningHeightCapMeters / 2, bCenterZ],
     dimensions: [bounds.buildableWidth, zoningHeightCapMeters, bounds.buildableLength],
     properties: {

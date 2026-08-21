@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { adaptSitePilotToPascalScene } from '@/features/development-3d/adapter';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
-import { calculateDevelopmentMetrics } from '@/lib/geometry/engine';
 
 describe('SitePilot ↔ Pascal Scene Adapter (PRD Sec 14, 16, & 3D Pivot)', () => {
   it('adapts canonical SitePilot model into deterministic Pascal scene nodes', () => {

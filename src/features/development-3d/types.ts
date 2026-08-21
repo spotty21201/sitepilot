@@ -1,4 +1,4 @@
-import { BuildingMass, DevelopmentScenario, Setbacks, SiteGeometry } from '@/types';
+import { BuildingMass, Setbacks } from '@/types';
 
 export type ViewportDisplayMode = 'DEVELOPMENT' | 'MONOCHROME' | 'CONSTRAINTS';
 

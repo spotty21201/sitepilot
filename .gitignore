@@ -50,3 +50,6 @@ gcp-key*.json
 *.sw?
 .idea/
 .vscode/
+.claude/
+artifacts/
+patches/

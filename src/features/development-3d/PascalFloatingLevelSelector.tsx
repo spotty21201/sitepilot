@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { BuildingMass, DevelopmentScenario } from '@/types';
-import { Layers, Plus, Minus, Building, ArrowUp, Check, ChevronUp, ChevronDown } from 'lucide-react';
+import { Layers, Plus, Minus, ChevronUp, ChevronDown } from 'lucide-react';
 
 interface PascalFloatingLevelSelectorProps {
   scenario: DevelopmentScenario;
@@ -26,7 +26,6 @@ export function PascalFloatingLevelSelector({
   // Derive total floors from scenario metrics
   const totalFloors = scenario.metrics.totalFloors || 8;
   const f2f = selectedMass?.floorToFloorHeight || 3.5;
-  const targetMass = selectedMass || scenario.masses[0];
 
   const levels = Array.from({ length: totalFloors }, (_, i) => {
     const floorNum = totalFloors - i;

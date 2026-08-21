@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 
 interface ArchitecturalNumericInputProps {
   label: string;
@@ -100,6 +100,20 @@ export function ArchitecturalNumericInput({
       setDraft(value.toString());
       setValidationError(null);
       inputRef.current?.blur();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const current = parseFloat(draft) || value;
+      const next = Math.min(max, current + (step || 1));
+      const rounded = Math.round(next * 100) / 100;
+      setDraft(rounded.toString());
+      onChange(rounded);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const current = parseFloat(draft) || value;
+      const next = Math.max(min, current - (step || 1));
+      const rounded = Math.round(next * 100) / 100;
+      setDraft(rounded.toString());
+      onChange(rounded);
     }
   };
 

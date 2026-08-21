@@ -1,157 +1,438 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Type } from '@google/genai';
-import { createAiClient } from '@/lib/ai/gemini';
-import { PlanningAssessment, Setbacks } from '@/types';
+import { 
+  calculateDevelopmentMetrics, 
+  calculateMassPairwiseIntersections, 
+  checkSetbackEncroachments, 
+  evaluateScenarioCompliance 
+} from '@/lib/geometry/engine';
+import { BuildingMass, PlanningAssessment, Setbacks } from '@/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const REQUIRED_CLOUD_RUN_MODEL = 'gemini-3.7-flash';
+const REQUIRED_CLOUD_RUN_PROJECT = 'project-528f858c-325a-45aa-ac0';
+const REQUIRED_CLOUD_RUN_LOCATION = 'global';
+
 interface AssessmentRequestBody {
   scenarioId: string;
   scenarioName: string;
-  floors: number;
-  heightMeters: number;
-  heightCap: number;
-  heightOverrun: number;
-  far: number;
-  gfa: number;
-  siteCoverage: number;
-  openSpace: number;
+  grossSiteArea: number;
   setbacks: Setbacks;
-  isOverridden: boolean;
-  hasCollision?: boolean;
-  collisionVolume?: number;
-  encroachments?: Array<{ side: string; description: string; encroachmentMeters: number }>;
+  masses: BuildingMass[];
+  hasZoningEvidence?: boolean;
+  projectName?: string;
+  caseName?: string;
+  address?: string;
+  userQuery?: string;
+  zoningLimits?: {
+    zoneCode?: string;
+    zoneName?: string;
+    maxFAR?: number;
+    maxCoveragePct?: number;
+    minKDHPct?: number;
+    maxHeightMeters?: number;
+    maxFloors?: number;
+  };
+  existingAsset?: {
+    gfa?: number;
+    floors?: number;
+    description?: string;
+    currentStatus?: string;
+  };
+  valuation?: {
+    askingPriceAmount?: number;
+    askingPriceCurrency?: string;
+    njopAmount?: number;
+    pricePerM2?: number;
+    valuationBasisNotes?: string;
+  };
+  expansionHeadroomGFA?: number;
+}
+
+/**
+ * Validates numeric properties strictly to prevent NaN, Infinity, or negative inputs.
+ */
+function isValidPositiveNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && val > 0;
+}
+
+function isValidNonNegativeNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val) && val >= 0;
+}
+
+function isValidFiniteNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Security Check: Authenticate request & prevent public abuse
-    const authHeader = request.headers.get('authorization') || '';
-    const internalSecret = process.env.SITEPILOT_INTERNAL_TOKEN || 'sitepilot-internal-auth-token-2026';
-    const origin = request.headers.get('origin') || request.headers.get('referer') || '';
-    
-    // Check if request is from legitimate same-origin app or authorized server-to-server token
-    const isSameOrigin = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('100.97.49.76') || origin.includes('.run.app') || origin.includes('vercel.app');
-    const isTokenAuthorized = authHeader === `Bearer ${internalSecret}` || request.headers.get('x-sitepilot-auth') === internalSecret;
+    // 1. Security & Two-Path Access Boundary
+    const authHeader = request.headers.get('authorization');
+    const serverSecret = process.env.SITEPILOT_SERVER_SECRET;
+    const isProduction = process.env.NODE_ENV === 'production';
+    const cloudRunUrl = process.env.CLOUDRUN_SERVICE_URL;
 
-    if (!isSameOrigin && !isTokenAuthorized) {
+    // Check Server-to-Server Path (requires valid Bearer secret)
+    const isServerAuthorized = Boolean(serverSecret && authHeader === `Bearer ${serverSecret}`);
+
+    // If an authorization header was supplied but is invalid, reject immediately (401)
+    if (authHeader && !isServerAuthorized) {
       return NextResponse.json(
-        { error: 'Unauthorized: Access to AI assessment requires authentication token or same-origin session.' },
+        { error: 'Unauthorized: Invalid authentication credentials.', ok: false },
         { status: 401 }
       );
     }
 
-    const body: AssessmentRequestBody = await request.json();
+    // Check Browser Path (requires exact same-origin Origin & Host matching)
+    const origin = request.headers.get('origin');
+    const referer = request.headers.get('referer');
+    const host = request.headers.get('host') || request.nextUrl?.host || '';
+    const secFetchSite = request.headers.get('sec-fetch-site');
 
-    if (!body.scenarioId || !body.scenarioName || typeof body.floors !== 'number') {
+    let accessPath: 'same_origin_browser' | 'authorized_server';
+
+    if (isServerAuthorized) {
+      accessPath = 'authorized_server';
+    } else {
+      // Browser path requires explicit valid Origin matching the request host
+      if (!origin) {
+        return NextResponse.json(
+          { error: 'Unauthorized: Missing Origin header for browser request path.', ok: false },
+          { status: 401 }
+        );
+      }
+
+      try {
+        const originUrl = new URL(origin);
+        if (originUrl.host !== host) {
+          return NextResponse.json(
+            { error: 'Unauthorized: Cross-origin access denied.', ok: false },
+            { status: 401 }
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          { error: 'Unauthorized: Malformed Origin header.', ok: false },
+          { status: 401 }
+        );
+      }
+
+      // Check referer if present
+      if (referer) {
+        try {
+          const refererUrl = new URL(referer);
+          if (refererUrl.host !== host) {
+            return NextResponse.json(
+              { error: 'Unauthorized: Mismatched Referer header.', ok: false },
+              { status: 401 }
+            );
+          }
+        } catch {
+          return NextResponse.json(
+            { error: 'Unauthorized: Malformed Referer header.', ok: false },
+            { status: 401 }
+          );
+        }
+      }
+
+      // Check Sec-Fetch-Site if provided
+      if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
+        return NextResponse.json(
+          { error: 'Unauthorized: Cross-site fetch prohibited.', ok: false },
+          { status: 401 }
+        );
+      }
+
+      accessPath = 'same_origin_browser';
+    }
+
+    // In production, if server secret is missing and Cloud Run is configured, fail closed
+    if (isProduction && !serverSecret && cloudRunUrl) {
+      console.error('[SitePilot Assessment API] Server configuration error: SITEPILOT_SERVER_SECRET is missing in production.');
       return NextResponse.json(
-        { error: 'Invalid payload: scenarioId, scenarioName, and numeric metrics are required.' },
+        { error: 'Server configuration error: Secure backend authentication is unconfigured.', ok: false },
+        { status: 500 }
+      );
+    }
+
+    // 2. Strict Input Schema Validation (Validates Every Geometry Field)
+    let body: AssessmentRequestBody;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Malformed request: Invalid JSON body.', ok: false },
         { status: 400 }
       );
     }
 
-    // 2. Format Deterministic Planning Evidence Prompt
-    const { ai, model, provider } = createAiClient();
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json(
+        { error: 'Invalid request: Request body must be an object.', ok: false },
+        { status: 400 }
+      );
+    }
 
-    const prompt = `You are the Senior Planning Advisor for SitePilot (intelligent site due diligence workspace).
-Analyze the following active scenario's deterministic planning evidence for the Menteng prime property (Subzone R.9):
+    if (!body.scenarioId || typeof body.scenarioId !== 'string' || !body.scenarioName || typeof body.scenarioName !== 'string') {
+      return NextResponse.json(
+        { error: 'Validation error: scenarioId and scenarioName must be non-empty strings.', ok: false },
+        { status: 400 }
+      );
+    }
 
-SCENARIO EVIDENCE:
-- Scenario ID: ${body.scenarioId}
-- Scenario Name: "${body.scenarioName}"
-- Storeys: ${body.floors} floors
-- Building Height: ${body.heightMeters.toFixed(1)}m
-- Subzone R.9 Height Limit: ${body.heightCap.toFixed(1)}m (Maximum 8 floors / 32m)
-- Height Overrun: ${body.heightOverrun > 0 ? `+${body.heightOverrun.toFixed(1)}m VIOLATION` : '0m (Compliant)'}
-- Floor Area Ratio (FAR / KLB): ${body.far.toFixed(2)}x (Zoning Cap: 3.20x)
-- Gross Floor Area (GFA): ${body.gfa.toLocaleString()} m²
-- Building Coverage (KDB): ${body.siteCoverage}% (Zoning Cap: 55%)
-- Open Green Space: ${body.openSpace.toLocaleString()} m²
-- Setbacks: Front ${body.setbacks.front}m (Standard 10m), Rear ${body.setbacks.rear}m, Left ${body.setbacks.sideLeft}m, Right ${body.setbacks.sideRight}m
-- Override State: ${body.isOverridden ? 'Active User Override' : 'Baseline Concept'}
-- 3D Mass Collisions: ${body.hasCollision ? `DETECTED (${body.collisionVolume || 0} m³ overlap)` : 'Zero Collisions'}
-- Setback Encroachments: ${body.encroachments && body.encroachments.length > 0 ? body.encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}
+    if (!isValidPositiveNumber(body.grossSiteArea)) {
+      return NextResponse.json(
+        { error: 'Validation error: grossSiteArea must be a finite positive number.', ok: false },
+        { status: 400 }
+      );
+    }
 
-TASK:
-Provide a concise, professional urban planning assessment containing:
-1. Decision: One-sentence definitive executive verdict.
-2. Supporting Evidence: 3-4 bullet points citing exact numerical metrics above.
-3. Identified Risks: 1-3 key risks (e.g. height variance, traffic ingress on 6.5m northern corridor, collision).
-4. Recommended Next Action: One actionable recommendation.
+    if (!body.setbacks || typeof body.setbacks !== 'object') {
+      return NextResponse.json(
+        { error: 'Validation error: setbacks must be an object.', ok: false },
+        { status: 400 }
+      );
+    }
 
-Return strict JSON conforming to this schema.`;
+    const { front, rear, sideLeft, sideRight } = body.setbacks;
+    if (
+      !isValidNonNegativeNumber(front) ||
+      !isValidNonNegativeNumber(rear) ||
+      !isValidNonNegativeNumber(sideLeft) ||
+      !isValidNonNegativeNumber(sideRight)
+    ) {
+      return NextResponse.json(
+        { error: 'Validation error: All setback dimensions must be finite non-negative numbers.', ok: false },
+        { status: 400 }
+      );
+    }
+
+    if (!Array.isArray(body.masses) || body.masses.length === 0) {
+      return NextResponse.json(
+        { error: 'Validation error: masses must be a non-empty array of building masses.', ok: false },
+        { status: 400 }
+      );
+    }
+
+    for (const mass of body.masses) {
+      if (
+        !mass ||
+        typeof mass !== 'object' ||
+        !mass.id ||
+        !mass.name ||
+        !isValidPositiveNumber(mass.footprintArea) ||
+        !isValidPositiveNumber(mass.floors) ||
+        !isValidPositiveNumber(mass.height) ||
+        !isValidPositiveNumber(mass.floorToFloorHeight) ||
+        !mass.position ||
+        !isValidFiniteNumber(mass.position.x) ||
+        !isValidFiniteNumber(mass.position.y) ||
+        !isValidFiniteNumber(mass.position.z) ||
+        !mass.dimensions ||
+        !isValidPositiveNumber(mass.dimensions.width) ||
+        !isValidPositiveNumber(mass.dimensions.length) ||
+        !isValidPositiveNumber(mass.dimensions.height)
+      ) {
+        return NextResponse.json(
+          { error: `Validation error: Mass ${mass?.id || 'unknown'} contains missing, non-finite, or negative geometry fields.`, ok: false },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3. Deterministic Authority (Recomputed on Server using Single Authoritative Geometry Engine)
+    const canonicalSetbacks: Setbacks = { front, rear, sideLeft, sideRight };
+    const grossSiteArea = body.grossSiteArea;
+    const masses = body.masses;
+    const hasZoningEvidence = body.hasZoningEvidence !== undefined
+      ? Boolean(body.hasZoningEvidence)
+      : (grossSiteArea === 16850 || Boolean(body.projectName && body.projectName.includes('Menteng')));
+    const targetProjectName = body.projectName || body.caseName || 'Development Opportunity';
+    const targetAddress = body.address || 'Site Location';
+
+    const statMaxFAR = body.zoningLimits?.maxFAR ?? 3.20;
+    const statMaxCoveragePct = body.zoningLimits?.maxCoveragePct ?? 55.0;
+    const statMinKDHPct = body.zoningLimits?.minKDHPct ?? 20.0;
+    const statMaxFloors = body.zoningLimits?.maxFloors ?? (statMaxFAR > 5.0 ? 14 : 8);
+    const statMaxHeightM = body.zoningLimits?.maxHeightMeters ?? (body.zoningLimits?.maxFloors ? (body.zoningLimits.maxFloors * 3.5 + 2.0) : 32.0);
+    const statZoneName = body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode;
+
+    const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks);
+    const overlaps = calculateMassPairwiseIntersections(masses);
+    const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses);
+    const complianceReport = evaluateScenarioCompliance(
+      grossSiteArea, 
+      canonicalSetbacks, 
+      masses, 
+      metrics, 
+      overlaps, 
+      {
+        scenarioName: body.scenarioName,
+        hasZoningEvidence,
+        maxFAR: statMaxFAR,
+        maxCoveragePct: statMaxCoveragePct,
+        minKDHPct: statMinKDHPct,
+        maxHeightMeters: statMaxHeightM,
+        maxFloors: statMaxFloors,
+        zoningName: statZoneName
+      }
+    );
+
+    // 4. Construct Grounded Prompt for Vertex AI
+    const deterministicFacts = [
+      `- Project: "${targetProjectName}" (${targetAddress})`,
+      `- Scenario: "${body.scenarioName}" (ID: ${body.scenarioId})`,
+      `- Planning Evidence Status: ${hasZoningEvidence ? 'VERIFIED (Municipal Certificate on File)' : 'UNVERIFIED (No RDTR/KRK Certificate on file)'}`,
+      body.zoningLimits ? `- Zoning Classification: ${body.zoningLimits.zoneCode || 'K.1'} (${body.zoningLimits.zoneName || 'Commercial'})` : '',
+      `- Total Building Height: ${metrics.totalHeightMeters.toFixed(1)}m (${metrics.totalFloors} Storeys)`,
+      `- Height Limit: ${statMaxHeightM.toFixed(1)}m (${statMaxFloors} Storeys max)`,
+      `- Height Overrun: ${complianceReport.metrics.heightOverrunMeters > 0 ? `+${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Within Envelope)'}`,
+      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${statMaxFAR.toFixed(2)}x)`,
+      `- Total Gross Floor Area (GFA): ${metrics.totalGFA.toLocaleString()} m²`,
+      body.existingAsset?.gfa ? `- Existing Structure: ${body.existingAsset.gfa.toLocaleString()} m² (${body.existingAsset.floors || 4} floors, status: ${body.existingAsset.currentStatus || 'Operational'})` : '',
+      body.expansionHeadroomGFA !== undefined ? `- Permissible Expansion Headroom: ${body.expansionHeadroomGFA.toLocaleString()} m²` : '',
+      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct}%)`,
+      `- Unbuilt Open Space (KDH Basis): ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%, min required: ${statMinKDHPct}%)`,
+      body.valuation?.askingPriceAmount ? `- Commercial Terms: Asking Rp ${(body.valuation.askingPriceAmount / 1e9).toFixed(1)}B (~Rp ${(body.valuation.pricePerM2 ? (body.valuation.pricePerM2 / 1e6).toFixed(1) : (body.valuation.askingPriceAmount / grossSiteArea / 1e6).toFixed(1))}M/m² land)` : '',
+      body.valuation?.njopAmount ? `- Tax Benchmark (NJOP): Rp ${(body.valuation.njopAmount / 1e9).toFixed(1)}B` : '',
+      `- Setbacks: Front ${canonicalSetbacks.front}m, Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
+      `- Setback Encroachments: ${encroachments.length > 0 ? encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}`,
+      `- 3D Mass Overlaps: ${overlaps.hasOverlap ? `ACTIVE COLLISION (${overlaps.overlapVolumeM3} m³ overlap)` : 'Zero Collisions'}`,
+      `- Out of Bounds Footprint: ${(metrics.outOfBoundsAreaM2 || 0) > 0.5 ? `${metrics.outOfBoundsAreaM2} m² beyond parcel` : 'None'}`,
+      `- Authoritative Compliance Verdict: ${complianceReport.status} (${complianceReport.assessmentStatus})`,
+      `- Primary Summary: ${complianceReport.summaryText}`
+    ].filter(Boolean).join('\n');
+
+    const prompt = `You are the Senior Planning & Real Estate Investment Advisor for SitePilot (intelligent site due diligence workspace).
+Analyze the active scenario's deterministic planning and investment facts for "${targetProjectName}" at ${targetAddress}:
+
+${deterministicFacts}
+
+${body.userQuery ? `SPECIFIC INVESTOR INQUIRY TO ADDRESS: "${body.userQuery}"` : ''}
+
+TASK & GUARDRAILS:
+1. All narrative conclusions must strictly align with the deterministic planning facts above.
+2. The numeric calculations and compliance status above are immutable and authoritative.
+3. If Planning Evidence Status is UNVERIFIED, do NOT assert statutory municipal compliance. State that statutory compliance is unverified pending official zoning certificate (RDTR/KRK).
+4. Address yield potential, operational asset preservation, expansion headroom, and valuation implications.
+5. Structure your response into:
+   - Decision: One clear executive verdict reflecting the Authoritative Deterministic Status.
+   - Supporting Evidence: 3-4 concise bullet points citing exact numerical metrics above.
+   - Identified Risks: 1-3 specific planning or physical/commercial risks.
+   - Recommended Next Action: One actionable professional recommendation.
+
+Provide a professional, clear assessment.`;
 
     let assessment: PlanningAssessment;
 
-    // Check if Cloud Run external proxy is configured or direct Vertex AI
-    if (provider === 'LOCAL_DEVELOPMENT' && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_CLOUD_PROJECT) {
-      // Offline fallback in local development mode
-      assessment = {
-        scenarioId: body.scenarioId,
-        scenarioName: body.scenarioName,
-        status: body.heightOverrun > 0 ? 'NON_COMPLIANT_HEIGHT' : (body.encroachments && body.encroachments.length > 0) ? 'NON_COMPLIANT_SETBACK' : 'COMPLIANT',
-        decision: body.heightOverrun > 0 
-          ? `Non-compliant: Height exceeds Subzone R.9 cap by ${body.heightOverrun.toFixed(1)}m.`
-          : 'Viable concept conforming to baseline zoning and setbacks.',
-        supportingEvidence: [
-          `Height: ${body.heightMeters.toFixed(1)}m (Cap: ${body.heightCap.toFixed(1)}m)`,
-          `FAR: ${body.far.toFixed(2)}x (Max: 3.20x)`,
-          `Coverage: ${body.siteCoverage}% (Max: 55%)`,
-          `Setbacks: Front ${body.setbacks.front}m`
-        ],
-        identifiedRisks: body.heightOverrun > 0 
-          ? ['Height overrun requires municipal RDTR rezoning variance.', 'Potential permit denial from DKI Jakarta spatial planning bureau.']
-          : ['Northern access corridor (6.5m width) requires traffic management for residential volumes.'],
-        recommendedAction: body.heightOverrun > 0 
-          ? 'Reduce massing storeys to 8 floors (≤32m) or seek statutory height exemption.'
-          : 'Proceed with cadastral boundary marker survey and preliminary architectural submission.',
-        model: `${model} (Dev Heuristic)`,
-        generatedAt: new Date().toISOString(),
-        authenticated: true
+    // 5. Invoke Cloud Run Backend with Strict Provenance Validation
+    if (cloudRunUrl) {
+      const cloudRunHeaders: Record<string, string> = {
+        'Content-Type': 'application/json'
       };
-    } else {
-      // Execute live Vertex AI / Google GenAI SDK call
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              status: {
-                type: Type.STRING,
-                enum: ['COMPLIANT', 'NON_COMPLIANT_HEIGHT', 'NON_COMPLIANT_SETBACK', 'COLLISION_DETECTED', 'WARNING']
-              },
-              decision: { type: Type.STRING },
-              supportingEvidence: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              identifiedRisks: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              },
-              recommendedAction: { type: Type.STRING }
-            },
-            required: ['status', 'decision', 'supportingEvidence', 'identifiedRisks', 'recommendedAction']
-          }
-        }
+      if (serverSecret) {
+        cloudRunHeaders['Authorization'] = `Bearer ${serverSecret}`;
+      }
+
+      const cloudRunRes = await fetch(`${cloudRunUrl.replace(/\/$/, '')}/analyze`, {
+        method: 'POST',
+        headers: cloudRunHeaders,
+        body: JSON.stringify({
+          prompt,
+          scenarioId: body.scenarioId
+        })
       });
 
-      const parsed = JSON.parse(response.text || '{}');
+      if (!cloudRunRes.ok) {
+        const errText = await cloudRunRes.text();
+        console.error(`[SitePilot Assessment API] Cloud Run invocation failed (HTTP ${cloudRunRes.status}):`, errText);
+        return NextResponse.json(
+          { error: `Cloud Run Vertex AI service error (HTTP ${cloudRunRes.status}).`, ok: false },
+          { status: cloudRunRes.status }
+        );
+      }
+
+      const cloudRunData = await cloudRunRes.json();
+
+      // Strict Provenance Validation: require exact model, project, location, and non-empty revision/correlationId
+      if (
+        !cloudRunData ||
+        typeof cloudRunData !== 'object' ||
+        cloudRunData.ok !== true ||
+        cloudRunData.authenticated !== true ||
+        cloudRunData.model !== REQUIRED_CLOUD_RUN_MODEL ||
+        cloudRunData.project !== REQUIRED_CLOUD_RUN_PROJECT ||
+        cloudRunData.vertexLocation !== REQUIRED_CLOUD_RUN_LOCATION ||
+        typeof cloudRunData.revision !== 'string' ||
+        cloudRunData.revision.length === 0 ||
+        typeof cloudRunData.correlationId !== 'string' ||
+        cloudRunData.correlationId.length === 0
+      ) {
+        console.error('[SitePilot Assessment API] Invalid or inconsistent provenance from Cloud Run:', cloudRunData);
+        return NextResponse.json(
+          { error: 'Invalid or inconsistent provenance received from Cloud Run service.', ok: false },
+          { status: 502 }
+        );
+      }
+
+      const rawText = cloudRunData.response || '';
+      const lines = rawText.split('\n').map((l: string) => l.trim()).filter(Boolean);
+      const evidenceLines = lines.filter((l: string) => l.startsWith('*') || l.startsWith('-')).slice(0, 4).map((l: string) => l.replace(/^[-*]\s*/, ''));
+
       assessment = {
         scenarioId: body.scenarioId,
         scenarioName: body.scenarioName,
-        status: parsed.status || (body.heightOverrun > 0 ? 'NON_COMPLIANT_HEIGHT' : 'COMPLIANT'),
-        decision: parsed.decision || 'Assessment generated.',
-        supportingEvidence: parsed.supportingEvidence || [],
-        identifiedRisks: parsed.identifiedRisks || [],
-        recommendedAction: parsed.recommendedAction || 'Review zoning compliance.',
-        model: `${model} (${provider})`,
+        status: complianceReport.assessmentStatus,
+        decision: complianceReport.decisionText,
+        supportingEvidence: evidenceLines.length > 0 ? evidenceLines : [
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
+          `Setbacks: Front ${canonicalSetbacks.front}m`
+        ],
+        identifiedRisks: complianceReport.identifiedRisks,
+        recommendedAction: complianceReport.recommendedAction,
+        model: `${cloudRunData.model} (Cloud Run / Vertex AI)`,
         generatedAt: new Date().toISOString(),
-        authenticated: true
+        accessPath,
+        userAuthenticated: false,
+        backendAuthenticated: true,
+        provenance: {
+          model: cloudRunData.model,
+          project: cloudRunData.project,
+          vertexLocation: cloudRunData.vertexLocation,
+          revision: cloudRunData.revision,
+          correlationId: cloudRunData.correlationId
+        }
+      };
+    } else {
+      // Non-production development fallback
+      if (isProduction) {
+        return NextResponse.json(
+          { error: 'Production deployment requires CLOUDRUN_SERVICE_URL.', ok: false },
+          { status: 500 }
+        );
+      }
+
+      assessment = {
+        scenarioId: body.scenarioId,
+        scenarioName: body.scenarioName,
+        status: complianceReport.assessmentStatus,
+        decision: complianceReport.decisionText,
+        supportingEvidence: [
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
+          `Setbacks: Front ${canonicalSetbacks.front}m`
+        ],
+        identifiedRisks: complianceReport.identifiedRisks,
+        recommendedAction: complianceReport.recommendedAction,
+        model: 'gemini-3.7-flash (DEV_HEURISTIC)',
+        generatedAt: new Date().toISOString(),
+        accessPath,
+        userAuthenticated: false,
+        backendAuthenticated: false
       };
     }
 
@@ -161,7 +442,8 @@ Return strict JSON conforming to this schema.`;
     return NextResponse.json(
       { 
         error: 'Failed to generate Planning Assessment.', 
-        details: error instanceof Error ? error.message : String(error) 
+        details: error instanceof Error ? error.message : String(error),
+        ok: false
       },
       { status: 500 }
     );

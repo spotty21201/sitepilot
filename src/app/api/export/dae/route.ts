@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exportToColladaDAE, calculateDevelopmentMetrics, fitMassesToBuildableEnvelope } from '@/lib/geometry/engine';
+import { exportToColladaDAE } from '@/lib/geometry/engine';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
-import { BuildingMass } from '@/types';
+import { BuildingMass, SiteGeometry } from '@/types';
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,18 +10,40 @@ export async function GET(request: NextRequest) {
     const floorsParam = searchParams.get('floors');
     const setbackParam = searchParams.get('setback');
     const siteAreaParam = searchParams.get('siteArea');
+    const projectNameParam = searchParams.get('projectName');
+    const addressParam = searchParams.get('address');
 
-    const scenario = GOLDEN_PROJECT.scenarios.find(s => s.id === scenarioId) || GOLDEN_PROJECT.scenarios[1];
-    const siteArea = siteAreaParam ? parseFloat(siteAreaParam) : GOLDEN_PROJECT.site.grossSiteArea;
-    const frontSetback = setbackParam ? parseFloat(setbackParam) : scenario.assumptionsUsed.setbacks.front;
-    const effectiveSetbacks = { ...scenario.assumptionsUsed.setbacks, front: frontSetback };
+    // Only fallback to Golden Project if specifically requesting a Golden Project scenario ID
+    const isGoldenScenario = GOLDEN_PROJECT.scenarios.some(s => s.id === scenarioId);
+    const scenario = isGoldenScenario
+      ? (GOLDEN_PROJECT.scenarios.find(s => s.id === scenarioId) || GOLDEN_PROJECT.scenarios[1])
+      : null;
 
-    let masses: BuildingMass[] = scenario.masses;
+    const siteArea = siteAreaParam ? parseFloat(siteAreaParam) : (scenario ? GOLDEN_PROJECT.site.grossSiteArea : 10000);
+    const frontSetback = setbackParam ? parseFloat(setbackParam) : (scenario ? scenario.assumptionsUsed.setbacks.front : 8);
+    const effectiveSetbacks = scenario 
+      ? { ...scenario.assumptionsUsed.setbacks, front: frontSetback }
+      : { front: frontSetback, rear: 5, sideLeft: 4, sideRight: 4 };
 
-    if (floorsParam) {
+    let masses: BuildingMass[] = scenario ? scenario.masses : [
+      {
+        id: 'mass-export-01',
+        name: 'Main Block',
+        type: 'GENERAL',
+        footprintArea: Math.round(siteArea * 0.4),
+        floors: floorsParam ? parseInt(floorsParam, 10) : 4,
+        floorToFloorHeight: 3.5,
+        height: (floorsParam ? parseInt(floorsParam, 10) : 4) * 3.5,
+        gfa: Math.round(siteArea * 0.4) * (floorsParam ? parseInt(floorsParam, 10) : 4),
+        program: 'COMMERCIAL',
+        position: { x: 0, y: 0, z: 0 },
+        dimensions: { width: 50, length: 80, height: (floorsParam ? parseInt(floorsParam, 10) : 4) * 3.5 }
+      }
+    ];
+
+    if (scenario && floorsParam) {
       const floors = parseInt(floorsParam, 10);
       masses = masses.map(m => {
-        const basePodiumFloors = m.type === 'PODIUM' ? Math.min(2, floors) : 0;
         const newFloors = m.type === 'PODIUM' ? Math.min(2, floors) : Math.max(1, floors - (scenario.masses.some(x => x.type === 'PODIUM') ? 2 : 0));
         const h = newFloors * (m.floorToFloorHeight || 3.5);
         return {
@@ -34,15 +56,25 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const originalFloors = scenario.id === 'scen-001' ? 4 : scenario.id === 'scen-002' ? 8 : 12;
-    const currentFloors = floorsParam ? parseInt(floorsParam, 10) : scenario.metrics.totalFloors;
-    const isOverridden = currentFloors !== originalFloors;
+    const currentFloors = floorsParam ? parseInt(floorsParam, 10) : (scenario ? scenario.metrics.totalFloors : 4);
+    const baseName = projectNameParam 
+      ? projectNameParam.replace(/[^a-zA-Z0-9_-]/g, '_')
+      : (scenario ? scenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_') : 'Scenario');
+    const filename = `SitePilot_${baseName}_${currentFloors}Fl.dae`;
 
-    const baseName = scenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
-    const filename = `SitePilot_${baseName}_${currentFloors}Fl${isOverridden ? '_Override' : ''}.dae`;
+    const targetSite: SiteGeometry = isGoldenScenario 
+      ? { ...GOLDEN_PROJECT.site, grossSiteArea: siteArea, setbacks: effectiveSetbacks }
+      : { 
+          boundary: { type: 'Polygon', coordinates: [[[0,0], [100,0], [100,100], [0,100], [0,0]]] },
+          grossSiteArea: siteArea, 
+          buildableArea: siteArea * 0.8,
+          coordinateSystem: 'WGS84',
+          address: addressParam || 'Site Parcel', 
+          setbacks: effectiveSetbacks 
+        };
 
     const daeXml = exportToColladaDAE(
-      { ...GOLDEN_PROJECT.site, grossSiteArea: siteArea, setbacks: effectiveSetbacks },
+      targetSite,
       masses,
       filename.replace('.dae', ''),
       effectiveSetbacks
@@ -68,14 +100,21 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { site, masses, scenarioName, setbacks } = body;
 
+    if (!site || !masses || !Array.isArray(masses)) {
+      return NextResponse.json(
+        { error: 'Invalid request: "site" and "masses" are required for dynamic DAE export.' },
+        { status: 400 }
+      );
+    }
+
     const exportName = scenarioName || 'SitePilot_Scenario';
-    const filename = `${exportName}.dae`;
+    const filename = `${exportName.replace(/[^a-zA-Z0-9_-]/g, '_')}.dae`;
 
     const daeXml = exportToColladaDAE(
-      site || GOLDEN_PROJECT.site,
-      masses || GOLDEN_PROJECT.scenarios[1].masses,
+      site,
+      masses,
       exportName,
-      setbacks
+      setbacks || site.setbacks
     );
 
     return new NextResponse(daeXml, {

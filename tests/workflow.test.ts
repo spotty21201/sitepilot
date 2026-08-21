@@ -92,7 +92,7 @@ describe('SitePilot complete user journey', () => {
     expect(checkConstraintViolations(scenarioC.metrics, ZONING_LIMITS)).toMatchObject({
       hasViolations: true,
       warnings: expect.arrayContaining([
-        'Massing height (43.2m / 12 floors) exceeds Subzone R.9 maximum allowable height (32.0m / 8 floors) by 11.2m.',
+        'Massing height (43.2m / 12 floors) exceeds maximum allowable height (32.0m / 8 floors) by +11.2m.',
       ]),
     });
     expect(scenarioB.metrics.totalGFA).toBe(40400);

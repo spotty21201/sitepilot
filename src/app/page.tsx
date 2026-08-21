@@ -1,12 +1,26 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { DecisionRoomHeader } from '@/components/DecisionRoomHeader';
 import { DevelopmentWorkspace } from '@/features/development-3d/DevelopmentWorkspace';
 import { EvidenceLedger } from '@/components/EvidenceLedger';
 import { ScenarioControls } from '@/components/ScenarioControls';
 import { DecisionRoomSummary } from '@/components/DecisionRoomSummary';
+import { NewCaseModal } from '@/components/NewCaseModal';
+import { ScenarioComparisonModal } from '@/components/ScenarioComparisonModal';
+import { 
+  getCase, 
+  saveCase, 
+  listCases, 
+  createCase, 
+  deleteCase,
+  resetDemoCase, 
+  getActiveCaseId, 
+  setActiveCaseId,
+  duplicateScenarioInCase,
+  CreateCaseParams 
+} from '@/lib/storage/case-repository';
 import { 
   calculateDevelopmentMetrics, 
   fitMassesToBuildableEnvelope,
@@ -15,52 +29,169 @@ import {
   evaluateScenarioCompliance
 } from '@/lib/geometry/engine';
 import { Compass, ShieldCheck } from 'lucide-react';
-import { Project, DevelopmentScenario, BuildingMass } from '@/types';
+import { Project, DevelopmentScenario, BuildingMass, CaseSummary } from '@/types';
 
-export default function SitePilotDecisionRoom() {
-  const [project, setProject] = useState<Project>(() => {
-    // Initialize scenarios with canonical compliance reports
-    const initialScenarios = GOLDEN_PROJECT.scenarios.map(s => {
-      const pairwiseOverlap = calculateMassPairwiseIntersections(s.masses);
-      const complianceReport = evaluateScenarioCompliance(
-        GOLDEN_PROJECT.site.grossSiteArea,
-        s.assumptionsUsed.setbacks,
-        s.masses,
-        s.metrics,
-        pairwiseOverlap
-      );
-      return {
-        ...s,
-        complianceReport,
-        pairwiseOverlap,
-        status: complianceReport.status as DevelopmentScenario['status'],
-        warningMessage: complianceReport.primaryWarning
-      };
-    });
-
+function initializeProjectScenarios(rawProject: Project): Project {
+  const initialScenarios = rawProject.scenarios.map(s => {
+    const pairwiseOverlap = calculateMassPairwiseIntersections(s.masses);
+    const complianceReport = evaluateScenarioCompliance(
+      rawProject.site.grossSiteArea,
+      s.assumptionsUsed.setbacks,
+      s.masses,
+      s.metrics,
+      pairwiseOverlap,
+      {
+        scenarioName: s.name,
+        hasZoningEvidence: Boolean(rawProject.site.hasZoningEvidence),
+        maxFAR: rawProject.zoningLimits?.maxFAR,
+        maxCoveragePct: rawProject.zoningLimits?.maxCoveragePct,
+        minKDHPct: rawProject.zoningLimits?.minKDHPct,
+        maxHeightMeters: rawProject.zoningLimits?.maxHeightMeters,
+        maxFloors: rawProject.zoningLimits?.maxFloors,
+        zoningName: rawProject.zoningLimits?.zoneName,
+        frontageLength: rawProject.site.frontageLength
+      }
+    );
     return {
-      ...GOLDEN_PROJECT,
-      scenarios: initialScenarios
+      ...s,
+      complianceReport,
+      pairwiseOverlap,
+      status: complianceReport.status as DevelopmentScenario['status'],
+      warningMessage: complianceReport.primaryWarning
     };
   });
 
-  const [activeScenarioId, setActiveScenarioId] = useState<string>(GOLDEN_PROJECT.scenarios[1].id); // Default Scenario B (Preferred)
-  const [leftTab, setLeftTab] = useState<'DECISION' | 'EVIDENCE'>('DECISION');
+  return {
+    ...rawProject,
+    scenarios: initialScenarios
+  };
+}
 
-  // Handle Working Site Area Basis toggle (e.g. 16,850 m² vs 18,200 m²)
-  const handleSelectSiteArea = (newArea: number) => {
+function getInitialProject(): Project {
+  if (typeof window !== 'undefined') {
+    try {
+      const activeId = getActiveCaseId();
+      const loaded = getCase(activeId);
+      return initializeProjectScenarios(loaded);
+    } catch {
+      // Fallback
+    }
+  }
+  return initializeProjectScenarios(GOLDEN_PROJECT);
+}
+
+function getInitialCases(): CaseSummary[] {
+  if (typeof window !== 'undefined') {
+    try {
+      return listCases();
+    } catch {
+      // Fallback
+    }
+  }
+  return [{
+    id: GOLDEN_PROJECT.id,
+    name: GOLDEN_PROJECT.name,
+    address: GOLDEN_PROJECT.location.address,
+    grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
+    isTemplate: true,
+    createdAt: GOLDEN_PROJECT.createdAt,
+    updatedAt: GOLDEN_PROJECT.updatedAt
+  }];
+}
+
+export default function SitePilotDecisionRoom() {
+  const [project, setProject] = useState<Project>(getInitialProject);
+  const [activeScenarioId, setActiveScenarioId] = useState<string>(() => {
+    const initialProj = getInitialProject();
+    const pref = initialProj.scenarios.find(s => s.isPreferred) || initialProj.scenarios[0];
+    return pref?.id || 'scen-002';
+  });
+  const [leftTab, setLeftTab] = useState<'DECISION' | 'EVIDENCE'>('DECISION');
+  const [isNewCaseModalOpen, setIsNewCaseModalOpen] = useState(false);
+  const [casesList, setCasesList] = useState<CaseSummary[]>(getInitialCases);
+
+  // Helper to update project and immediately persist
+  const updateProjectState = useCallback((updater: (prev: Project) => Project) => {
     setProject(prev => {
+      const updated = updater(prev);
+      saveCase(updated);
+      return updated;
+    });
+  }, []);
+
+  // Case Switching Handler
+  const handleSelectCase = useCallback((id: string) => {
+    setActiveCaseId(id);
+    const loadedProj = getCase(id);
+    const initialized = initializeProjectScenarios(loadedProj);
+    setProject(initialized);
+    const preferredScen = initialized.scenarios.find(s => s.isPreferred) || initialized.scenarios[0];
+    if (preferredScen) {
+      setActiveScenarioId(preferredScen.id);
+    }
+    setCasesList(listCases());
+  }, []);
+
+  // New Case Creation Handler
+  const handleCreateCase = useCallback((params: CreateCaseParams) => {
+    const newProj = createCase(params);
+    const initialized = initializeProjectScenarios(newProj);
+    setProject(initialized);
+    const preferredScen = initialized.scenarios.find(s => s.isPreferred) || initialized.scenarios[0];
+    if (preferredScen) {
+      setActiveScenarioId(preferredScen.id);
+    }
+    setCasesList(listCases());
+  }, []);
+
+  // Reset Demo Case Handler
+  const handleResetDemo = useCallback(() => {
+    const reset = resetDemoCase();
+    const initialized = initializeProjectScenarios(reset);
+    setProject(initialized);
+    setActiveScenarioId(initialized.scenarios[1]?.id || initialized.scenarios[0].id);
+    setCasesList(listCases());
+  }, []);
+
+  // Delete Case Handler
+  const handleDeleteCase = useCallback((id: string) => {
+    deleteCase(id);
+    const activeId = getActiveCaseId();
+    const loadedProj = getCase(activeId);
+    const initialized = initializeProjectScenarios(loadedProj);
+    setProject(initialized);
+    const preferredScen = initialized.scenarios.find(s => s.isPreferred) || initialized.scenarios[0];
+    if (preferredScen) {
+      setActiveScenarioId(preferredScen.id);
+    }
+    setCasesList(listCases());
+  }, []);
+
+  // Handle Working Site Area Basis toggle
+  const handleSelectSiteArea = (newArea: number) => {
+    updateProjectState(prev => {
       const updatedSite = { ...prev.site, grossSiteArea: newArea };
       const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
-        const originalScen = GOLDEN_PROJECT.scenarios.find(s => s.id === scen.id) || scen;
-        const newMetrics = calculateDevelopmentMetrics(newArea, scen.masses, scen.assumptionsUsed.setbacks);
+        const originalScen = prev.scenarios.find(s => s.id === scen.id) || scen;
+        const newMetrics = calculateDevelopmentMetrics(newArea, scen.masses, scen.assumptionsUsed.setbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(scen.masses);
         const complianceReport = evaluateScenarioCompliance(
           newArea,
           scen.assumptionsUsed.setbacks,
           scen.masses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const updatedScenObj = {
@@ -90,15 +221,16 @@ export default function SitePilotDecisionRoom() {
 
   // Handle direct mass geometry updates from 3D Development Workspace
   const handleUpdateScenarioMasses = (scenarioId: string, updatedMasses: BuildingMass[]) => {
-    setProject(prev => {
+    updateProjectState(prev => {
       const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
         if (scen.id !== scenarioId) return scen;
 
-        const originalScen = GOLDEN_PROJECT.scenarios.find(s => s.id === scenarioId) || scen;
+        const originalScen = prev.scenarios.find(s => s.id === scenarioId) || scen;
         const newMetrics = calculateDevelopmentMetrics(
           prev.site.grossSiteArea, 
           updatedMasses, 
-          scen.assumptionsUsed.setbacks
+          scen.assumptionsUsed.setbacks,
+          prev.site.frontageLength
         );
         const pairwiseOverlap = calculateMassPairwiseIntersections(updatedMasses);
         const complianceReport = evaluateScenarioCompliance(
@@ -106,7 +238,18 @@ export default function SitePilotDecisionRoom() {
           scen.assumptionsUsed.setbacks,
           updatedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const tempScen: DevelopmentScenario = {
@@ -142,10 +285,10 @@ export default function SitePilotDecisionRoom() {
     param: 'floors' | 'frontSetback', 
     value: number
   ) => {
-    setProject(prev => {
+    updateProjectState(prev => {
       const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
         if (scen.id !== scenarioId) return scen;
-        const originalScen = GOLDEN_PROJECT.scenarios.find(s => s.id === scenarioId) || scen;
+        const originalScen = prev.scenarios.find(s => s.id === scenarioId) || scen;
 
         const updatedSetbacks = {
           ...scen.assumptionsUsed.setbacks,
@@ -169,14 +312,25 @@ export default function SitePilotDecisionRoom() {
           return mass;
         });
 
-        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, updatedMasses, updatedSetbacks);
+        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, updatedMasses, updatedSetbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(updatedMasses);
         const complianceReport = evaluateScenarioCompliance(
           prev.site.grossSiteArea,
           updatedSetbacks,
           updatedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const tempScen: DevelopmentScenario = {
@@ -213,31 +367,43 @@ export default function SitePilotDecisionRoom() {
 
   // One-Click Deterministic "Fit Massing to Setback" Action
   const handleFitMassingToEnvelope = (scenarioId: string) => {
-    setProject(prev => {
+    updateProjectState(prev => {
       const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
         if (scen.id !== scenarioId) return scen;
 
         const fittedMasses = fitMassesToBuildableEnvelope(
           prev.site.grossSiteArea, 
           scen.assumptionsUsed.setbacks, 
-          scen.masses
+          scen.masses,
+          prev.site.frontageLength
         );
 
-        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, fittedMasses, scen.assumptionsUsed.setbacks);
+        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, fittedMasses, scen.assumptionsUsed.setbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(fittedMasses);
         const complianceReport = evaluateScenarioCompliance(
           prev.site.grossSiteArea,
           scen.assumptionsUsed.setbacks,
           fittedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         return {
           ...scen,
           isFittedOverride: true,
           editClassification: 'FITTED_TO_SETBACK',
-          fitOverrideReason: `Shifted rearward to achieve 100% containment within ${scen.assumptionsUsed.setbacks.front}m setback envelope.`,
+          fitOverrideReason: `Shifted and resized to achieve 100% containment within ${scen.assumptionsUsed.setbacks.front}m setback envelope.`,
           originalMasses: scen.originalMasses || scen.masses,
           masses: fittedMasses,
           metrics: newMetrics,
@@ -254,27 +420,40 @@ export default function SitePilotDecisionRoom() {
 
   // Reset Scenario to Baseline Concept
   const handleResetScenario = (scenarioId: string) => {
-    const originalScenario = GOLDEN_PROJECT.scenarios.find(s => s.id === scenarioId);
-    if (!originalScenario) return;
+    updateProjectState(prev => {
+      const targetScenario = prev.scenarios.find(s => s.id === scenarioId);
+      if (!targetScenario) return prev;
 
-    setProject(prev => {
+      const baseMasses = targetScenario.originalMasses || targetScenario.masses;
+      const baselineMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, baseMasses, targetScenario.assumptionsUsed.setbacks, prev.site.frontageLength);
+      const pairwiseOverlap = calculateMassPairwiseIntersections(baseMasses);
+      const complianceReport = evaluateScenarioCompliance(
+        prev.site.grossSiteArea,
+        targetScenario.assumptionsUsed.setbacks,
+        baseMasses,
+        baselineMetrics,
+        pairwiseOverlap,
+        {
+          scenarioName: targetScenario.name,
+          hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+          maxFAR: prev.zoningLimits?.maxFAR,
+          maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+          minKDHPct: prev.zoningLimits?.minKDHPct,
+          maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+          maxFloors: prev.zoningLimits?.maxFloors,
+          zoningName: prev.zoningLimits?.zoneName,
+          frontageLength: prev.site.frontageLength
+        }
+      );
+
       const updatedScenarios = prev.scenarios.map(s => {
         if (s.id !== scenarioId) return s;
-        const baselineMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, originalScenario.masses, originalScenario.assumptionsUsed.setbacks);
-        const pairwiseOverlap = { hasOverlap: false, overlapVolumeM3: 0, overlaps: [] };
-        const complianceReport = evaluateScenarioCompliance(
-          prev.site.grossSiteArea,
-          originalScenario.assumptionsUsed.setbacks,
-          originalScenario.masses,
-          baselineMetrics,
-          pairwiseOverlap
-        );
-
         return {
-          ...originalScenario,
+          ...s,
           isFittedOverride: false,
           fitOverrideReason: undefined,
           editClassification: 'BASE_CONCEPT' as const,
+          masses: baseMasses,
           pairwiseOverlap,
           complianceReport,
           status: complianceReport.status as DevelopmentScenario['status'],
@@ -282,16 +461,38 @@ export default function SitePilotDecisionRoom() {
           metrics: baselineMetrics
         };
       });
+
       return { ...prev, scenarios: updatedScenarios };
     });
   };
+
+  // Duplicate Scenario Handler
+  const handleDuplicateScenario = (sourceScenarioId: string) => {
+    const updatedProject = duplicateScenarioInCase(project.id, sourceScenarioId);
+    const initialized = initializeProjectScenarios(updatedProject);
+    setProject(initialized);
+    const newScen = initialized.scenarios[initialized.scenarios.length - 1];
+    if (newScen) {
+      setActiveScenarioId(newScen.id);
+    }
+  };
+
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const activeScenario = project.scenarios.find(s => s.id === activeScenarioId) || project.scenarios[0];
 
   return (
     <div className="flex flex-col min-h-screen lg:h-screen w-full bg-[#0a0c10] text-slate-100 overflow-x-hidden select-none">
-      {/* Top Header */}
-      <DecisionRoomHeader project={project} />
+      {/* Top Header with Case Switcher */}
+      <DecisionRoomHeader 
+        project={project}
+        cases={casesList}
+        activeCaseId={project.id}
+        onSelectCase={handleSelectCase}
+        onOpenNewCaseModal={() => setIsNewCaseModalOpen(true)}
+        onResetDemo={handleResetDemo}
+        onDeleteCase={handleDeleteCase}
+      />
 
       {/* Main Responsive 3-Column Decision Workspace */}
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-y-auto lg:overflow-hidden">
@@ -346,16 +547,41 @@ export default function SitePilotDecisionRoom() {
         {/* Right Column: Scenarios & Development Metrics (3 cols) */}
         <section className="col-span-1 lg:col-span-3 min-h-[480px] lg:h-full overflow-hidden">
           <ScenarioControls
-            site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks }}
+            site={{ 
+              ...project.site, 
+              setbacks: activeScenario.assumptionsUsed.setbacks,
+              projectName: project.name,
+              address: project.location.address,
+              hasZoningEvidence: project.id === 'proj-001' || project.sources.some(s => s.status === 'PROCESSED')
+            }}
+            project={project}
             scenarios={project.scenarios}
             activeScenarioId={activeScenarioId}
             onSelectScenario={setActiveScenarioId}
             onUpdateScenarioParam={handleUpdateScenarioParam}
             onFitMassingToEnvelope={handleFitMassingToEnvelope}
             onResetScenario={handleResetScenario}
+            onOpenCompareModal={() => setIsCompareModalOpen(true)}
+            onDuplicateScenario={handleDuplicateScenario}
           />
         </section>
       </main>
+
+      {/* New Opportunity Modal */}
+      <NewCaseModal 
+        isOpen={isNewCaseModalOpen}
+        onClose={() => setIsNewCaseModalOpen(false)}
+        onCreateCase={handleCreateCase}
+      />
+
+      {/* Scenario Comparison Matrix Modal */}
+      <ScenarioComparisonModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        project={project}
+        activeScenarioId={activeScenarioId}
+        onSelectScenario={setActiveScenarioId}
+      />
     </div>
   );
 }

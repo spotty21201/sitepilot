@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { DevelopmentScenario, SiteGeometry, PlanningAssessment } from '@/types';
+import { DevelopmentScenario, SiteGeometry, PlanningAssessment, Project } from '@/types';
 import { checkSetbackEncroachments, exportToColladaDAE } from '@/lib/geometry/engine';
 import { 
   Building2, 
@@ -28,6 +28,9 @@ interface ScenarioControlsProps {
   onUpdateScenarioParam: (scenarioId: string, param: 'floors' | 'frontSetback', value: number) => void;
   onFitMassingToEnvelope: (scenarioId: string) => void;
   onResetScenario: (scenarioId: string) => void;
+  onOpenCompareModal?: () => void;
+  onDuplicateScenario?: (scenarioId: string) => void;
+  project?: Project;
 }
 
 export function ScenarioControls({
@@ -37,15 +40,20 @@ export function ScenarioControls({
   onSelectScenario,
   onUpdateScenarioParam,
   onFitMassingToEnvelope,
-  onResetScenario
+  onResetScenario,
+  onOpenCompareModal,
+  project
 }: ScenarioControlsProps) {
   const [copied, setCopied] = useState(false);
+  const [downloadedToast, setDownloadedToast] = useState<string | null>(null);
   const [showXmlModal, setShowXmlModal] = useState(false);
   const [rawXml, setRawXml] = useState('');
   const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
   const [assessment, setAssessment] = useState<PlanningAssessment | null>(null);
+  const [assessedSnapshot, setAssessedSnapshot] = useState<string | null>(null);
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
+  const [investorQuery, setInvestorQuery] = useState('');
   
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -53,6 +61,7 @@ export function ScenarioControls({
   if (activeScenarioId !== prevScenarioId) {
     setPrevScenarioId(activeScenarioId);
     setAssessment(null);
+    setAssessedSnapshot(null);
     setAssessmentError(null);
   }
 
@@ -60,20 +69,10 @@ export function ScenarioControls({
   const metrics = activeScenario.metrics;
   const currentSetback = activeScenario.assumptionsUsed.setbacks.front;
 
-  const baselineFloors = activeScenario.id === 'scen-001' ? 4 : activeScenario.id === 'scen-002' ? 8 : 12;
-  const baselineGFA = activeScenario.id === 'scen-001' ? 24000 : activeScenario.id === 'scen-002' ? 40400 : 50400;
-
   const isFittedToSetback = activeScenario.isFittedOverride === true || activeScenario.editClassification === 'FITTED_TO_SETBACK';
-  const isUserOverride = 
-    (metrics.totalFloors !== baselineFloors || 
-     activeScenario.assumptionsUsed.setbacks.front !== 10 ||
-     activeScenario.assumptionsUsed.setbacks.rear !== 6 ||
-     activeScenario.assumptionsUsed.setbacks.sideLeft !== 5 ||
-     activeScenario.assumptionsUsed.setbacks.sideRight !== 5 ||
-     activeScenario.editClassification === 'USER_GEOMETRY_EDIT' ||
-     activeScenario.editClassification === 'HEIGHT_OVERRIDE' ||
-     activeScenario.editClassification === 'PROGRAM_OVERRIDE') &&
-    !isFittedToSetback;
+  const isUserOverride = (activeScenario.editClassification === 'USER_GEOMETRY_EDIT' || 
+    activeScenario.editClassification === 'HEIGHT_OVERRIDE' || 
+    activeScenario.editClassification === 'PROGRAM_OVERRIDE') && !isFittedToSetback;
 
   const isOverridden = isUserOverride || isFittedToSetback;
   const hasCollision = activeScenario.pairwiseOverlap?.hasOverlap;
@@ -85,7 +84,9 @@ export function ScenarioControls({
     activeScenario.masses
   );
 
-  const exportFilename = `SitePilot_${activeScenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_')}_${metrics.totalFloors}Fl${isOverridden ? '_Override' : ''}.dae`;
+  const cleanProjectName = (site.projectName || 'SitePilot').split('—')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanScenarioName = activeScenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
+  const exportFilename = `${cleanProjectName}_${cleanScenarioName}_${metrics.totalFloors}Fl${isOverridden ? '_Override' : ''}.dae`;
 
   // Dynamic description deriving from live geometry
   const dynamicDescription = (() => {
@@ -95,12 +96,12 @@ export function ScenarioControls({
     if (isOutOfBounds) {
       return `⚠️ Out of Bounds: Massing extends ${metrics.outOfBoundsAreaM2?.toLocaleString()} m² beyond parcel perimeter.`;
     }
-    if (metrics.totalHeightMeters > 32.0) {
+    if (metrics.totalHeightMeters > 32.05) {
       const overrun = Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10;
-      return `⚠️ Non-compliant: Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 32m limit by ${overrun}m.`;
+      return `⚠️ Height Overrun: Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds allowable 32m limit by +${overrun}m.`;
     }
     if (encroachments.length > 0) {
-      return `⚠️ Non-compliant: ${encroachments[0].description}`;
+      return `⚠️ Setback Warning: ${encroachments[0].description}`;
     }
     return activeScenario.description;
   })();
@@ -115,7 +116,7 @@ export function ScenarioControls({
     );
   };
 
-  // Direct client-side blob download
+  // Direct client-side blob download with feedback toast
   const handleClientDownloadBlob = () => {
     const xml = generateLiveXml();
     const blob = new Blob([xml], { type: 'model/vnd.collada+xml;charset=utf-8' });
@@ -125,8 +126,15 @@ export function ScenarioControls({
     a.download = exportFilename;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    }, 1500);
+
+    setDownloadedToast(exportFilename);
+    setTimeout(() => setDownloadedToast(null), 4000);
   };
 
   const handleCopyXML = async () => {
@@ -141,16 +149,14 @@ export function ScenarioControls({
       } else {
         setShowXmlModal(true);
       }
-    } catch (e) {
-      console.warn('Clipboard API blocked, showing XML viewer modal:', e);
+    } catch {
       setShowXmlModal(true);
     }
   };
 
-  const handleOpenXmlModal = (e: React.MouseEvent<HTMLButtonElement>) => {
-    triggerRef.current = e.currentTarget;
-    const xml = generateLiveXml();
-    setRawXml(xml);
+  const handleOpenXmlModal = () => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    setRawXml(generateLiveXml());
     setShowXmlModal(true);
   };
 
@@ -158,12 +164,28 @@ export function ScenarioControls({
     setShowXmlModal(false);
     setTimeout(() => {
       triggerRef.current?.focus();
-    }, 0);
+    }, 50);
   }, []);
 
-  const handleGenerateAssessment = async () => {
+  const getCurrentSnapshot = useCallback(() => {
+    return `${activeScenario.id}-${metrics.totalGFA}-${metrics.totalFloors}-${metrics.totalHeightMeters}-${currentSetback}-${isFittedToSetback}-${(activeScenario.masses || []).map(m => `${m.id}:${m.position.x},${m.position.z}:${m.dimensions.width},${m.dimensions.length}`).join('|')}`;
+  }, [activeScenario.id, activeScenario.masses, currentSetback, isFittedToSetback, metrics.totalFloors, metrics.totalGFA, metrics.totalHeightMeters]);
+
+  const baseFloors = activeScenario.originalMasses 
+    ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
+    : metrics.totalFloors;
+  const baseGFA = activeScenario.originalMasses
+    ? activeScenario.originalMasses.reduce((acc, m) => acc + m.gfa, 0)
+    : metrics.totalGFA;
+
+  const isAssessmentStale = Boolean(assessment && assessedSnapshot && assessedSnapshot !== getCurrentSnapshot());
+
+  const handleGenerateAssessment = async (overrideQuery?: string) => {
     setIsLoadingAssessment(true);
     setAssessmentError(null);
+    const snapshot = getCurrentSnapshot();
+    const queryToSend = overrideQuery !== undefined ? overrideQuery : investorQuery;
+
     try {
       const res = await fetch('/api/assessment', {
         method: 'POST',
@@ -171,19 +193,17 @@ export function ScenarioControls({
         body: JSON.stringify({
           scenarioId: activeScenario.id,
           scenarioName: activeScenario.name,
-          floors: metrics.totalFloors,
-          heightMeters: metrics.totalHeightMeters,
-          heightCap: 32.0,
-          heightOverrun: metrics.totalHeightMeters > 32.0 ? Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10 : 0,
-          far: metrics.farKLB,
-          gfa: metrics.totalGFA,
-          siteCoverage: metrics.siteCoveragePercentage,
-          openSpace: metrics.openSpaceArea,
+          grossSiteArea: site.grossSiteArea,
           setbacks: activeScenario.assumptionsUsed.setbacks,
-          isOverridden: isOverridden,
-          hasCollision: hasCollision,
-          collisionVolume: activeScenario.pairwiseOverlap?.overlapVolumeM3 || 0,
-          encroachments: encroachments.map(e => ({ side: e.edge, description: e.description, encroachmentMeters: e.distanceMeters }))
+          masses: activeScenario.masses, // CRITICAL FIX: Pass masses array
+          projectName: site.projectName,
+          address: site.address,
+          hasZoningEvidence: Boolean(site.hasZoningEvidence),
+          zoningLimits: project?.zoningLimits,
+          existingAsset: project?.existingAsset,
+          valuation: project?.valuation,
+          expansionHeadroomGFA: project?.expansionHeadroomGFA,
+          userQuery: queryToSend.trim() || undefined
         })
       });
       const data = await res.json();
@@ -191,6 +211,7 @@ export function ScenarioControls({
         throw new Error(data.error || 'Failed to generate assessment');
       }
       setAssessment(data);
+      setAssessedSnapshot(snapshot);
     } catch (err) {
       setAssessmentError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -246,6 +267,22 @@ export function ScenarioControls({
 
   return (
     <div className="flex flex-col h-full bg-[#11141d] border border-[#232938] rounded-xl overflow-hidden shadow-lg select-none">
+      {/* Real Download Toast Notification */}
+      {downloadedToast && (
+        <div className="bg-emerald-950/90 border-b border-emerald-600/70 p-2.5 flex items-center justify-between text-xs text-emerald-200 animate-in fade-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="truncate">Saved <strong>{downloadedToast}</strong> to downloads.</span>
+          </div>
+          <button 
+            onClick={() => setDownloadedToast(null)}
+            className="text-emerald-400 hover:text-white text-xs px-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header & Export Actions */}
       <div className="p-3 border-b border-[#232938] bg-[#141824]">
         <div className="flex items-center justify-between mb-2.5">
@@ -255,6 +292,17 @@ export function ScenarioControls({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {onOpenCompareModal && (
+              <button
+                onClick={onOpenCompareModal}
+                title="Compare all scenarios side-by-side"
+                aria-label="Compare all scenarios side-by-side"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1e293b] hover:bg-[#283852] text-[#38bdf8] text-[11px] font-semibold border border-[#38bdf8]/40 shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                <span>Compare</span>
+              </button>
+            )}
+
             <button
               onClick={handleOpenXmlModal}
               title="Inspect & Copy Raw COLLADA XML"
@@ -288,7 +336,7 @@ export function ScenarioControls({
         </div>
 
         {/* Scenario Switcher Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#181d2a] rounded-lg border border-[#272f42]">
+        <div className={`grid gap-1.5 p-1 bg-[#181d2a] rounded-lg border border-[#272f42] grid-cols-${scenarios.length}`}>
           {scenarios.map((s) => {
             const isSelected = s.id === activeScenario.id;
             const sOrigFloors = s.id === 'scen-001' ? 4 : s.id === 'scen-002' ? 8 : 12;
@@ -305,14 +353,11 @@ export function ScenarioControls({
                     : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e2434]'
                 }`}
               >
-                <span className="block truncate">{s.name.split(':')[0]}</span>
-                {s.isPreferred ? (
-                  <span className="block text-[9px] text-sky-200 font-normal">Preferred · {s.metrics.totalFloors} Fl</span>
-                ) : sOverridden ? (
-                  <span className="block text-[9px] text-indigo-300 font-normal">{s.metrics.totalFloors} Fl [Override]</span>
-                ) : (
-                  <span className="block text-[9px] text-slate-400 font-normal">{s.metrics.totalFloors} Fl</span>
-                )}
+                <div className="truncate">{s.name.split('(')[0].replace('Scenario ', '')}</div>
+                <div className={`text-[9px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                  {s.metrics.totalFloors} Fl · {s.metrics.totalGFA.toLocaleString()} m²
+                  {sOverridden && ' *'}
+                </div>
               </button>
             );
           })}
@@ -370,7 +415,7 @@ export function ScenarioControls({
           <div className="p-2.5 bg-indigo-950/30 border border-indigo-800/50 rounded-lg space-y-1 text-xs">
             <div className="flex items-center justify-between text-slate-300 text-[11px]">
               <span className="text-slate-400">Base Concept:</span>
-              <span className="font-mono">{baselineFloors} Storeys ({baselineGFA.toLocaleString()} m² GFA)</span>
+              <span className="font-mono">{baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
             </div>
             <div className="flex items-center justify-between text-indigo-200 font-semibold text-[11px]">
               <span className="text-indigo-300">Working Geometry:</span>
@@ -379,7 +424,7 @@ export function ScenarioControls({
           </div>
         ) : (
           <div className="flex items-center justify-between text-[10px] text-slate-400 bg-[#161c28] px-2.5 py-1.5 rounded border border-[#222c40]">
-            <span>Base Concept: {baselineFloors} Storeys</span>
+            <span>Base Concept: {baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
             <span className="font-mono text-emerald-400 font-semibold">Active Baseline</span>
           </div>
         )}
@@ -457,7 +502,7 @@ export function ScenarioControls({
               />
               <div className="flex justify-between text-[9px] text-slate-500 font-mono mt-0.5">
                 <span>Min: 2 Fl</span>
-                <span className="text-amber-400 font-semibold">Subzone R.9 Cap: 8 Fl (32m)</span>
+                <span className="text-amber-400 font-semibold">Zoning Cap: 8 Fl (32m)</span>
                 <span>Max: 16 Fl</span>
               </div>
             </div>
@@ -465,7 +510,7 @@ export function ScenarioControls({
             {/* Front Setback Slider */}
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-slate-300">Front Setback (Teuku Umar Frontage)</span>
+                <span className="text-slate-300">Front Setback</span>
                 <span className="font-mono font-bold text-slate-100 bg-[#1f283d] px-2 py-0.5 rounded text-[11px]">
                   {currentSetback} Meters
                 </span>
@@ -514,54 +559,118 @@ export function ScenarioControls({
             Deterministic Yield Metrics
           </h4>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Total GFA</span>
-              <span className="text-base font-bold text-slate-100 font-mono">
-                {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
-              </span>
-            </div>
+          {(() => {
+            const maxFAR = project?.zoningLimits?.maxFAR ?? 3.20;
+            const maxCoverage = project?.zoningLimits?.maxCoveragePct ?? 55.0;
+            const hasZoningEvidence = Boolean(site.hasZoningEvidence);
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">FAR / KLB Ratio</span>
-              <span className={`text-base font-bold font-mono ${metrics.farKLB > 3.2 ? 'text-rose-400' : 'text-[#38bdf8]'}`}>
-                {metrics.farKLB.toFixed(2)}x
-              </span>
-              <span className="text-[9px] text-slate-500 block">Zoning Max: 3.20x</span>
-            </div>
+            return (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Total GFA</span>
+                  <span className="text-base font-bold text-slate-100 font-mono">
+                    {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                  </span>
+                </div>
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Site Coverage (KDB)</span>
-              <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > 55 ? 'text-rose-400' : 'text-slate-100'}`}>
-                {metrics.siteCoveragePercentage}%
-              </span>
-              <span className="text-[9px] text-slate-500 block">Zoning Max: 55%</span>
-            </div>
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">FAR / KLB Ratio</span>
+                  <span className={`text-base font-bold font-mono ${metrics.farKLB > maxFAR + 0.01 ? 'text-rose-400' : 'text-[#38bdf8]'}`}>
+                    {metrics.farKLB.toFixed(2)}x
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">
+                    {hasZoningEvidence ? 'Statutory Cap' : 'Target'}: {maxFAR.toFixed(2)}x
+                  </span>
+                </div>
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Unbuilt Site Area</span>
-              <span className="text-base font-bold text-emerald-400 font-mono">
-                {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
-              </span>
-              <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
-            </div>
-          </div>
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Site Coverage (KDB)</span>
+                  <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-rose-400' : 'text-slate-100'}`}>
+                    {metrics.siteCoveragePercentage}%
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">
+                    {hasZoningEvidence ? 'Statutory Limit' : 'Limit'}: {maxCoverage}%
+                  </span>
+                </div>
+
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Unbuilt Site Area</span>
+                  <span className="text-base font-bold text-emerald-400 font-mono">
+                    {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Evidence-Backed AI Planning Assessment */}
+        {/* Evidence-Backed AI Planning & Investment Advisor */}
         <div className="pt-2 border-t border-[#232938] space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-purple-300 text-xs font-bold uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span>AI Planning Advisor</span>
+              <span>AI Investment Advisor</span>
             </div>
             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800/60 text-purple-300">
               gemini-3.7-flash
             </span>
           </div>
 
+          {/* Interactive Investor Prompt Box */}
+          <div className="space-y-1.5 p-2 bg-[#141824] rounded-lg border border-[#263147]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Investor Inquiry / Custom Prompt
+            </label>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={investorQuery}
+                onChange={(e) => setInvestorQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoadingAssessment) {
+                    e.preventDefault();
+                    handleGenerateAssessment(investorQuery);
+                  }
+                }}
+                placeholder="e.g. Evaluate Rp 125.3B yield vs NJOP benchmark"
+                className="flex-1 bg-[#0c0f17] border border-[#252f44] rounded px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleGenerateAssessment(investorQuery)}
+                disabled={isLoadingAssessment}
+                className="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <span>Ask</span>
+              </button>
+            </div>
+
+            {/* Quick Prompt Chips */}
+            <div className="flex flex-wrap gap-1 pt-1">
+              {[
+                'Evaluate yield vs asking price',
+                'Analyze expansion headroom',
+                'Check KDH 20% & parking'
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => {
+                    setInvestorQuery(chip);
+                    handleGenerateAssessment(chip);
+                  }}
+                  disabled={isLoadingAssessment}
+                  className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e2436] hover:bg-[#28324a] text-purple-300 border border-purple-800/40 cursor-pointer transition-all"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
-            onClick={handleGenerateAssessment}
+            onClick={() => handleGenerateAssessment(investorQuery)}
             disabled={isLoadingAssessment}
             aria-label="Generate AI Planning Assessment"
             className="w-full py-2 px-3 bg-gradient-to-r from-purple-900/70 via-indigo-900/70 to-blue-900/70 hover:from-purple-800/90 hover:via-indigo-800/90 hover:to-blue-800/90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border border-purple-500/40 shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
@@ -574,19 +683,48 @@ export function ScenarioControls({
             ) : (
               <>
                 <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-                <span>Generate Planning Assessment</span>
+                <span>Generate Comprehensive Assessment</span>
               </>
             )}
           </button>
 
           {assessmentError && (
-            <div className="p-2.5 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300">
-              {assessmentError}
+            <div className="p-3 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300 space-y-2">
+              <div className="flex items-center gap-1.5 font-semibold text-rose-200">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>Assessment Request Failed</span>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                {assessmentError}
+              </p>
+              <button
+                onClick={() => handleGenerateAssessment()}
+                className="px-2.5 py-1 bg-rose-900/70 hover:bg-rose-800 text-white rounded text-[11px] font-semibold border border-rose-600/60 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Retry Assessment</span>
+              </button>
             </div>
           )}
 
           {assessment && (
             <div className="p-3 bg-[#151926] border border-[#2b374e] rounded-xl space-y-2 text-xs shadow-inner">
+              {isAssessmentStale && (
+                <div className="p-2 bg-amber-950/80 border border-amber-600/70 rounded-lg flex items-center justify-between gap-2 text-amber-200 text-[11px]">
+                  <div className="flex items-center gap-1.5 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>[STALE] Inputs changed since assessment</span>
+                  </div>
+                  <button
+                    onClick={() => handleGenerateAssessment()}
+                    disabled={isLoadingAssessment}
+                    className="px-2 py-0.5 bg-amber-800/80 hover:bg-amber-700 text-white rounded text-[10px] font-semibold cursor-pointer shrink-0"
+                  >
+                    Re-evaluate
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between pb-1.5 border-b border-[#222c40]">
                 <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Executive Verdict</span>
                 <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${

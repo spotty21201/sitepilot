@@ -62,6 +62,9 @@ export interface SiteGeometry {
   setbacks: Setbacks;
   frontageLength?: number;     // in meters
   accessRoadWidth?: number;    // in meters
+  address?: string;
+  projectName?: string;
+  hasZoningEvidence?: boolean;
   coordinateSystem: 'WGS84' | 'EPSG:3857';
   boundingBox?: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
@@ -140,7 +143,7 @@ export interface Assumption {
   parameter: string;           // e.g. "Maximum Height", "Front Setback", "FAR / KLB"
   workingValue: string | number;
   unit?: string;
-  source: string;              // e.g. "Standard Menteng Mixed-Use Rule of Thumb"
+  source: string;              // e.g. "Municipal Urban Planning Rule of Thumb"
   classification: EvidenceClassification;
   verificationStatus: 'VERIFIED' | 'UNVERIFIED' | 'CHALLENGED_BY_NEW_EVIDENCE';
   affectedScenarioIds: string[];
@@ -229,6 +232,10 @@ export interface DevelopmentScenario {
     statusPillLabel: string;
     isGreen: boolean;
     summaryText: string;
+    decisionText?: string;
+    recommendedAction?: string;
+    identifiedRisks?: string[];
+    assessmentStatus?: string;
     primaryWarning?: string;
     violations: string[];
   };
@@ -243,12 +250,69 @@ export interface DevelopmentScenario {
   updatedAt: string;
 }
 
+export type AreaProvenanceType = 
+  | 'VERIFIED_TITLE'            // e.g. BPN Certificate
+  | 'EXTRACTED_CLAIM'           // e.g. Broker Brochure
+  | 'CALCULATED_GEOMETRY'       // e.g. User drawn polygon
+  | 'USER_ENTERED_ASSUMPTION'   // e.g. Opportunity Intake Form
+  | 'ILLUSTRATIVE_STUDY';       // e.g. Generated massing model
+
+export interface AreaProvenance {
+  value: number;                  // Area in m²
+  sourceType: AreaProvenanceType;
+  sourceDocumentId?: string;
+  sourceName: string;             // e.g. "User Intake Form", "SHGB Certificate #1842"
+  confidence: ConfidenceLevel;
+  adoptedAt?: string;
+  adoptedBy?: string;
+  notes?: string;
+}
+
+export interface CaseSummary {
+  id: string;
+  name: string;
+  address: string;
+  grossSiteArea: number;
+  isTemplate?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExistingAssetInfo {
+  gfa: number;              // in m² (e.g. 3,760 m²)
+  floors?: number;          // e.g. 4 storeys (undefined if unconfirmed)
+  isFloorsAssumed?: boolean;
+  description?: string;     // e.g. "Operational Sharia Boutique Hotel"
+  currentStatus?: string;   // e.g. "Operational", "Vacant", "Underutilized"
+}
+
+export interface ProjectZoningLimits {
+  zoneCode?: string;        // e.g. "K.1" or "Subzone R.9"
+  zoneName?: string;        // e.g. "Perkantoran, Perdagangan dan Jasa"
+  maxFAR: number;           // e.g. 6.65
+  maxCoveragePct: number;   // e.g. 55.0%
+  minKDHPct?: number;       // e.g. 20.0%
+  maxKTBPct?: number;       // e.g. 55.0%
+  maxHeightMeters: number;  // e.g. 32.0m or 48.0m
+  maxFloors: number;        // e.g. 8 or 14 floors
+  setbacks: Setbacks;
+}
+
+export interface ValuationInfo {
+  askingPriceAmount: number;
+  askingPriceCurrency: string;
+  njopAmount?: number;
+  pricePerM2: number;
+  valuationBasisNotes?: string;
+}
+
 // ==========================================
 // 6. Project Aggregate Root (PRD Sec 11 & 35)
 // ==========================================
 export interface Project {
   id: string;
   name: string;
+  isTemplate?: boolean;        // If true, represents read-only Golden Project demonstration
   objective: string;           // e.g. "Evaluate site for luxury residential or boutique mixed-use"
   location: {
     address: string;
@@ -261,10 +325,15 @@ export interface Project {
     currency: string;          // e.g. "IDR", "USD"
     pricePerM2?: number;
   };
+  existingAsset?: ExistingAssetInfo;
+  zoningLimits?: ProjectZoningLimits;
+  valuation?: ValuationInfo;
+  expansionHeadroomGFA?: number;
   status: 'ACTIVE' | 'ARCHIVED';
   recommendation: RecommendationStatus;
   siteReadinessPercentage: number; // 0 - 100%
   evidenceConfidence: ConfidenceLevel;
+  areaProvenance?: AreaProvenance;
   
   site: SiteGeometry;
   sources: SourceDocument[];
@@ -286,18 +355,24 @@ export interface Project {
   updatedAt: string;
 }
 
-// ==========================================
-// 7. AI Planning Assessment Model
-// ==========================================
 export interface PlanningAssessment {
   scenarioId: string;
   scenarioName: string;
-  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_SETBACK' | 'COLLISION_DETECTED' | 'WARNING';
+  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
   decision: string;
   supportingEvidence: string[];
   identifiedRisks: string[];
   recommendedAction: string;
   model: string;
   generatedAt: string;
-  authenticated: boolean;
+  accessPath: 'same_origin_browser' | 'authorized_server';
+  userAuthenticated: boolean;
+  backendAuthenticated: boolean;
+  provenance?: {
+    model: string;
+    project: string;
+    vertexLocation: string;
+    revision?: string;
+    correlationId?: string;
+  };
 }

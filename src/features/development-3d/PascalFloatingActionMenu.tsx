@@ -5,20 +5,17 @@ import { BuildingMass, DevelopmentScenario, Setbacks } from '@/types';
 import { 
   Copy, 
   Trash2, 
-  Compass, 
-  Maximize2, 
   Plus, 
   Minus, 
   Sparkles, 
   Building2, 
-  Layers,
   X 
 } from 'lucide-react';
 
 interface PascalFloatingActionMenuProps {
   scenario: DevelopmentScenario;
   selectedMass: BuildingMass;
-  setbacks: Setbacks;
+  setbacks?: Setbacks;
   onUpdateMass: (massId: string, updates: Partial<BuildingMass>) => void;
   onDuplicateMass: (massId: string) => void;
   onDeleteMass: (massId: string) => void;
@@ -29,7 +26,6 @@ interface PascalFloatingActionMenuProps {
 export function PascalFloatingActionMenu({
   scenario,
   selectedMass,
-  setbacks,
   onUpdateMass,
   onDuplicateMass,
   onDeleteMass,
