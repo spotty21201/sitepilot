@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Project, CaseSummary } from '@/types';
 import { 
   MapPin, 
@@ -36,6 +36,18 @@ export function DecisionRoomHeader({
   onDeleteCase
 }: DecisionRoomHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!dropdownOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setDropdownOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dropdownOpen]);
 
   const getRecommendationBadge = (status: Project['recommendation']) => {
     switch (status) {

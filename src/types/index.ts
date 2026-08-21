@@ -278,6 +278,33 @@ export interface CaseSummary {
   updatedAt: string;
 }
 
+export interface ExistingAssetInfo {
+  gfa: number;              // in m² (e.g. 3,760 m²)
+  floors: number;           // e.g. 4 storeys
+  description?: string;     // e.g. "Operational Sharia Boutique Hotel"
+  currentStatus?: string;   // e.g. "Operational", "Vacant", "Underutilized"
+}
+
+export interface ProjectZoningLimits {
+  zoneCode?: string;        // e.g. "K.1" or "Subzone R.9"
+  zoneName?: string;        // e.g. "Perkantoran, Perdagangan dan Jasa"
+  maxFAR: number;           // e.g. 6.65
+  maxCoveragePct: number;   // e.g. 55.0%
+  minKDHPct?: number;       // e.g. 20.0%
+  maxKTBPct?: number;       // e.g. 55.0%
+  maxHeightMeters: number;  // e.g. 32.0m or 48.0m
+  maxFloors: number;        // e.g. 8 or 14 floors
+  setbacks: Setbacks;
+}
+
+export interface ValuationInfo {
+  askingPriceAmount: number;
+  askingPriceCurrency: string;
+  njopAmount?: number;
+  pricePerM2: number;
+  valuationBasisNotes?: string;
+}
+
 // ==========================================
 // 6. Project Aggregate Root (PRD Sec 11 & 35)
 // ==========================================
@@ -297,6 +324,10 @@ export interface Project {
     currency: string;          // e.g. "IDR", "USD"
     pricePerM2?: number;
   };
+  existingAsset?: ExistingAssetInfo;
+  zoningLimits?: ProjectZoningLimits;
+  valuation?: ValuationInfo;
+  expansionHeadroomGFA?: number;
   status: 'ACTIVE' | 'ARCHIVED';
   recommendation: RecommendationStatus;
   siteReadinessPercentage: number; // 0 - 100%

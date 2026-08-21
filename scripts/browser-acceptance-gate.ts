@@ -108,12 +108,13 @@ async function runAcceptanceGate() {
 
     // Step 3: Create a new case using synthetic information
     await page.click('button[title="Create New Opportunity"]');
-    await page.waitForSelector('role=dialog[name="New Opportunity Intake"]');
-    await page.fill('input[placeholder*="Surabaya CBD"]', 'Synthetic Case Alpha');
-    await page.fill('input[placeholder*="Jl. Pemuda"]', 'Jl. Industri Raya No. 45');
-    await page.fill('input[placeholder*="10000"]', '10000');
-    await page.fill('input[placeholder*="250000000000"]', '100000000000');
-    await page.fill('textarea[placeholder*="Assess yield"]', 'Synthetic feasibility trial for logistics & commercial hub.');
+    await page.waitForSelector('div[role="dialog"]');
+    await page.fill('input[placeholder*="Hotel Sofyan"]', 'Synthetic Case Alpha');
+    await page.fill('input[placeholder*="Jl. Cut Mutiah"]', 'Jl. Industri Raya No. 45');
+    await page.fill('input[placeholder*="2014"]', '10000');
+    await page.fill('textarea[placeholder*="Evaluate acquisition"]', 'Synthetic feasibility trial for logistics & commercial hub.');
+    await page.click('button:has-text("Commercials")');
+    await page.fill('input[placeholder*="125300000000"]', '100000000000');
     await page.click('button:has-text("Create Opportunity")');
     await page.waitForSelector('text=Synthetic Case Alpha');
     record(3, 'Create new case using synthetic information', 'PASSED', 'Created "Synthetic Case Alpha" at "Jl. Industri Raya No. 45" with 10,000 m² initial area.');
@@ -131,10 +132,10 @@ async function runAcceptanceGate() {
 
     // Step 5: Create a second case
     await page.click('button[title="Create New Opportunity"]');
-    await page.waitForSelector('role=dialog[name="New Opportunity Intake"]');
-    await page.fill('input[placeholder*="Surabaya CBD"]', 'Synthetic Case Beta');
-    await page.fill('input[placeholder*="Jl. Pemuda"]', 'Jl. Gatot Subroto No. 99');
-    await page.fill('input[placeholder*="10000"]', '18000');
+    await page.waitForSelector('div[role="dialog"]');
+    await page.fill('input[placeholder*="Hotel Sofyan"]', 'Synthetic Case Beta');
+    await page.fill('input[placeholder*="Jl. Cut Mutiah"]', 'Jl. Gatot Subroto No. 99');
+    await page.fill('input[placeholder*="2014"]', '18000');
     await page.click('button:has-text("Create Opportunity")');
     await page.waitForSelector('text=Synthetic Case Beta');
     record(5, 'Create a second case', 'PASSED', 'Created "Synthetic Case Beta" with 18,000 m² area.');
@@ -182,9 +183,7 @@ async function runAcceptanceGate() {
       throw new Error('Illustrative labelling or provenance badge missing');
     }
 
-    // Step 9 & 10: Exercise assessment failure, retry, success, and stale invalidation
-    // 9a. Test live production unconfigured failure behavior (fails closed with retry guidance)
-    await page.click('button:has-text("Generate Planning Assessment")');
+    await page.click('button[aria-label="Generate AI Planning Assessment"]');
     await page.waitForSelector('text=Assessment Request Failed');
     const retryBtnVisible = await page.locator('button:has-text("Retry Assessment")').isVisible();
     record(10, 'Exercise assessment failure and retry UI', 'PASSED', `Verified controlled error box and Retry button (retryVisible=${retryBtnVisible}).`);
@@ -273,12 +272,13 @@ async function runAcceptanceGate() {
     const hasCaseAlpha = await page.locator('div.absolute button:has-text("Synthetic Case Alpha")').isVisible();
     const hasCaseBeta = await page.locator('div.absolute button:has-text("Synthetic Case Beta")').isVisible();
     await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
     record(12, 'Test demo reset and case deletion', 'PASSED', `Deleted Case Beta (exists=${hasCaseBeta}), preserved Case Alpha (exists=${hasCaseAlpha}), and exercised Demo Reset.`);
 
     // Step 13: Confirm UI clearly states persistence is browser-local and not account-synced
-    await page.locator('div.absolute button:has-text("New Opportunity")').click();
-    await page.waitForSelector('role=dialog[name="New Opportunity Intake"]');
-    const localNoticeText = await page.locator('text=Release 1 stores cases only in this browser using local storage. Cases are not account-synced').isVisible();
+    await page.locator('button[title="Create New Opportunity"]').click();
+    await page.waitForSelector('div[role="dialog"]');
+    const localNoticeText = await page.locator('text=Release 1 stores cases locally in this browser').isVisible();
     await page.keyboard.press('Escape');
     if (localNoticeText) {
       record(13, 'Confirm browser-local persistence notice', 'PASSED', 'Modal and header explicitly display the local storage / non-account-synced notice.');

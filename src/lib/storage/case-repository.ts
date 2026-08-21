@@ -4,14 +4,15 @@
  * Standard: Invariants 1, 2, 3, 4, and 8.
  */
 
-import { Project, CaseSummary, DevelopmentScenario, BuildingMass } from '@/types';
+import { Project, CaseSummary, DevelopmentScenario, BuildingMass, AreaProvenanceType, Finding } from '@/types';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { 
   calculateDevelopmentMetrics, 
   calculateMassPairwiseIntersections, 
   evaluateScenarioCompliance,
   calculateBuildableArea,
-  getCanonicalParcelBounds
+  getCanonicalParcelBounds,
+  fitMassesToBuildableEnvelope
 } from '@/lib/geometry/engine';
 
 const STORAGE_VERSION = 'v1';
@@ -24,10 +25,45 @@ export interface CreateCaseParams {
   city?: string;
   country?: string;
   objective?: string;
-  askingPriceAmount?: number;
-  askingPriceCurrency?: string;
   grossSiteArea?: number;
   frontageLength?: number;
+
+  // Existing asset facts
+  existingBuildingGFA?: number;   // e.g. 3,760 m²
+  existingGFA?: number;
+  existingFloors?: number;        // e.g. 4 floors
+  existingAssetDescription?: string; // e.g. "Operational Sharia Boutique Hotel"
+  existingAssetStatus?: string;   // e.g. "Operational"
+
+  // Planning & Zoning Parameters
+  zoneCode?: string;              // e.g. "K.1"
+  zoneName?: string;              // e.g. "Perkantoran, Perdagangan dan Jasa"
+  statutoryMaxFAR?: number;       // e.g. 6.65
+  maxFAR?: number;
+  statutoryMaxCoveragePct?: number; // e.g. 55.0%
+  maxCoveragePct?: number;
+  statutoryMinKDHPct?: number;    // e.g. 20.0%
+  minKDHPct?: number;
+  statutoryMaxKTBPct?: number;    // e.g. 55.0%
+  statutoryMaxHeightMeters?: number; // e.g. 32.0m or 48.0m
+  maxHeightMeters?: number;
+  statutoryMaxFloors?: number;    // e.g. 8 or 14 floors
+  maxFloors?: number;
+  setbackFront?: number;
+  setbackRear?: number;
+  setbackSideLeft?: number;
+  setbackSideRight?: number;
+  setbacks?: { front: number; rear: number; sideLeft: number; sideRight: number };
+
+  // Valuation & Commercial
+  askingPriceAmount?: number;     // e.g. 125300000000 (Rp 125.3B)
+  askingPriceCurrency?: string;   // e.g. "IDR"
+  njopAmount?: number;            // e.g. 95000000000 (Rp 95B)
+  valuationBasisNotes?: string;
+
+  // Provenance
+  provenanceType?: AreaProvenanceType;
+  hasZoningEvidence?: boolean;
 }
 
 function isBrowser(): boolean {
@@ -122,18 +158,16 @@ export function getCase(id: string): Project {
 }
 
 export function saveCase(project: Project): void {
-  if (!isBrowser()) return;
   const stored = getStoredCasesMap();
-  const updatedProject = {
+  stored[project.id] = {
     ...project,
     updatedAt: new Date().toISOString()
   };
-  stored[project.id] = updatedProject;
   saveStoredCasesMap(stored);
 }
 
 export function deleteCase(id: string): void {
-  if (!isBrowser() || id === GOLDEN_PROJECT.id) return;
+  if (id === GOLDEN_PROJECT.id) return;
   const stored = getStoredCasesMap();
   delete stored[id];
   saveStoredCasesMap(stored);
@@ -143,14 +177,16 @@ export function deleteCase(id: string): void {
   }
 }
 
-export function resetDemoCase(): Project {
+export function resetDemo(): Project {
   if (isBrowser()) {
     const stored = getStoredCasesMap();
-    delete stored[GOLDEN_PROJECT.id];
+    stored[GOLDEN_PROJECT.id] = GOLDEN_PROJECT;
     saveStoredCasesMap(stored);
   }
   return GOLDEN_PROJECT;
 }
+
+export const resetDemoCase = resetDemo;
 
 /**
  * Creates a clean, trustworthy initial case with explicit USER_ENTERED_ASSUMPTION provenance.
@@ -168,16 +204,28 @@ export function createCase(params: CreateCaseParams): Project {
     : Math.max(20, Math.round(Math.sqrt(grossSiteArea * 0.75) * 10) / 10);
 
   const defaultSetbacks = {
-    front: 8,
-    rear: 5,
-    sideLeft: 4,
-    sideRight: 4
+    front: params.setbacks?.front ?? params.setbackFront ?? 8,
+    rear: params.setbacks?.rear ?? params.setbackRear ?? 5,
+    sideLeft: params.setbacks?.sideLeft ?? params.setbackSideLeft ?? 4,
+    sideRight: params.setbacks?.sideRight ?? params.setbackSideRight ?? 4
   };
 
   const bounds = getCanonicalParcelBounds(grossSiteArea, defaultSetbacks, standardFrontage);
   const netBuildableArea = calculateBuildableArea(grossSiteArea, defaultSetbacks, standardFrontage);
 
-  // Generate 2 clean illustrative study scenarios scaled to the site area
+  // Planning & Zoning Limits
+  const maxFAR = params.maxFAR ?? params.statutoryMaxFAR ?? 3.20;
+  const maxCoveragePct = params.maxCoveragePct ?? params.statutoryMaxCoveragePct ?? 55.0;
+  const minKDHPct = params.minKDHPct ?? params.statutoryMinKDHPct ?? 20.0;
+  const maxFloors = params.maxFloors ?? params.statutoryMaxFloors ?? (maxFAR > 5.0 ? 14 : 8);
+  const maxHeightMeters = params.maxHeightMeters ?? params.statutoryMaxHeightMeters ?? (maxFloors * 3.5 + 2.0);
+  const maxGFA = Math.round(grossSiteArea * maxFAR);
+  const rawExistingGFA = params.existingGFA ?? params.existingBuildingGFA;
+  const existingGFA = rawExistingGFA ? Math.round(rawExistingGFA) : undefined;
+  const existingFloors = params.existingFloors ?? 4;
+  const expansionHeadroomGFA = existingGFA ? Math.max(0, maxGFA - existingGFA) : undefined;
+
+  // Determine footprint sizing scaled to parcel buildable dimensions
   const podiumWidth = Math.max(15, Math.round(bounds.buildableWidth * 0.75 * 10) / 10);
   const podiumLength = Math.max(15, Math.round(bounds.buildableLength * 0.65 * 10) / 10);
   const podiumFootprint = Math.round(podiumWidth * podiumLength);
@@ -186,8 +234,32 @@ export function createCase(params: CreateCaseParams): Project {
   const towerLength = Math.max(12, Math.round(podiumLength * 0.6 * 10) / 10);
   const towerFootprint = Math.round(towerWidth * towerLength);
 
-  // Scenario A: Low-Rise Study (4 Storeys)
-  const massesA: BuildingMass[] = [
+  // ----------------------------------------------------
+  // SCENARIO A: Existing Asset Baseline / Low-Rise Concept
+  // ----------------------------------------------------
+  const targetFootprintA = existingGFA ? Math.round(existingGFA / existingFloors) : podiumFootprint;
+  const massAWidth = Math.min(bounds.buildableWidth * 0.85, Math.max(15, Math.round(Math.sqrt(targetFootprintA * 0.85) * 10) / 10));
+  const massALength = Math.min(bounds.buildableLength * 0.85, Math.max(15, Math.round((targetFootprintA / massAWidth) * 10) / 10));
+
+  const massesA: BuildingMass[] = existingGFA ? [
+    {
+      id: `mass-${caseId}-a1`,
+      name: params.existingAssetDescription || 'Existing Hotel Structure',
+      type: 'GENERAL',
+      footprintArea: targetFootprintA,
+      floors: existingFloors,
+      floorToFloorHeight: 3.5,
+      height: existingFloors * 3.5,
+      gfa: existingGFA,
+      program: 'HOTEL',
+      position: { x: 0, y: 0, z: 0 },
+      dimensions: { 
+        width: massAWidth, 
+        length: massALength, 
+        height: existingFloors * 3.5 
+      }
+    }
+  ] : [
     {
       id: `mass-${caseId}-a1`,
       name: 'Main Block',
@@ -203,41 +275,104 @@ export function createCase(params: CreateCaseParams): Project {
     }
   ];
 
-  const metricsA = calculateDevelopmentMetrics(grossSiteArea, massesA, defaultSetbacks);
-  const overlapA = calculateMassPairwiseIntersections(massesA);
-  const complianceA = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesA, metricsA, overlapA, {
-    scenarioName: 'Scenario A: Baseline Concept',
-    hasZoningEvidence: false
+  const fittedMassesA = fitMassesToBuildableEnvelope(grossSiteArea, defaultSetbacks, massesA, standardFrontage);
+  const metricsA = calculateDevelopmentMetrics(grossSiteArea, fittedMassesA, defaultSetbacks, standardFrontage);
+  const overlapA = calculateMassPairwiseIntersections(fittedMassesA);
+  const complianceA = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesA, metricsA, overlapA, {
+    scenarioName: existingGFA ? `Scenario A: Existing Asset Baseline (${existingGFA.toLocaleString()} m²)` : 'Scenario A: Baseline Concept',
+    hasZoningEvidence: Boolean(params.hasZoningEvidence),
+    maxFAR,
+    maxCoveragePct,
+    maxHeightMeters,
+    maxFloors
   });
 
   const scenarioA: DevelopmentScenario = {
     id: `scen-${caseId}-01`,
     projectId: caseId,
-    name: 'Scenario A: Baseline Concept',
-    description: 'Initial 4-storey commercial study envelope conforming to standard setbacks.',
+    name: existingGFA ? `Scenario A: Existing Asset Baseline (${existingGFA.toLocaleString()} m²)` : 'Scenario A: Baseline Concept',
+    description: existingGFA 
+      ? `Preserves existing ${existingGFA.toLocaleString()} m² operational asset (${existingFloors} floors) with zero expansion capital expenditure.`
+      : 'Initial 4-storey commercial study envelope conforming to standard setbacks.',
     isPreferred: false,
     status: complianceA.status as DevelopmentScenario['status'],
     complianceReport: complianceA,
     pairwiseOverlap: overlapA,
     editClassification: 'BASE_CONCEPT',
-    masses: massesA,
+    masses: fittedMassesA,
     metrics: metricsA,
     assumptionsUsed: {
-      heightFloors: 4,
-      heightMeters: 14.0,
-      targetFAR: 1.5,
-      targetCoverageKDB: 40.0,
+      heightFloors: metricsA.totalFloors,
+      heightMeters: metricsA.totalHeightMeters,
+      targetFAR: metricsA.farKLB,
+      targetCoverageKDB: metricsA.siteCoveragePercentage,
       setbacks: defaultSetbacks,
-      unverifiedAssumptionsCount: 2
+      unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
-    risks: ['Planning parameters unverified against local zoning regulation.'],
-    opportunities: ['Moderate scale enables rapid approval feasibility.'],
+    risks: ['Preserves baseline without capitalizing on permissible statutory expansion headroom.'],
+    opportunities: ['Immediate operational cashflow without construction disruption.'],
     createdAt: now,
     updatedAt: now
   };
 
-  // Scenario B: Mid-Rise Mixed-Use Study (8 Storeys, Podium + Tower)
-  const massesB: BuildingMass[] = [
+  const buildableAreaM2 = bounds.netBuildableArea;
+
+  // ----------------------------------------------------
+  // SCENARIO B: Phased Expansion / Target Scheme (Preferred)
+  // ----------------------------------------------------
+  const targetExpansionGFA = existingGFA && expansionHeadroomGFA 
+    ? Math.round(existingGFA + expansionHeadroomGFA * 0.65)
+    : (podiumFootprint * 2 + towerFootprint * 6);
+
+  const footprintB1 = existingGFA ? Math.min(Math.round(existingGFA / existingFloors), Math.round(buildableAreaM2 * 0.45)) : podiumFootprint;
+  const widthB1 = Math.min(bounds.buildableWidth * 0.45, Math.max(12, Math.round(Math.sqrt(footprintB1 * 0.75) * 10) / 10));
+  const lengthB1 = Math.min(bounds.buildableLength * 0.85, Math.max(12, Math.round((footprintB1 / widthB1) * 10) / 10));
+
+  const gfaExpansion = existingGFA ? Math.max(1000, targetExpansionGFA - (widthB1 * lengthB1 * existingFloors)) : towerFootprint * 6;
+  const floorsB2 = Math.min(maxFloors, 8);
+  const footprintB2 = Math.round(gfaExpansion / floorsB2);
+  const widthB2 = Math.min(bounds.buildableWidth * 0.45, Math.max(12, Math.round(Math.sqrt(footprintB2 * 0.75) * 10) / 10));
+  const lengthB2 = Math.min(bounds.buildableLength * 0.85, Math.max(12, Math.round((footprintB2 / widthB2) * 10) / 10));
+
+  const posX_B1 = -Math.round((widthB1 / 2 + 1.0) * 10) / 10;
+  const posX_B2 = Math.round((widthB2 / 2 + 1.0) * 10) / 10;
+
+  const massesB: BuildingMass[] = existingGFA ? [
+    {
+      id: `mass-${caseId}-b1`,
+      name: 'Existing Hotel Wing',
+      type: 'PODIUM',
+      footprintArea: Math.round(widthB1 * lengthB1),
+      floors: existingFloors,
+      floorToFloorHeight: 3.5,
+      height: existingFloors * 3.5,
+      gfa: Math.round(widthB1 * lengthB1 * existingFloors),
+      program: 'HOTEL',
+      position: { x: posX_B1, y: 0, z: 0 },
+      dimensions: { 
+        width: widthB1, 
+        length: lengthB1, 
+        height: existingFloors * 3.5 
+      }
+    },
+    {
+      id: `mass-${caseId}-b2`,
+      name: 'New Lifestyle Tower Addition',
+      type: 'TOWER',
+      footprintArea: Math.round(widthB2 * lengthB2),
+      floors: floorsB2,
+      floorToFloorHeight: 3.5,
+      height: floorsB2 * 3.5,
+      gfa: Math.round(widthB2 * lengthB2 * floorsB2),
+      program: 'MIXED_USE',
+      position: { x: posX_B2, y: 0, z: 0 },
+      dimensions: { 
+        width: widthB2, 
+        length: lengthB2, 
+        height: floorsB2 * 3.5 
+      }
+    }
+  ] : [
     {
       id: `mass-${caseId}-b1`,
       name: 'Retail Podium',
@@ -266,38 +401,204 @@ export function createCase(params: CreateCaseParams): Project {
     }
   ];
 
-  const metricsB = calculateDevelopmentMetrics(grossSiteArea, massesB, defaultSetbacks);
-  const overlapB = calculateMassPairwiseIntersections(massesB);
-  const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesB, metricsB, overlapB, {
-    scenarioName: 'Scenario B: Mixed-Use Option (Preferred)',
-    hasZoningEvidence: false
+  const fittedMassesB = fitMassesToBuildableEnvelope(grossSiteArea, defaultSetbacks, massesB, standardFrontage);
+  const metricsB = calculateDevelopmentMetrics(grossSiteArea, fittedMassesB, defaultSetbacks, standardFrontage);
+  const overlapB = calculateMassPairwiseIntersections(fittedMassesB);
+  const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesB, metricsB, overlapB, {
+    scenarioName: existingGFA ? `Scenario B: Phased Expansion (${targetExpansionGFA.toLocaleString()} m²)` : 'Scenario B: Phased Mixed-Use Development',
+    hasZoningEvidence: Boolean(params.hasZoningEvidence),
+    maxFAR,
+    maxCoveragePct,
+    maxHeightMeters,
+    maxFloors
   });
 
   const scenarioB: DevelopmentScenario = {
     id: `scen-${caseId}-02`,
     projectId: caseId,
-    name: 'Scenario B: Mixed-Use Option (Preferred)',
-    description: '8-storey concept featuring 2-storey retail podium and 6-storey upper commercial block.',
+    name: existingGFA ? `Scenario B: Phased Expansion (${targetExpansionGFA.toLocaleString()} m²)` : 'Scenario B: Phased Mixed-Use Development',
+    description: existingGFA
+      ? `Adds ${((targetExpansionGFA - existingGFA)).toLocaleString()} m² of high-yield lifestyle & hospitality space while retaining existing operations.`
+      : 'Balanced phased density scheme with active ground-floor retail and 6 storeys of commercial suites.',
     isPreferred: true,
     status: complianceB.status as DevelopmentScenario['status'],
     complianceReport: complianceB,
     pairwiseOverlap: overlapB,
     editClassification: 'BASE_CONCEPT',
-    masses: massesB,
+    masses: fittedMassesB,
     metrics: metricsB,
     assumptionsUsed: {
-      heightFloors: 8,
-      heightMeters: 29.0,
-      targetFAR: 2.5,
-      targetCoverageKDB: 45.0,
+      heightFloors: metricsB.totalFloors,
+      heightMeters: metricsB.totalHeightMeters,
+      targetFAR: metricsB.farKLB,
+      targetCoverageKDB: metricsB.siteCoveragePercentage,
       setbacks: defaultSetbacks,
-      unverifiedAssumptionsCount: 2
+      unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
-    risks: ['Pending formal zoning confirmation for 8 storeys.'],
-    opportunities: ['Optimizes site capacity across commercial and retail programs.'],
+    risks: ['Phased integration requires careful structural and access coordination.'],
+    opportunities: ['Strongest risk-adjusted financial yield and operational continuity.'],
     createdAt: now,
     updatedAt: now
   };
+
+  // ----------------------------------------------------
+  // SCENARIO C: Maximum Statutory Buildout (Full KLB Envelope)
+  // ----------------------------------------------------
+  const towerFloorsC = Math.min(maxFloors, 14);
+  const towerHeightC = towerFloorsC * 3.5;
+  const targetFootprintC = Math.min(Math.round(buildableAreaM2 * 0.85), Math.round(maxGFA / towerFloorsC));
+  const widthC = Math.min(bounds.buildableWidth * 0.85, Math.max(15, Math.round(Math.sqrt(targetFootprintC * 0.85) * 10) / 10));
+  const lengthC = Math.min(bounds.buildableLength * 0.85, Math.max(15, Math.round((targetFootprintC / widthC) * 10) / 10));
+
+  const massesC: BuildingMass[] = [
+    {
+      id: `mass-${caseId}-c1`,
+      name: 'Integrated Podium & Tower',
+      type: 'GENERAL',
+      footprintArea: Math.round(widthC * lengthC),
+      floors: towerFloorsC,
+      floorToFloorHeight: 3.5,
+      height: towerHeightC,
+      gfa: Math.round(widthC * lengthC * towerFloorsC),
+      program: 'MIXED_USE',
+      position: { x: 0, y: 0, z: 0 },
+      dimensions: { 
+        width: widthC, 
+        length: lengthC, 
+        height: towerHeightC 
+      }
+    }
+  ];
+
+  const fittedMassesC = fitMassesToBuildableEnvelope(grossSiteArea, defaultSetbacks, massesC, standardFrontage);
+  const metricsC = calculateDevelopmentMetrics(grossSiteArea, fittedMassesC, defaultSetbacks, standardFrontage);
+  const overlapC = calculateMassPairwiseIntersections(fittedMassesC);
+  const complianceC = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesC, metricsC, overlapC, {
+    scenarioName: `Scenario C: Maximum Statutory Buildout (${maxGFA.toLocaleString()} m² · KLB ${maxFAR.toFixed(2)}x)`,
+    hasZoningEvidence: Boolean(params.hasZoningEvidence),
+    maxFAR,
+    maxCoveragePct,
+    maxHeightMeters,
+    maxFloors
+  });
+
+  const scenarioC: DevelopmentScenario = {
+    id: `scen-${caseId}-03`,
+    projectId: caseId,
+    name: `Scenario C: Maximum Statutory Buildout (${maxGFA.toLocaleString()} m² · KLB ${maxFAR.toFixed(2)}x)`,
+    description: `Full statutory density redevelopment maximizing permissible ${maxFAR.toFixed(2)}x KLB envelope (${maxGFA.toLocaleString()} m² GFA across ${towerFloorsC} storeys).`,
+    isPreferred: false,
+    status: complianceC.status as DevelopmentScenario['status'],
+    complianceReport: complianceC,
+    pairwiseOverlap: overlapC,
+    editClassification: 'BASE_CONCEPT',
+    masses: fittedMassesC,
+    metrics: metricsC,
+    assumptionsUsed: {
+      heightFloors: towerFloorsC,
+      heightMeters: towerHeightC,
+      targetFAR: maxFAR,
+      targetCoverageKDB: metricsC.siteCoveragePercentage,
+      setbacks: defaultSetbacks,
+      unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
+    },
+    risks: ['Demands total demolition and high construction capital expenditure.'],
+    opportunities: ['Maximizes allowable real estate asset value under statutory municipal limits.'],
+    createdAt: now,
+    updatedAt: now
+  };
+
+  // Construct structured initial findings based on user-entered facts
+  const findings: Finding[] = [
+    {
+      id: `fnd-${caseId}-01`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Opportunity Intake Form',
+      statement: `Registered land parcel area stated as ${grossSiteArea.toLocaleString()} m² with ${standardFrontage}m frontage width.`,
+      category: 'PHYSICAL_SURVEY',
+      classification: params.provenanceType === 'VERIFIED_TITLE' ? 'FACT' : 'ASSUMPTION',
+      confidence: params.provenanceType === 'VERIFIED_TITLE' ? 'HIGH' : 'LOW',
+      extractedValue: { numericValue: grossSiteArea, unit: 'm²', key: 'gross_site_area' },
+      createdAt: now
+    }
+  ];
+
+  if (existingGFA) {
+    findings.push({
+      id: `fnd-${caseId}-02`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Asset Inventory Records',
+      statement: `Existing building on parcel comprises ${existingGFA.toLocaleString()} m² GFA across ${existingFloors} storeys (${params.existingAssetDescription || 'Structure'}, status: ${params.existingAssetStatus || 'Operational'}).`,
+      category: 'MARKET_COMMERCIAL',
+      classification: 'FACT',
+      confidence: 'MEDIUM',
+      extractedValue: { numericValue: existingGFA, unit: 'm²', key: 'existing_building_gfa' },
+      createdAt: now
+    });
+  }
+
+  if (params.statutoryMaxFAR) {
+    findings.push({
+      id: `fnd-${caseId}-03`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Zoning & Planning Information',
+      statement: `Municipal planning zoning specifies ${params.zoneCode || 'K.1'} (${params.zoneName || 'Commercial'}) with statutory KLB/FAR cap of ${maxFAR.toFixed(2)}x (Yield: ${maxGFA.toLocaleString()} m² maximum GFA, expansion headroom: ${(expansionHeadroomGFA || maxGFA).toLocaleString()} m²).`,
+      category: 'ZONING_PLANNING',
+      classification: params.hasZoningEvidence ? 'FACT' : 'CLAIM',
+      confidence: params.hasZoningEvidence ? 'HIGH' : 'LOW',
+      extractedValue: { numericValue: maxFAR, unit: 'FAR', key: 'max_far' },
+      createdAt: now
+    });
+  }
+
+  if (params.statutoryMinKDHPct) {
+    findings.push({
+      id: `fnd-${caseId}-04`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Zoning & Environmental Regulation',
+      statement: `Environmental stormwater and open space bylaws require minimum ${minKDHPct}% Koefisien Daerah Hijau (KDH Green Space).`,
+      category: 'ENVIRONMENTAL_TOPOGRAPHY',
+      classification: 'ASSUMPTION',
+      confidence: 'LOW',
+      extractedValue: { numericValue: minKDHPct, unit: '%', key: 'min_kdh' },
+      createdAt: now
+    });
+  }
+
+  if (params.askingPriceAmount) {
+    const derivedPricePerM2 = Math.round(params.askingPriceAmount / grossSiteArea);
+    findings.push({
+      id: `fnd-${caseId}-05`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Commercial Offering Terms',
+      statement: `Asking price stated at Rp ${(params.askingPriceAmount / 1e9).toFixed(1)} Billion (~Rp ${(derivedPricePerM2 / 1e6).toFixed(1)}M/m² land basis).`,
+      category: 'MARKET_COMMERCIAL',
+      classification: 'CLAIM',
+      confidence: 'LOW',
+      extractedValue: { numericValue: params.askingPriceAmount, unit: 'IDR', key: 'asking_price' },
+      createdAt: now
+    });
+  }
+
+  if (params.njopAmount) {
+    findings.push({
+      id: `fnd-${caseId}-06`,
+      projectId: caseId,
+      sourceId: 'src-intake-01',
+      sourceName: 'Tax Assessment Notice (PBB/NJOP)',
+      statement: `Government tax appraisal benchmark (NJOP) recorded at Rp ${(params.njopAmount / 1e9).toFixed(1)} Billion (~Rp ${(Math.round(params.njopAmount / grossSiteArea) / 1e6).toFixed(1)}M/m²).`,
+      category: 'MARKET_COMMERCIAL',
+      classification: 'FACT',
+      confidence: 'MEDIUM',
+      extractedValue: { numericValue: params.njopAmount, unit: 'IDR', key: 'njop' },
+      createdAt: now
+    });
+  }
 
   const newProject: Project = {
     id: caseId,
@@ -315,17 +616,42 @@ export function createCase(params: CreateCaseParams): Project {
       currency: params.askingPriceCurrency || 'IDR',
       pricePerM2: Math.round(params.askingPriceAmount / grossSiteArea)
     } : undefined,
+    existingAsset: existingGFA ? {
+      gfa: existingGFA,
+      floors: existingFloors,
+      description: params.existingAssetDescription || 'Operational Structure',
+      currentStatus: params.existingAssetStatus || 'Operational'
+    } : undefined,
+    zoningLimits: {
+      zoneCode: params.zoneCode || 'K.1',
+      zoneName: params.zoneName || 'Perkantoran, Perdagangan dan Jasa',
+      maxFAR,
+      maxCoveragePct,
+      minKDHPct,
+      maxKTBPct: params.statutoryMaxKTBPct || 55.0,
+      maxHeightMeters,
+      maxFloors,
+      setbacks: defaultSetbacks
+    },
+    valuation: params.askingPriceAmount ? {
+      askingPriceAmount: params.askingPriceAmount,
+      askingPriceCurrency: params.askingPriceCurrency || 'IDR',
+      njopAmount: params.njopAmount,
+      pricePerM2: Math.round(params.askingPriceAmount / grossSiteArea),
+      valuationBasisNotes: params.valuationBasisNotes
+    } : undefined,
+    expansionHeadroomGFA,
     status: 'ACTIVE',
     recommendation: 'INVESTIGATE',
     siteReadinessPercentage: 25,
-    evidenceConfidence: 'UNVERIFIED',
+    evidenceConfidence: params.hasZoningEvidence ? 'MEDIUM' : 'UNVERIFIED',
     areaProvenance: {
       value: grossSiteArea,
-      sourceType: 'USER_ENTERED_ASSUMPTION',
+      sourceType: params.provenanceType || 'USER_ENTERED_ASSUMPTION',
       sourceName: 'Opportunity Intake Form',
-      confidence: 'UNVERIFIED',
+      confidence: params.provenanceType === 'VERIFIED_TITLE' ? 'HIGH' : 'UNVERIFIED',
       adoptedAt: now,
-      notes: 'Initial site area entered during new opportunity intake'
+      notes: 'Initial site parameters recorded during opportunity creation.'
     },
     site: {
       grossSiteArea,
@@ -333,6 +659,9 @@ export function createCase(params: CreateCaseParams): Project {
       coordinateSystem: 'WGS84',
       frontageLength: standardFrontage,
       accessRoadWidth: 8.0,
+      address: params.address.trim(),
+      projectName: params.name.trim(),
+      hasZoningEvidence: Boolean(params.hasZoningEvidence),
       setbacks: defaultSetbacks,
       boundary: {
         type: 'Polygon',
@@ -346,31 +675,19 @@ export function createCase(params: CreateCaseParams): Project {
       }
     },
     sources: [],
-    findings: [],
+    findings,
     contradictions: [],
     assumptions: [
       {
-        id: `assump-${caseId}-01`,
+        id: `asm-${caseId}-01`,
         projectId: caseId,
-        parameter: 'Initial Site Area',
-        workingValue: grossSiteArea,
-        unit: 'm²',
-        source: 'Opportunity Intake Form',
+        parameter: 'Municipal Zoning Envelope',
+        workingValue: `${maxFAR.toFixed(2)}x KLB / ${maxCoveragePct}% KDB`,
+        unit: 'ratio',
+        source: params.hasZoningEvidence ? 'Zoning Certificate' : 'Opportunity Intake Form',
         classification: 'ASSUMPTION',
-        verificationStatus: 'UNVERIFIED',
-        affectedScenarioIds: [scenarioA.id, scenarioB.id],
-        lastUpdated: now
-      },
-      {
-        id: `assump-${caseId}-02`,
-        projectId: caseId,
-        parameter: 'Working Setbacks',
-        workingValue: `${defaultSetbacks.front}m Front / ${defaultSetbacks.rear}m Rear / ${defaultSetbacks.sideLeft}m Sides`,
-        unit: 'meters',
-        source: 'Standard Municipal Urban Planning Rule of Thumb',
-        classification: 'ASSUMPTION',
-        verificationStatus: 'UNVERIFIED',
-        affectedScenarioIds: [scenarioA.id, scenarioB.id],
+        verificationStatus: params.hasZoningEvidence ? 'VERIFIED' : 'UNVERIFIED',
+        affectedScenarioIds: [scenarioA.id, scenarioB.id, scenarioC.id],
         lastUpdated: now
       }
     ],
@@ -378,52 +695,55 @@ export function createCase(params: CreateCaseParams): Project {
       {
         id: `iss-${caseId}-01`,
         projectId: caseId,
-        title: 'Site Area & Boundary Unverified',
+        title: 'Municipal Planning & Title Verification Pending',
         category: 'LEGAL_TITLE',
         severity: 'IMPORTANT',
-        evidenceSummary: `Initial site area of ${grossSiteArea.toLocaleString()} m² is based on opportunity intake assumptions without cadastral survey verification.`,
+        evidenceSummary: `Initial land area (${grossSiteArea.toLocaleString()} m²) and zoning limits (${maxFAR.toFixed(2)}x FAR) are unverified intake assumptions.`,
         implication: 'Yield calculations and purchase price basis may change upon formal survey.',
         status: 'OPEN',
-        recommendedAction: 'Obtain official land certificate (SHGB/SHM) and topographic survey.',
-        affectedScenarioIds: [scenarioA.id, scenarioB.id]
+        recommendedAction: 'Obtain official land certificate (SHGB/SHM) and municipal KRK planning certificate.',
+        affectedScenarioIds: [scenarioA.id, scenarioB.id, scenarioC.id]
       }
     ],
     actions: [
       {
         id: `act-${caseId}-01`,
         projectId: caseId,
-        title: 'Verify Land Title & Survey Certificate',
+        title: 'Verify Land Title & Cadastral Boundary',
         priority: 'CRITICAL',
         reason: 'Confirm precise boundary coordinates and official registered land area.',
-        affectedScenarioIds: [scenarioA.id, scenarioB.id],
+        affectedScenarioIds: [scenarioA.id, scenarioB.id, scenarioC.id],
         status: 'PENDING',
         assignedTo: 'Due Diligence Team'
       },
       {
         id: `act-${caseId}-02`,
         projectId: caseId,
-        title: 'Confirm Municipal Zoning Designation (RDTR)',
+        title: 'Obtain Official Municipal Zoning Certificate (KRK/RDTR)',
         priority: 'IMPORTANT',
-        reason: 'Verify allowable FAR, building height, coverage, and statutory setbacks.',
-        affectedScenarioIds: [scenarioA.id, scenarioB.id],
+        reason: 'Verify binding statutory FAR, building height cap, and setback requirements.',
+        affectedScenarioIds: [scenarioA.id, scenarioB.id, scenarioC.id],
         status: 'PENDING',
         assignedTo: 'Planning Consultant'
       }
     ],
-    scenarios: [scenarioA, scenarioB],
+    scenarios: [scenarioA, scenarioB, scenarioC],
     executiveSummary: {
       topOpportunities: [
-        `Opportunity captured: ${params.name.trim()} (${grossSiteArea.toLocaleString()} m² initial site area).`,
-        'Parametric study envelope initialized for rapid due diligence exploration.'
+        `Opportunity captured: ${params.name.trim()} (${grossSiteArea.toLocaleString()} m² site area).`,
+        existingGFA 
+          ? `Existing ${existingGFA.toLocaleString()} m² asset provides immediate cashflow while evaluating ${expansionHeadroomGFA?.toLocaleString()} m² expansion headroom.`
+          : `Parametric study initialized exploring 3 development schemes up to ${maxGFA.toLocaleString()} m² statutory capacity.`
       ],
       criticalRisks: [
-        'Site area, setbacks, and allowable yields are provisional assumptions requiring verification.'
+        'Site area, setbacks, and allowable yields are provisional assumptions requiring verification.',
+        params.askingPriceAmount ? `Acquisition price of Rp ${(params.askingPriceAmount / 1e9).toFixed(1)}B requires formal yield validation.` : 'Commercial terms unverified.'
       ],
       criticalUnknowns: [
         'Legal land title certificate and official cadastral boundary verification pending.',
-        'Local municipal zoning bylaws (FAR, maximum height, permitted uses) pending confirmation.'
+        'Local municipal zoning bylaws (KRK / RDTR certificate) pending confirmation.'
       ],
-      recommendedNextMove: 'Upload legal title documents or municipal zoning excerpts to verify planning parameters and unlock high-confidence feasibility assessment.'
+      recommendedNextMove: 'Conduct cadastral boundary survey and obtain municipal KRK zoning certificate to de-risk investment decision before entering binding agreements.'
     },
     createdAt: now,
     updatedAt: now
@@ -432,4 +752,49 @@ export function createCase(params: CreateCaseParams): Project {
   saveCase(newProject);
   setActiveCaseId(newProject.id);
   return newProject;
+}
+
+/**
+ * Adds a new custom scenario to an existing case.
+ */
+export function addScenarioToCase(caseId: string, scenario: DevelopmentScenario): Project {
+  const project = getCase(caseId);
+  const updatedScenarios = [...project.scenarios, scenario];
+  const updatedProject = { ...project, scenarios: updatedScenarios };
+  saveCase(updatedProject);
+  return updatedProject;
+}
+
+/**
+ * Duplicates an existing scenario into a new editable working scenario.
+ */
+export function duplicateScenarioInCase(caseId: string, sourceScenarioId: string): Project {
+  const project = getCase(caseId);
+  const source = project.scenarios.find(s => s.id === sourceScenarioId) || project.scenarios[0];
+  const newId = `scen-${caseId}-${Date.now()}`;
+  
+  const duplicated: DevelopmentScenario = {
+    ...source,
+    id: newId,
+    name: `${source.name} (Copy)`,
+    isPreferred: false,
+    editClassification: 'USER_GEOMETRY_EDIT',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  return addScenarioToCase(caseId, duplicated);
+}
+
+/**
+ * Deletes a scenario from a case (preventing deletion if it's the last remaining scenario).
+ */
+export function deleteScenarioFromCase(caseId: string, scenarioId: string): Project {
+  const project = getCase(caseId);
+  if (project.scenarios.length <= 1) return project;
+
+  const updatedScenarios = project.scenarios.filter(s => s.id !== scenarioId);
+  const updatedProject = { ...project, scenarios: updatedScenarios };
+  saveCase(updatedProject);
+  return updatedProject;
 }

@@ -24,6 +24,30 @@ interface AssessmentRequestBody {
   projectName?: string;
   caseName?: string;
   address?: string;
+  userQuery?: string;
+  zoningLimits?: {
+    zoneCode?: string;
+    zoneName?: string;
+    maxFAR?: number;
+    maxCoveragePct?: number;
+    minKDHPct?: number;
+    maxHeightMeters?: number;
+    maxFloors?: number;
+  };
+  existingAsset?: {
+    gfa?: number;
+    floors?: number;
+    description?: string;
+    currentStatus?: string;
+  };
+  valuation?: {
+    askingPriceAmount?: number;
+    askingPriceCurrency?: string;
+    njopAmount?: number;
+    pricePerM2?: number;
+    valuationBasisNotes?: string;
+  };
+  expansionHeadroomGFA?: number;
 }
 
 /**
@@ -44,7 +68,7 @@ function isValidFiniteNumber(val: unknown): val is number {
 export async function POST(request: NextRequest) {
   try {
     // 1. Security & Two-Path Access Boundary
-    const authHeader = request.headers.get('authorization') || '';
+    const authHeader = request.headers.get('authorization');
     const serverSecret = process.env.SITEPILOT_SERVER_SECRET;
     const isProduction = process.env.NODE_ENV === 'production';
     const cloudRunUrl = process.env.CLOUDRUN_SERVICE_URL;
@@ -227,6 +251,13 @@ export async function POST(request: NextRequest) {
     const targetProjectName = body.projectName || body.caseName || 'Development Opportunity';
     const targetAddress = body.address || 'Site Location';
 
+    const statMaxFAR = body.zoningLimits?.maxFAR ?? 3.20;
+    const statMaxCoveragePct = body.zoningLimits?.maxCoveragePct ?? 55.0;
+    const statMinKDHPct = body.zoningLimits?.minKDHPct ?? 20.0;
+    const statMaxFloors = body.zoningLimits?.maxFloors ?? (statMaxFAR > 5.0 ? 14 : 8);
+    const statMaxHeightM = body.zoningLimits?.maxHeightMeters ?? (body.zoningLimits?.maxFloors ? (body.zoningLimits.maxFloors * 3.5 + 2.0) : 32.0);
+    const statZoneName = body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode;
+
     const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks);
     const overlaps = calculateMassPairwiseIntersections(masses);
     const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses);
@@ -238,47 +269,57 @@ export async function POST(request: NextRequest) {
       overlaps, 
       {
         scenarioName: body.scenarioName,
-        hasZoningEvidence
+        hasZoningEvidence,
+        maxFAR: statMaxFAR,
+        maxCoveragePct: statMaxCoveragePct,
+        minKDHPct: statMinKDHPct,
+        maxHeightMeters: statMaxHeightM,
+        maxFloors: statMaxFloors,
+        zoningName: statZoneName
       }
     );
-
-    const STATUTORY_HEIGHT_CAP_METERS = 32.0;
-    const STATUTORY_MAX_FAR = 3.20;
-    const STATUTORY_MAX_KDB_PERCENT = 55.0;
 
     // 4. Construct Grounded Prompt for Vertex AI
     const deterministicFacts = [
       `- Project: "${targetProjectName}" (${targetAddress})`,
       `- Scenario: "${body.scenarioName}" (ID: ${body.scenarioId})`,
       `- Planning Evidence Status: ${hasZoningEvidence ? 'VERIFIED (Municipal Certificate on File)' : 'UNVERIFIED (No RDTR/KRK Certificate on file)'}`,
+      body.zoningLimits ? `- Zoning Classification: ${body.zoningLimits.zoneCode || 'K.1'} (${body.zoningLimits.zoneName || 'Commercial'})` : '',
       `- Total Building Height: ${metrics.totalHeightMeters.toFixed(1)}m (${metrics.totalFloors} Storeys)`,
-      `- Height Limit: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m (${hasZoningEvidence ? 'Statutory Cap' : 'Provisional Assumption'})`,
+      `- Height Limit: ${statMaxHeightM.toFixed(1)}m (${statMaxFloors} Storeys max)`,
       `- Height Overrun: ${complianceReport.metrics.heightOverrunMeters > 0 ? `+${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Within Envelope)'}`,
-      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${STATUTORY_MAX_FAR.toFixed(2)}x)`,
+      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${statMaxFAR.toFixed(2)}x)`,
       `- Total Gross Floor Area (GFA): ${metrics.totalGFA.toLocaleString()} m²`,
-      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${STATUTORY_MAX_KDB_PERCENT}%)`,
-      `- Unbuilt Open Space: ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%)`,
+      body.existingAsset?.gfa ? `- Existing Structure: ${body.existingAsset.gfa.toLocaleString()} m² (${body.existingAsset.floors || 4} floors, status: ${body.existingAsset.currentStatus || 'Operational'})` : '',
+      body.expansionHeadroomGFA !== undefined ? `- Permissible Expansion Headroom: ${body.expansionHeadroomGFA.toLocaleString()} m²` : '',
+      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct}%)`,
+      `- Unbuilt Open Space (KDH Basis): ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%, min required: ${statMinKDHPct}%)`,
+      body.valuation?.askingPriceAmount ? `- Commercial Terms: Asking Rp ${(body.valuation.askingPriceAmount / 1e9).toFixed(1)}B (~Rp ${(body.valuation.pricePerM2 ? (body.valuation.pricePerM2 / 1e6).toFixed(1) : (body.valuation.askingPriceAmount / grossSiteArea / 1e6).toFixed(1))}M/m² land)` : '',
+      body.valuation?.njopAmount ? `- Tax Benchmark (NJOP): Rp ${(body.valuation.njopAmount / 1e9).toFixed(1)}B` : '',
       `- Setbacks: Front ${canonicalSetbacks.front}m, Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
       `- Setback Encroachments: ${encroachments.length > 0 ? encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}`,
       `- 3D Mass Overlaps: ${overlaps.hasOverlap ? `ACTIVE COLLISION (${overlaps.overlapVolumeM3} m³ overlap)` : 'Zero Collisions'}`,
       `- Out of Bounds Footprint: ${(metrics.outOfBoundsAreaM2 || 0) > 0.5 ? `${metrics.outOfBoundsAreaM2} m² beyond parcel` : 'None'}`,
       `- Authoritative Compliance Verdict: ${complianceReport.status} (${complianceReport.assessmentStatus})`,
       `- Primary Summary: ${complianceReport.summaryText}`
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
-    const prompt = `You are the Senior Planning Advisor for SitePilot (intelligent site due diligence workspace).
-Analyze the active scenario's deterministic planning evidence for "${targetProjectName}" at ${targetAddress}:
+    const prompt = `You are the Senior Planning & Real Estate Investment Advisor for SitePilot (intelligent site due diligence workspace).
+Analyze the active scenario's deterministic planning and investment facts for "${targetProjectName}" at ${targetAddress}:
 
 ${deterministicFacts}
+
+${body.userQuery ? `SPECIFIC INVESTOR INQUIRY TO ADDRESS: "${body.userQuery}"` : ''}
 
 TASK & GUARDRAILS:
 1. All narrative conclusions must strictly align with the deterministic planning facts above.
 2. The numeric calculations and compliance status above are immutable and authoritative.
 3. If Planning Evidence Status is UNVERIFIED, do NOT assert statutory municipal compliance. State that statutory compliance is unverified pending official zoning certificate (RDTR/KRK).
-4. Structure your response into:
+4. Address yield potential, operational asset preservation, expansion headroom, and valuation implications.
+5. Structure your response into:
    - Decision: One clear executive verdict reflecting the Authoritative Deterministic Status.
    - Supporting Evidence: 3-4 concise bullet points citing exact numerical metrics above.
-   - Identified Risks: 1-3 specific planning or physical risks.
+   - Identified Risks: 1-3 specific planning or physical/commercial risks.
    - Recommended Next Action: One actionable professional recommendation.
 
 Provide a professional, clear assessment.`;
@@ -345,9 +386,9 @@ Provide a professional, clear assessment.`;
         status: complianceReport.assessmentStatus,
         decision: complianceReport.decisionText,
         supportingEvidence: evidenceLines.length > 0 ? evidenceLines : [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m` : 'Provisional'})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${STATUTORY_MAX_FAR.toFixed(2)}x` : 'Provisional'})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${STATUTORY_MAX_KDB_PERCENT}%` : 'Provisional'})`,
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
         identifiedRisks: complianceReport.identifiedRisks,
@@ -380,9 +421,9 @@ Provide a professional, clear assessment.`;
         status: complianceReport.assessmentStatus,
         decision: complianceReport.decisionText,
         supportingEvidence: [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m` : 'Provisional'})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${STATUTORY_MAX_FAR.toFixed(2)}x` : 'Provisional'})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${STATUTORY_MAX_KDB_PERCENT}%` : 'Provisional'})`,
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
         identifiedRisks: complianceReport.identifiedRisks,

@@ -90,20 +90,64 @@ export function EvidenceLedger({
           </div>
         </div>
 
-        {activeSiteArea !== undefined && onSelectSiteArea && (
-          <label className="flex items-center justify-between gap-3 border-y hairline-rule py-2 text-[10px] text-[#8f8c84]">
-            <span>Working site area basis</span>
-            <select
-              value={activeSiteArea}
-              onChange={(event) => onSelectSiteArea(Number(event.target.value))}
-              className="border-0 bg-transparent font-metadata text-[9px] uppercase text-[#d2af78] outline-none"
-              aria-label="Working site area basis"
-            >
-              <option value="16850">16,850 m² / title</option>
-              <option value="18200">18,200 m² / claim</option>
-            </select>
-          </label>
-        )}
+        {(() => {
+          const areaContradiction = contradictions.find(c => 
+            c.id === 'c-001' || 
+            c.title.toLowerCase().includes('site area') ||
+            c.impactStatement.toLowerCase().includes('site area')
+          );
+
+          if (areaContradiction && onSelectSiteArea) {
+            // Find finding values linked to this contradiction
+            const contradictionFindings = findings.filter(f => 
+              areaContradiction.findings?.some(fnd => fnd.id === f.id) ||
+              f.extractedValue?.key === 'gross_site_area'
+            );
+
+            const options = contradictionFindings.map(f => ({
+              value: f.extractedValue?.numericValue || 0,
+              label: `${f.extractedValue?.numericValue?.toLocaleString() || ''} m² / ${f.classification.toLowerCase()}`
+            })).filter(o => o.value > 0);
+
+            // Deduplicate options by value
+            const uniqueOptions = options.filter((opt, index, self) => 
+              index === self.findIndex(o => o.value === opt.value)
+            );
+
+            if (uniqueOptions.length > 1) {
+              return (
+                <label className="flex items-center justify-between gap-3 border-y hairline-rule py-2 text-[10px] text-[#8f8c84]">
+                  <span>Working site area basis</span>
+                  <select
+                    value={activeSiteArea}
+                    onChange={(event) => onSelectSiteArea(Number(event.target.value))}
+                    className="border-0 bg-transparent font-metadata text-[9px] uppercase text-[#d2af78] outline-none cursor-pointer"
+                    aria-label="Working site area basis"
+                  >
+                    {uniqueOptions.map(opt => (
+                      <option key={opt.value} value={opt.value} className="bg-[#121622] text-[#eeeae1]">
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            }
+          }
+
+          if (activeSiteArea !== undefined) {
+            return (
+              <div className="flex items-center justify-between gap-3 border-y hairline-rule py-2 text-[10px] text-[#8f8c84]">
+                <span>Working site area basis</span>
+                <span className="font-metadata text-[9px] uppercase text-[#d2af78]">
+                  {activeSiteArea.toLocaleString()} m² ({sources.length > 0 ? 'Document Basis' : 'Intake Assumption'})
+                </span>
+              </div>
+            );
+          }
+
+          return null;
+        })()}
 
         <div className="mt-4 flex flex-col gap-3">
           <label className="relative block">

@@ -50,15 +50,17 @@ describe('SitePilot Case Repository & Persistence Suite', () => {
     expect(newCase.areaProvenance?.value).toBe(12500);
     expect(newCase.areaProvenance?.confidence).toBe('UNVERIFIED');
 
-    // Verify 2 baseline scenarios are created with deterministic metrics
-    expect(newCase.scenarios).toHaveLength(2);
-    const [scenA, scenB] = newCase.scenarios;
+    // Verify 3 baseline scenarios are created with deterministic metrics
+    expect(newCase.scenarios).toHaveLength(3);
+    const [scenA, scenB, scenC] = newCase.scenarios;
     expect(scenA.name).toContain('Scenario A');
     expect(scenB.name).toContain('Scenario B');
+    expect(scenC.name).toContain('Scenario C');
     expect(scenB.isPreferred).toBe(true);
     expect(scenA.metrics.grossSiteArea).toBe(12500);
     expect(scenB.metrics.grossSiteArea).toBe(12500);
-    expect(scenB.metrics.totalGFA).toBeGreaterThan(scenA.metrics.totalGFA);
+    expect(scenC.metrics.grossSiteArea).toBe(12500);
+    expect(scenC.metrics.totalGFA).toBeGreaterThan(scenB.metrics.totalGFA);
 
     // Verify case is now listed and active
     const cases = listCases();

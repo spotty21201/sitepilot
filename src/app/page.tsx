@@ -8,6 +8,7 @@ import { EvidenceLedger } from '@/components/EvidenceLedger';
 import { ScenarioControls } from '@/components/ScenarioControls';
 import { DecisionRoomSummary } from '@/components/DecisionRoomSummary';
 import { NewCaseModal } from '@/components/NewCaseModal';
+import { ScenarioComparisonModal } from '@/components/ScenarioComparisonModal';
 import { 
   getCase, 
   saveCase, 
@@ -17,6 +18,7 @@ import {
   resetDemoCase, 
   getActiveCaseId, 
   setActiveCaseId,
+  duplicateScenarioInCase,
   CreateCaseParams 
 } from '@/lib/storage/case-repository';
 import { 
@@ -327,7 +329,8 @@ export default function SitePilotDecisionRoom() {
         const fittedMasses = fitMassesToBuildableEnvelope(
           prev.site.grossSiteArea, 
           scen.assumptionsUsed.setbacks, 
-          scen.masses
+          scen.masses,
+          prev.site.frontageLength
         );
 
         const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, fittedMasses, scen.assumptionsUsed.setbacks);
@@ -337,7 +340,17 @@ export default function SitePilotDecisionRoom() {
           scen.assumptionsUsed.setbacks,
           fittedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName
+          }
         );
 
         return {
@@ -373,7 +386,17 @@ export default function SitePilotDecisionRoom() {
         targetScenario.assumptionsUsed.setbacks,
         baseMasses,
         baselineMetrics,
-        pairwiseOverlap
+        pairwiseOverlap,
+        {
+          scenarioName: targetScenario.name,
+          hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+          maxFAR: prev.zoningLimits?.maxFAR,
+          maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+          minKDHPct: prev.zoningLimits?.minKDHPct,
+          maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+          maxFloors: prev.zoningLimits?.maxFloors,
+          zoningName: prev.zoningLimits?.zoneName
+        }
       );
 
       const updatedScenarios = prev.scenarios.map(s => {
@@ -395,6 +418,19 @@ export default function SitePilotDecisionRoom() {
       return { ...prev, scenarios: updatedScenarios };
     });
   };
+
+  // Duplicate Scenario Handler
+  const handleDuplicateScenario = (sourceScenarioId: string) => {
+    const updatedProject = duplicateScenarioInCase(project.id, sourceScenarioId);
+    const initialized = initializeProjectScenarios(updatedProject);
+    setProject(initialized);
+    const newScen = initialized.scenarios[initialized.scenarios.length - 1];
+    if (newScen) {
+      setActiveScenarioId(newScen.id);
+    }
+  };
+
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const activeScenario = project.scenarios.find(s => s.id === activeScenarioId) || project.scenarios[0];
 
@@ -471,12 +507,15 @@ export default function SitePilotDecisionRoom() {
               address: project.location.address,
               hasZoningEvidence: project.id === 'proj-001' || project.sources.some(s => s.status === 'PROCESSED')
             }}
+            project={project}
             scenarios={project.scenarios}
             activeScenarioId={activeScenarioId}
             onSelectScenario={setActiveScenarioId}
             onUpdateScenarioParam={handleUpdateScenarioParam}
             onFitMassingToEnvelope={handleFitMassingToEnvelope}
             onResetScenario={handleResetScenario}
+            onOpenCompareModal={() => setIsCompareModalOpen(true)}
+            onDuplicateScenario={handleDuplicateScenario}
           />
         </section>
       </main>
@@ -486,6 +525,15 @@ export default function SitePilotDecisionRoom() {
         isOpen={isNewCaseModalOpen}
         onClose={() => setIsNewCaseModalOpen(false)}
         onCreateCase={handleCreateCase}
+      />
+
+      {/* Scenario Comparison Matrix Modal */}
+      <ScenarioComparisonModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        project={project}
+        activeScenarioId={activeScenarioId}
+        onSelectScenario={setActiveScenarioId}
       />
     </div>
   );

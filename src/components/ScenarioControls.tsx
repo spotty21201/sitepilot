@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { DevelopmentScenario, SiteGeometry, PlanningAssessment } from '@/types';
+import { DevelopmentScenario, SiteGeometry, PlanningAssessment, Project } from '@/types';
 import { checkSetbackEncroachments, exportToColladaDAE } from '@/lib/geometry/engine';
 import { 
   Building2, 
@@ -28,6 +28,9 @@ interface ScenarioControlsProps {
   onUpdateScenarioParam: (scenarioId: string, param: 'floors' | 'frontSetback', value: number) => void;
   onFitMassingToEnvelope: (scenarioId: string) => void;
   onResetScenario: (scenarioId: string) => void;
+  onOpenCompareModal?: () => void;
+  onDuplicateScenario?: (scenarioId: string) => void;
+  project?: Project;
 }
 
 export function ScenarioControls({
@@ -37,9 +40,13 @@ export function ScenarioControls({
   onSelectScenario,
   onUpdateScenarioParam,
   onFitMassingToEnvelope,
-  onResetScenario
+  onResetScenario,
+  onOpenCompareModal,
+  onDuplicateScenario,
+  project
 }: ScenarioControlsProps) {
   const [copied, setCopied] = useState(false);
+  const [downloadedToast, setDownloadedToast] = useState<string | null>(null);
   const [showXmlModal, setShowXmlModal] = useState(false);
   const [rawXml, setRawXml] = useState('');
   const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
@@ -47,6 +54,7 @@ export function ScenarioControls({
   const [assessedSnapshot, setAssessedSnapshot] = useState<string | null>(null);
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
+  const [investorQuery, setInvestorQuery] = useState('');
   
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -77,7 +85,9 @@ export function ScenarioControls({
     activeScenario.masses
   );
 
-  const exportFilename = `SitePilot_${activeScenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_')}_${metrics.totalFloors}Fl${isOverridden ? '_Override' : ''}.dae`;
+  const cleanProjectName = (site.projectName || 'SitePilot').split('—')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  const cleanScenarioName = activeScenario.name.split(':')[0].replace(/[^a-zA-Z0-9_-]/g, '_');
+  const exportFilename = `${cleanProjectName}_${cleanScenarioName}_${metrics.totalFloors}Fl${isOverridden ? '_Override' : ''}.dae`;
 
   // Dynamic description deriving from live geometry
   const dynamicDescription = (() => {
@@ -107,7 +117,7 @@ export function ScenarioControls({
     );
   };
 
-  // Direct client-side blob download
+  // Direct client-side blob download with feedback toast
   const handleClientDownloadBlob = () => {
     const xml = generateLiveXml();
     const blob = new Blob([xml], { type: 'model/vnd.collada+xml;charset=utf-8' });
@@ -119,6 +129,9 @@ export function ScenarioControls({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+
+    setDownloadedToast(exportFilename);
+    setTimeout(() => setDownloadedToast(null), 4000);
   };
 
   const handleCopyXML = async () => {
@@ -133,16 +146,14 @@ export function ScenarioControls({
       } else {
         setShowXmlModal(true);
       }
-    } catch (e) {
-      console.warn('Clipboard API blocked, showing XML viewer modal:', e);
+    } catch {
       setShowXmlModal(true);
     }
   };
 
-  const handleOpenXmlModal = (e: React.MouseEvent<HTMLButtonElement>) => {
-    triggerRef.current = e.currentTarget;
-    const xml = generateLiveXml();
-    setRawXml(xml);
+  const handleOpenXmlModal = () => {
+    triggerRef.current = document.activeElement as HTMLElement;
+    setRawXml(generateLiveXml());
     setShowXmlModal(true);
   };
 
@@ -150,17 +161,12 @@ export function ScenarioControls({
     setShowXmlModal(false);
     setTimeout(() => {
       triggerRef.current?.focus();
-    }, 0);
+    }, 50);
   }, []);
 
-  const getCurrentSnapshot = () => JSON.stringify({
-    scenarioId: activeScenario.id,
-    grossSiteArea: site.grossSiteArea,
-    setbacks: activeScenario.assumptionsUsed.setbacks,
-    floors: metrics.totalFloors,
-    gfa: metrics.totalGFA,
-    masses: activeScenario.masses.map(m => ({ id: m.id, floors: m.floors, pos: m.position, dim: m.dimensions }))
-  });
+  const getCurrentSnapshot = useCallback(() => {
+    return `${activeScenario.id}-${metrics.totalGFA}-${metrics.totalFloors}-${metrics.totalHeightMeters}-${currentSetback}-${isFittedToSetback}-${(activeScenario.masses || []).map(m => `${m.id}:${m.position.x},${m.position.z}:${m.dimensions.width},${m.dimensions.length}`).join('|')}`;
+  }, [activeScenario.id, activeScenario.masses, currentSetback, isFittedToSetback, metrics.totalFloors, metrics.totalGFA, metrics.totalHeightMeters]);
 
   const baseFloors = activeScenario.originalMasses 
     ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
@@ -171,10 +177,12 @@ export function ScenarioControls({
 
   const isAssessmentStale = Boolean(assessment && assessedSnapshot && assessedSnapshot !== getCurrentSnapshot());
 
-  const handleGenerateAssessment = async () => {
+  const handleGenerateAssessment = async (overrideQuery?: string) => {
     setIsLoadingAssessment(true);
     setAssessmentError(null);
     const snapshot = getCurrentSnapshot();
+    const queryToSend = overrideQuery !== undefined ? overrideQuery : investorQuery;
+
     try {
       const res = await fetch('/api/assessment', {
         method: 'POST',
@@ -184,9 +192,15 @@ export function ScenarioControls({
           scenarioName: activeScenario.name,
           grossSiteArea: site.grossSiteArea,
           setbacks: activeScenario.assumptionsUsed.setbacks,
+          masses: activeScenario.masses, // CRITICAL FIX: Pass masses array
           projectName: site.projectName,
           address: site.address,
-          hasZoningEvidence: Boolean(site.hasZoningEvidence)
+          hasZoningEvidence: Boolean(site.hasZoningEvidence),
+          zoningLimits: project?.zoningLimits,
+          existingAsset: project?.existingAsset,
+          valuation: project?.valuation,
+          expansionHeadroomGFA: project?.expansionHeadroomGFA,
+          userQuery: queryToSend.trim() || undefined
         })
       });
       const data = await res.json();
@@ -250,6 +264,22 @@ export function ScenarioControls({
 
   return (
     <div className="flex flex-col h-full bg-[#11141d] border border-[#232938] rounded-xl overflow-hidden shadow-lg select-none">
+      {/* Real Download Toast Notification */}
+      {downloadedToast && (
+        <div className="bg-emerald-950/90 border-b border-emerald-600/70 p-2.5 flex items-center justify-between text-xs text-emerald-200 animate-in fade-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="truncate">Saved <strong>{downloadedToast}</strong> to downloads.</span>
+          </div>
+          <button 
+            onClick={() => setDownloadedToast(null)}
+            className="text-emerald-400 hover:text-white text-xs px-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header & Export Actions */}
       <div className="p-3 border-b border-[#232938] bg-[#141824]">
         <div className="flex items-center justify-between mb-2.5">
@@ -259,6 +289,17 @@ export function ScenarioControls({
           </div>
 
           <div className="flex items-center gap-1.5">
+            {onOpenCompareModal && (
+              <button
+                onClick={onOpenCompareModal}
+                title="Compare all scenarios side-by-side"
+                aria-label="Compare all scenarios side-by-side"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1e293b] hover:bg-[#283852] text-[#38bdf8] text-[11px] font-semibold border border-[#38bdf8]/40 shadow-sm transition-all active:scale-95 cursor-pointer"
+              >
+                <span>Compare</span>
+              </button>
+            )}
+
             <button
               onClick={handleOpenXmlModal}
               title="Inspect & Copy Raw COLLADA XML"
@@ -292,7 +333,7 @@ export function ScenarioControls({
         </div>
 
         {/* Scenario Switcher Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#181d2a] rounded-lg border border-[#272f42]">
+        <div className={`grid gap-1.5 p-1 bg-[#181d2a] rounded-lg border border-[#272f42] grid-cols-${scenarios.length}`}>
           {scenarios.map((s) => {
             const isSelected = s.id === activeScenario.id;
             const sOrigFloors = s.id === 'scen-001' ? 4 : s.id === 'scen-002' ? 8 : 12;
@@ -309,14 +350,11 @@ export function ScenarioControls({
                     : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e2434]'
                 }`}
               >
-                <span className="block truncate">{s.name.split(':')[0]}</span>
-                {s.isPreferred ? (
-                  <span className="block text-[9px] text-sky-200 font-normal">Preferred · {s.metrics.totalFloors} Fl</span>
-                ) : sOverridden ? (
-                  <span className="block text-[9px] text-indigo-300 font-normal">{s.metrics.totalFloors} Fl [Override]</span>
-                ) : (
-                  <span className="block text-[9px] text-slate-400 font-normal">{s.metrics.totalFloors} Fl</span>
-                )}
+                <div className="truncate">{s.name.split('(')[0].replace('Scenario ', '')}</div>
+                <div className={`text-[9px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                  {s.metrics.totalFloors} Fl · {s.metrics.totalGFA.toLocaleString()} m²
+                  {sOverridden && ' *'}
+                </div>
               </button>
             );
           })}
@@ -518,54 +556,118 @@ export function ScenarioControls({
             Deterministic Yield Metrics
           </h4>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Total GFA</span>
-              <span className="text-base font-bold text-slate-100 font-mono">
-                {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
-              </span>
-            </div>
+          {(() => {
+            const maxFAR = project?.zoningLimits?.maxFAR ?? 3.20;
+            const maxCoverage = project?.zoningLimits?.maxCoveragePct ?? 55.0;
+            const hasZoningEvidence = Boolean(site.hasZoningEvidence);
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">FAR / KLB Ratio</span>
-              <span className={`text-base font-bold font-mono ${metrics.farKLB > 3.2 ? 'text-rose-400' : 'text-[#38bdf8]'}`}>
-                {metrics.farKLB.toFixed(2)}x
-              </span>
-              <span className="text-[9px] text-slate-500 block">Zoning Max: 3.20x</span>
-            </div>
+            return (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Total GFA</span>
+                  <span className="text-base font-bold text-slate-100 font-mono">
+                    {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                  </span>
+                </div>
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Site Coverage (KDB)</span>
-              <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > 55 ? 'text-rose-400' : 'text-slate-100'}`}>
-                {metrics.siteCoveragePercentage}%
-              </span>
-              <span className="text-[9px] text-slate-500 block">Zoning Max: 55%</span>
-            </div>
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">FAR / KLB Ratio</span>
+                  <span className={`text-base font-bold font-mono ${metrics.farKLB > maxFAR + 0.01 ? 'text-rose-400' : 'text-[#38bdf8]'}`}>
+                    {metrics.farKLB.toFixed(2)}x
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">
+                    {hasZoningEvidence ? 'Statutory Cap' : 'Target'}: {maxFAR.toFixed(2)}x
+                  </span>
+                </div>
 
-            <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Unbuilt Site Area</span>
-              <span className="text-base font-bold text-emerald-400 font-mono">
-                {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
-              </span>
-              <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
-            </div>
-          </div>
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Site Coverage (KDB)</span>
+                  <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-rose-400' : 'text-slate-100'}`}>
+                    {metrics.siteCoveragePercentage}%
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">
+                    {hasZoningEvidence ? 'Statutory Limit' : 'Limit'}: {maxCoverage}%
+                  </span>
+                </div>
+
+                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
+                  <span className="text-[10px] text-slate-400 block">Unbuilt Site Area</span>
+                  <span className="text-base font-bold text-emerald-400 font-mono">
+                    {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                  </span>
+                  <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Evidence-Backed AI Planning Assessment */}
+        {/* Evidence-Backed AI Planning & Investment Advisor */}
         <div className="pt-2 border-t border-[#232938] space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-purple-300 text-xs font-bold uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span>AI Planning Advisor</span>
+              <span>AI Investment Advisor</span>
             </div>
             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800/60 text-purple-300">
               gemini-3.7-flash
             </span>
           </div>
 
+          {/* Interactive Investor Prompt Box */}
+          <div className="space-y-1.5 p-2 bg-[#141824] rounded-lg border border-[#263147]">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Investor Inquiry / Custom Prompt
+            </label>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                value={investorQuery}
+                onChange={(e) => setInvestorQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isLoadingAssessment) {
+                    e.preventDefault();
+                    handleGenerateAssessment(investorQuery);
+                  }
+                }}
+                placeholder="e.g. Evaluate Rp 125.3B yield vs NJOP benchmark"
+                className="flex-1 bg-[#0c0f17] border border-[#252f44] rounded px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+              />
+              <button
+                type="button"
+                onClick={() => handleGenerateAssessment(investorQuery)}
+                disabled={isLoadingAssessment}
+                className="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <span>Ask</span>
+              </button>
+            </div>
+
+            {/* Quick Prompt Chips */}
+            <div className="flex flex-wrap gap-1 pt-1">
+              {[
+                'Evaluate yield vs asking price',
+                'Analyze expansion headroom',
+                'Check KDH 20% & parking'
+              ].map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => {
+                    setInvestorQuery(chip);
+                    handleGenerateAssessment(chip);
+                  }}
+                  disabled={isLoadingAssessment}
+                  className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e2436] hover:bg-[#28324a] text-purple-300 border border-purple-800/40 cursor-pointer transition-all"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
-            onClick={handleGenerateAssessment}
+            onClick={() => handleGenerateAssessment(investorQuery)}
             disabled={isLoadingAssessment}
             aria-label="Generate AI Planning Assessment"
             className="w-full py-2 px-3 bg-gradient-to-r from-purple-900/70 via-indigo-900/70 to-blue-900/70 hover:from-purple-800/90 hover:via-indigo-800/90 hover:to-blue-800/90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border border-purple-500/40 shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
@@ -578,7 +680,7 @@ export function ScenarioControls({
             ) : (
               <>
                 <Sparkles className="w-3.5 h-3.5 text-purple-300" />
-                <span>Generate Planning Assessment</span>
+                <span>Generate Comprehensive Assessment</span>
               </>
             )}
           </button>
@@ -593,7 +695,7 @@ export function ScenarioControls({
                 {assessmentError}
               </p>
               <button
-                onClick={handleGenerateAssessment}
+                onClick={() => handleGenerateAssessment()}
                 className="px-2.5 py-1 bg-rose-900/70 hover:bg-rose-800 text-white rounded text-[11px] font-semibold border border-rose-600/60 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
               >
                 <RefreshCw className="w-3 h-3" />
@@ -611,7 +713,7 @@ export function ScenarioControls({
                     <span>[STALE] Inputs changed since assessment</span>
                   </div>
                   <button
-                    onClick={handleGenerateAssessment}
+                    onClick={() => handleGenerateAssessment()}
                     disabled={isLoadingAssessment}
                     className="px-2 py-0.5 bg-amber-800/80 hover:bg-amber-700 text-white rounded text-[10px] font-semibold cursor-pointer shrink-0"
                   >

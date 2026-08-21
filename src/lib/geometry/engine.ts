@@ -267,9 +267,10 @@ export function calculateGroundFootprintUnion(
 export function calculateDevelopmentMetrics(
   grossSiteArea: number,
   masses: BuildingMass[],
-  setbacks: Setbacks
+  setbacks: Setbacks,
+  frontageWidth: number = 110
 ): DevelopmentMetrics {
-  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, 110);
+  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, frontageWidth);
   const netBuildable = bounds.netBuildableArea;
 
   const footprintUnion = calculateGroundFootprintUnion(masses, bounds);
@@ -527,7 +528,6 @@ export function checkSetbackEncroachments(
       });
     }
   }
-
   return results;
 }
 
@@ -537,57 +537,78 @@ export function checkSetbackEncroachments(
 export function fitMassesToBuildableEnvelope(
   grossSiteArea: number,
   setbacks: Setbacks,
-  masses: BuildingMass[]
+  masses: BuildingMass[],
+  frontageLength?: number
 ): BuildingMass[] {
-  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, 110);
+  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, frontageLength || 110);
   
-  // Find ground podium/bounding bounds
-  const groundMasses = masses.filter(m => m.type === 'PODIUM' || (m.position.y || 0) === 0);
-  if (groundMasses.length === 0) return masses;
+  if (masses.length === 0) return masses;
 
-  // Compute current massing envelope
-  let currentMaxY = -Infinity;
-  let currentMinY = Infinity;
+  const maxBuildableW = Math.max(10, bounds.buildableWidth);
+  const maxBuildableL = Math.max(10, bounds.buildableLength);
+  const centerX = (bounds.buildableMinX + bounds.buildableMaxX) / 2;
+  const centerZ = (bounds.buildableMinY + bounds.buildableMaxY) / 2;
+
+  // Determine current bounds across all masses
+  let minX = Infinity, maxX = -Infinity;
+  let minZ = Infinity, maxZ = -Infinity;
+
   for (const m of masses) {
+    const halfW = m.dimensions.width / 2;
     const halfL = m.dimensions.length / 2;
-    const maxY = m.position.z + halfL;
-    const minY = m.position.z - halfL;
-    if (maxY > currentMaxY) currentMaxY = maxY;
-    if (minY < currentMinY) currentMinY = minY;
+    const massMinX = m.position.x - halfW;
+    const massMaxX = m.position.x + halfW;
+    const massMinZ = m.position.z - halfL;
+    const massMaxZ = m.position.z + halfL;
+
+    if (massMinX < minX) minX = massMinX;
+    if (massMaxX > maxX) maxX = massMaxX;
+    if (massMinZ < minZ) minZ = massMinZ;
+    if (massMaxZ > maxZ) maxZ = massMaxZ;
   }
 
-  const frontEncroachment = currentMaxY > bounds.buildableMaxY ? currentMaxY - bounds.buildableMaxY : 0;
-  const rearEncroachment = currentMinY < bounds.buildableMinY ? bounds.buildableMinY - currentMinY : 0;
+  const currentTotalW = Math.max(1, maxX - minX);
+  const currentTotalL = Math.max(1, maxZ - minZ);
 
-  // If already contained, return as is
-  if (frontEncroachment <= 0 && rearEncroachment <= 0) {
-    return masses;
-  }
+  // Scaling factor if massing group exceeds buildable envelope
+  const scaleX = currentTotalW > maxBuildableW ? (maxBuildableW * 0.95) / currentTotalW : 1.0;
+  const scaleZ = currentTotalL > maxBuildableL ? (maxBuildableL * 0.95) / currentTotalL : 1.0;
+  const scale = Math.min(scaleX, scaleZ, 1.0);
 
-  // Calculate available rear shift clearance
-  const availableRearShift = currentMinY - bounds.buildableMinY;
+  const currentGroupCenterX = (minX + maxX) / 2;
+  const currentGroupCenterZ = (minZ + maxZ) / 2;
 
   return masses.map(mass => {
-    let newZ = mass.position.z;
-    let newLength = mass.dimensions.length;
-    let newWidth = mass.dimensions.width;
+    // Scale width and length
+    let newWidth = Math.round(mass.dimensions.width * scale * 10) / 10;
+    let newLength = Math.round(mass.dimensions.length * scale * 10) / 10;
 
-    if (frontEncroachment > 0) {
-      // Step 1: Shift rearward if rear clearance permits
-      if (availableRearShift >= frontEncroachment + 1.0) {
-        newZ = mass.position.z - (frontEncroachment + 0.5);
-      } else {
-        // Step 2: If rear clearance is insufficient, shift to buildable center and scale length to fit
-        const maxFittingLength = Math.max(20, bounds.buildableLength * (mass.dimensions.length / (currentMaxY - currentMinY || 1)) * 0.95);
-        newLength = Math.min(mass.dimensions.length, Math.round(maxFittingLength * 10) / 10);
-        newZ = (bounds.buildableMinY + bounds.buildableMaxY) / 2;
-      }
+    // Hard safety clamp to buildable bounds
+    newWidth = Math.min(newWidth, Math.round(maxBuildableW * 0.98 * 10) / 10);
+    newLength = Math.min(newLength, Math.round(maxBuildableL * 0.98 * 10) / 10);
+
+    // Shift relative to group center scaled and placed at buildable center
+    const relX = (mass.position.x - currentGroupCenterX) * scale;
+    const relZ = (mass.position.z - currentGroupCenterZ) * scale;
+
+    let newX = Math.round((centerX + relX) * 10) / 10;
+    let newZ = Math.round((centerZ + relZ) * 10) / 10;
+
+    // Strict boundary enforcement: Ensure mass edges don't exceed buildable bounds
+    const halfW = newWidth / 2;
+    const halfL = newLength / 2;
+
+    if (newX - halfW < bounds.buildableMinX) {
+      newX = bounds.buildableMinX + halfW;
     }
-
-    // Clamp width if side setbacks encroached
-    const maxFittingWidth = bounds.buildableWidth * 0.95;
-    if (newWidth > maxFittingWidth) {
-      newWidth = Math.round(maxFittingWidth * 10) / 10;
+    if (newX + halfW > bounds.buildableMaxX) {
+      newX = bounds.buildableMaxX - halfW;
+    }
+    if (newZ - halfL < bounds.buildableMinY) {
+      newZ = bounds.buildableMinY + halfL;
+    }
+    if (newZ + halfL > bounds.buildableMaxY) {
+      newZ = bounds.buildableMaxY - halfL;
     }
 
     const newFootprint = Math.round(newWidth * newLength * 100) / 100;
@@ -597,7 +618,11 @@ export function fitMassesToBuildableEnvelope(
       ...mass,
       footprintArea: newFootprint,
       gfa: newGfa,
-      position: { ...mass.position, z: Math.round(newZ * 100) / 100 },
+      position: {
+        ...mass.position,
+        x: Math.round(newX * 100) / 100,
+        z: Math.round(newZ * 100) / 100
+      },
       dimensions: {
         ...mass.dimensions,
         width: Math.round(newWidth * 100) / 100,
@@ -618,33 +643,51 @@ export function checkConstraintViolations(
     maxFAR?: number;
     maxCoveragePct?: number;
     encroachments?: SetbackEncroachmentResult[];
+    outOfBoundsAreaM2?: number;
   }
-): { hasViolations: boolean; warnings: string[] } {
+): { hasViolations: boolean; warnings: string[]; primaryViolation?: string } {
   const warnings: string[] = [];
 
-  const maxH = constraints.maxHeightMeters || 32.0;
-  if (metrics.totalHeightMeters > maxH + 0.05 || (constraints.maxHeightFloors && metrics.totalFloors > constraints.maxHeightFloors)) {
-    const overrunMeters = Math.max(0, Math.round((metrics.totalHeightMeters - maxH) * 10) / 10);
-    warnings.push(`Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds maximum allowable height (${maxH.toFixed(1)}m / ${constraints.maxHeightFloors || 8} floors) by +${overrunMeters.toFixed(1)}m.`);
+  const maxFloors = constraints.maxHeightFloors || 8;
+  const maxMeters = constraints.maxHeightMeters || 32.0;
+  const maxFAR = constraints.maxFAR || 3.20;
+  const maxCoverage = constraints.maxCoveragePct || 55.0;
+
+  if (metrics.totalHeightMeters > maxMeters + 0.05 || metrics.totalFloors > maxFloors) {
+    const overrunMeters = Math.max(0, Math.round((metrics.totalHeightMeters - maxMeters) * 10) / 10);
+    warnings.push(
+      `Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds maximum allowable height (${maxMeters.toFixed(1)}m / ${maxFloors} floors) by +${overrunMeters.toFixed(1)}m.`
+    );
   }
 
-  if (constraints.maxFAR && metrics.farKLB > constraints.maxFAR + 0.005) {
-    warnings.push(`Current FAR / KLB (${metrics.farKLB.toFixed(2)}x) exceeds allowable maximum (${constraints.maxFAR.toFixed(2)}x).`);
+  if (metrics.farKLB > maxFAR + 0.005) {
+    const overrunFAR = Math.max(0, Math.round((metrics.farKLB - maxFAR) * 100) / 100);
+    warnings.push(
+      `Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds statutory maximum (${maxFAR.toFixed(2)}x) by +${overrunFAR.toFixed(2)}x.`
+    );
   }
 
-  if (constraints.maxCoveragePct && metrics.siteCoveragePercentage > constraints.maxCoveragePct + 0.05) {
-    warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds maximum permissible KDB (${constraints.maxCoveragePct}%).`);
+  if (metrics.siteCoveragePercentage > maxCoverage + 0.05) {
+    const overrunCoverage = Math.max(0, Math.round((metrics.siteCoveragePercentage - maxCoverage) * 10) / 10);
+    warnings.push(
+      `Site coverage (${metrics.siteCoveragePercentage}%) exceeds statutory limit (${maxCoverage}%) by +${overrunCoverage.toFixed(1)}%.`
+    );
   }
 
   if (constraints.encroachments && constraints.encroachments.length > 0) {
     for (const enc of constraints.encroachments) {
-      warnings.push(enc.description);
+      warnings.push(`Setback Encroachment: ${enc.description}`);
     }
+  }
+
+  if ((metrics.outOfBoundsAreaM2 || 0) > 0.5) {
+    warnings.push(`Footprint extends ${(metrics.outOfBoundsAreaM2 || 0).toLocaleString()} m² outside parcel boundary.`);
   }
 
   return {
     hasViolations: warnings.length > 0,
-    warnings
+    warnings,
+    primaryViolation: warnings[0]
   };
 }
 
@@ -684,8 +727,10 @@ export interface ScenarioComplianceOptions {
   hasZoningEvidence?: boolean;
   zoningName?: string;
   maxHeightMeters?: number;
+  maxFloors?: number;
   maxFAR?: number;
   maxCoveragePct?: number;
+  minKDHPct?: number;
 }
 
 /**
@@ -711,6 +756,7 @@ export function evaluateScenarioCompliance(
 
   const warnings: string[] = [];
   const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters || 32.0;
+  const STATUTORY_MAX_FLOORS = options.maxFloors || 8;
   const STATUTORY_MAX_FAR = options.maxFAR || 3.20;
   const STATUTORY_MAX_KDB_PERCENT = options.maxCoveragePct || 55.0;
 
@@ -721,7 +767,7 @@ export function evaluateScenarioCompliance(
   const collisionVolumeM3 = pairwiseOverlap?.overlapVolumeM3 || 0;
 
   // 1. Height checks (both absolute meters and floor count)
-  if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > 8) {
+  if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS) {
     warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds ${zoningName ? `${zoningName} ` : ''}${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m cap by +${heightOverrunM.toFixed(1)}m.`);
   }
 

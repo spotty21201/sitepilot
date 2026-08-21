@@ -61,9 +61,10 @@ describe('Golden Project Zero-Leakage & Provenance Decoupling Suite', () => {
     expect(minimalCase.id).toMatch(/^proj-\d+/);
     expect(minimalCase.name).toBe('Bandung Creative Quarter');
     expect(minimalCase.site.grossSiteArea).toBe(10000); // Defaults cleanly to 10,000 m²
-    expect(minimalCase.scenarios).toHaveLength(2);
+    expect(minimalCase.scenarios).toHaveLength(3);
     expect(minimalCase.scenarios[0].metrics.grossSiteArea).toBe(10000);
     expect(minimalCase.scenarios[1].metrics.grossSiteArea).toBe(10000);
+    expect(minimalCase.scenarios[2].metrics.grossSiteArea).toBe(10000);
 
     const serialized = JSON.stringify(minimalCase);
     for (const forbidden of FORBIDDEN_GOLDEN_STRINGS) {
