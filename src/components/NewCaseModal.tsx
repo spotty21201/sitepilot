@@ -12,6 +12,17 @@ interface NewCaseModalProps {
 
 type IntakeTab = 'SITE' | 'EXISTING' | 'ZONING' | 'VALUATION';
 
+function formatRupiahHelper(amount: number): string {
+  if (isNaN(amount) || amount <= 0) return '';
+  if (amount >= 1e9) {
+    return `Rp ${(amount / 1e9).toFixed(2)} Billion (~Rp ${amount.toLocaleString()})`;
+  }
+  if (amount >= 1e6) {
+    return `Rp ${(amount / 1e6).toFixed(2)} Million (~Rp ${amount.toLocaleString()})`;
+  }
+  return `Rp ${amount.toLocaleString()}`;
+}
+
 export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProps) {
   const [activeTab, setActiveTab] = useState<IntakeTab>('SITE');
 
@@ -26,21 +37,21 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
 
   // Existing Asset Facts
   const [existingBuildingGFA, setExistingBuildingGFA] = useState<string>('');
-  const [existingFloors, setExistingFloors] = useState<string>('4');
+  const [existingFloors, setExistingFloors] = useState<string>('');
   const [existingAssetDescription, setExistingAssetDescription] = useState<string>('');
   const [existingAssetStatus, setExistingAssetStatus] = useState<string>('Operational');
 
   // Planning & Zoning Controls
-  const [zoneCode, setZoneCode] = useState<string>('K.1');
-  const [zoneName, setZoneName] = useState<string>('Perkantoran, Perdagangan dan Jasa');
+  const [zoneCode, setZoneCode] = useState<string>('KT + K-1');
+  const [zoneName, setZoneName] = useState<string>('Commercial / Hospitality');
   const [statutoryMaxFAR, setStatutoryMaxFAR] = useState<string>('6.65');
   const [statutoryMaxCoveragePct, setStatutoryMaxCoveragePct] = useState<string>('55');
   const [statutoryMinKDHPct, setStatutoryMinKDHPct] = useState<string>('20');
-  const [statutoryMaxFloors, setStatutoryMaxFloors] = useState<string>('14');
-  const [statutoryMaxHeightMeters, setStatutoryMaxHeightMeters] = useState<string>('48');
-  const [setbackFront, setSetbackFront] = useState<string>('8');
-  const [setbackRear, setSetbackRear] = useState<string>('5');
-  const [setbackSide, setSetbackSide] = useState<string>('4');
+  const [statutoryMaxFloors, setStatutoryMaxFloors] = useState<string>('');
+  const [statutoryMaxHeightMeters, setStatutoryMaxHeightMeters] = useState<string>('');
+  const [setbackFront, setSetbackFront] = useState<string>('');
+  const [setbackRear, setSetbackRear] = useState<string>('');
+  const [setbackSide, setSetbackSide] = useState<string>('');
 
   // Commercial & Valuation
   const [askingPriceAmount, setAskingPriceAmount] = useState<string>('');
@@ -53,12 +64,18 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
+  const handleClose = React.useCallback(() => {
+    setActiveTab('SITE');
+    setError(null);
+    onClose();
+  }, [onClose]);
+
   useEffect(() => {
     if (isOpen) {
-      setActiveTab('SITE');
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         nameInputRef.current?.focus();
       }, 50);
+      return () => clearTimeout(timer);
     }
   }, [isOpen]);
 
@@ -69,14 +86,14 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        handleClose();
         return;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   if (!isOpen) return null;
 
@@ -88,6 +105,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const headroomGFA = parsedExistingGFA > 0 ? Math.max(0, maxGFA - parsedExistingGFA) : maxGFA;
   const parsedPrice = parseFloat(askingPriceAmount) || 0;
   const pricePerM2 = parsedPrice > 0 && effectiveArea > 0 ? Math.round(parsedPrice / effectiveArea) : 0;
+  const parsedNJOP = parseFloat(njopAmount) || 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,16 +125,16 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       return;
     }
 
-    const parsedFrontage = frontageLength ? parseFloat(frontageLength) : undefined;
-    const parsedFloors = existingFloors ? parseInt(existingFloors, 10) : 4;
-    const parsedMaxCoverage = statutoryMaxCoveragePct ? parseFloat(statutoryMaxCoveragePct) : 55.0;
-    const parsedMinKDH = statutoryMinKDHPct ? parseFloat(statutoryMinKDHPct) : 20.0;
-    const parsedMaxFloors = statutoryMaxFloors ? parseInt(statutoryMaxFloors, 10) : 14;
-    const parsedMaxHeight = statutoryMaxHeightMeters ? parseFloat(statutoryMaxHeightMeters) : 48.0;
-    const parsedFrontSetback = setbackFront ? parseFloat(setbackFront) : 8;
-    const parsedRearSetback = setbackRear ? parseFloat(setbackRear) : 5;
-    const parsedSideSetback = setbackSide ? parseFloat(setbackSide) : 4;
-    const parsedNJOP = njopAmount ? parseFloat(njopAmount) : undefined;
+    const parsedFrontage = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
+    const parsedFloors = existingFloors.trim() ? parseInt(existingFloors, 10) : undefined;
+    const parsedMaxCoverage = statutoryMaxCoveragePct.trim() ? parseFloat(statutoryMaxCoveragePct) : 55.0;
+    const parsedMinKDH = statutoryMinKDHPct.trim() ? parseFloat(statutoryMinKDHPct) : 20.0;
+    const parsedMaxFloors = statutoryMaxFloors.trim() ? parseInt(statutoryMaxFloors, 10) : undefined;
+    const parsedMaxHeight = statutoryMaxHeightMeters.trim() ? parseFloat(statutoryMaxHeightMeters) : undefined;
+    const parsedFrontSetback = setbackFront.trim() ? parseFloat(setbackFront) : undefined;
+    const parsedRearSetback = setbackRear.trim() ? parseFloat(setbackRear) : undefined;
+    const parsedSideSetback = setbackSide.trim() ? parseFloat(setbackSide) : undefined;
+    const finalNJOP = njopAmount.trim() ? parseFloat(njopAmount) : undefined;
 
     onCreateCase({
       name: trimmedName,
@@ -129,13 +147,13 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       
       // Existing Asset
       existingBuildingGFA: parsedExistingGFA > 0 ? parsedExistingGFA : undefined,
-      existingFloors: parsedFloors > 0 ? parsedFloors : undefined,
+      existingFloors: parsedFloors && !isNaN(parsedFloors) && parsedFloors > 0 ? parsedFloors : undefined,
       existingAssetDescription: existingAssetDescription.trim() || undefined,
       existingAssetStatus: existingAssetStatus || 'Operational',
 
       // Planning & Zoning
-      zoneCode: zoneCode.trim() || 'K.1',
-      zoneName: zoneName.trim() || 'Perkantoran, Perdagangan dan Jasa',
+      zoneCode: zoneCode.trim() || 'KT + K-1',
+      zoneName: zoneName.trim() || 'Commercial / Hospitality',
       statutoryMaxFAR: parsedFAR,
       statutoryMaxCoveragePct: parsedMaxCoverage,
       statutoryMinKDHPct: parsedMinKDH,
@@ -149,12 +167,12 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       // Valuation
       askingPriceAmount: parsedPrice > 0 ? parsedPrice : undefined,
       askingPriceCurrency,
-      njopAmount: parsedNJOP && !isNaN(parsedNJOP) ? parsedNJOP : undefined,
+      njopAmount: finalNJOP && !isNaN(finalNJOP) ? finalNJOP : undefined,
       valuationBasisNotes: valuationBasisNotes.trim() || undefined,
       provenanceType: 'USER_ENTERED_ASSUMPTION'
     });
 
-    onClose();
+    handleClose();
   };
 
   return (
@@ -380,15 +398,17 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Existing Storeys / Floors</label>
+                  <label className="block font-semibold text-slate-300">
+                    Existing Storeys / Floors <span className="text-slate-500 font-normal">(Optional · leave blank if unknown)</span>
+                  </label>
                   <input
                     type="number"
                     min="1"
                     max="50"
-                    placeholder="e.g. 4"
+                    placeholder="e.g. 4 (leave blank if unconfirmed)"
                     value={existingFloors}
                     onChange={(e) => setExistingFloors(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
               </div>
@@ -429,7 +449,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   <label className="block font-semibold text-slate-300">Zoning Code / Subzone</label>
                   <input
                     type="text"
-                    placeholder="e.g. K.1 (Commercial / Office)"
+                    placeholder="e.g. KT + K-1 (Commercial / Hospitality)"
                     value={zoneCode}
                     onChange={(e) => setZoneCode(e.target.value)}
                     className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
@@ -439,7 +459,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   <label className="block font-semibold text-slate-300">Subzone Name</label>
                   <input
                     type="text"
-                    placeholder="e.g. Perkantoran, Perdagangan dan Jasa"
+                    placeholder="e.g. Commercial / Hospitality"
                     value={zoneName}
                     onChange={(e) => setZoneName(e.target.value)}
                     className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
@@ -495,9 +515,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     type="number"
                     min="1"
                     max="80"
+                    placeholder="e.g. 14 (leave blank if unknown)"
                     value={statutoryMaxFloors}
                     onChange={(e) => setStatutoryMaxFloors(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
                 <div className="space-y-1">
@@ -507,9 +528,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     min="3"
                     max="300"
                     step="0.5"
+                    placeholder="e.g. 48 (leave blank if unknown)"
                     value={statutoryMaxHeightMeters}
                     onChange={(e) => setStatutoryMaxHeightMeters(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
               </div>
@@ -521,9 +543,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     type="number"
                     min="0"
                     step="0.5"
+                    placeholder="e.g. 8 (standard assumption)"
                     value={setbackFront}
                     onChange={(e) => setSetbackFront(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
                 <div className="space-y-1">
@@ -532,9 +555,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     type="number"
                     min="0"
                     step="0.5"
+                    placeholder="e.g. 5 (standard assumption)"
                     value={setbackRear}
                     onChange={(e) => setSetbackRear(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
                 <div className="space-y-1">
@@ -543,9 +567,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     type="number"
                     min="0"
                     step="0.5"
+                    placeholder="e.g. 4 (standard assumption)"
                     value={setbackSide}
                     onChange={(e) => setSetbackSide(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
               </div>
@@ -558,17 +583,22 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2 space-y-1">
                   <label className="block font-semibold text-slate-300">
-                    Asking Price <span className="text-slate-500 font-normal">(e.g. 125,300,000,000 / Rp 125.3B)</span>
+                    Asking Price <span className="text-slate-500 font-normal">(e.g. 125,290,000,000 / Rp 125.29B)</span>
                   </label>
                   <input
                     type="number"
                     min="0"
-                    step="1000000"
-                    placeholder="e.g. 125300000000"
+                    step="any"
+                    placeholder="e.g. 125290000000"
                     value={askingPriceAmount}
                     onChange={(e) => setAskingPriceAmount(e.target.value)}
                     className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                   />
+                  {parsedPrice > 0 && (
+                    <span className="text-[10px] text-amber-400 font-mono block">
+                      {formatRupiahHelper(parsedPrice)}
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="block font-semibold text-slate-300">Currency</label>
@@ -586,24 +616,29 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
 
               <div className="space-y-1">
                 <label className="block font-semibold text-slate-300">
-                  Government Tax Benchmark / NJOP (IDR) <span className="text-slate-500 font-normal">(e.g. Rp 95,000,000,000)</span>
+                  Government Tax Benchmark / NJOP (IDR) <span className="text-slate-500 font-normal">(e.g. Rp 104,405,760,000)</span>
                 </label>
                 <input
                   type="number"
                   min="0"
-                  step="1000000"
-                  placeholder="e.g. 95000000000"
+                  step="any"
+                  placeholder="e.g. 104405760000"
                   value={njopAmount}
                   onChange={(e) => setNjopAmount(e.target.value)}
                   className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
                 />
+                {parsedNJOP > 0 && (
+                  <span className="text-[10px] text-sky-400 font-mono block">
+                    {formatRupiahHelper(parsedNJOP)}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-1">
                 <label className="block font-semibold text-slate-300">Valuation Notes & Deal Terms</label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Target acquisition price equates to ~Rp 62.2M/m² land basis or Rp 9.3M/m² permissible statutory GFA basis."
+                  placeholder="e.g. Target acquisition price equates to ~Rp 62.21M/m² land basis or Rp 9.35M/m² permissible statutory GFA basis."
                   value={valuationBasisNotes}
                   onChange={(e) => setValuationBasisNotes(e.target.value)}
                   className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg p-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8] resize-none"

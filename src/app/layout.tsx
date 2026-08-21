@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   description: "Deterministic spatial due diligence workspace, cadastral verification, and massing generator for property acquisition appraisal.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"

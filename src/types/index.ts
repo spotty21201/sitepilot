@@ -280,7 +280,8 @@ export interface CaseSummary {
 
 export interface ExistingAssetInfo {
   gfa: number;              // in m² (e.g. 3,760 m²)
-  floors: number;           // e.g. 4 storeys
+  floors?: number;          // e.g. 4 storeys (undefined if unconfirmed)
+  isFloorsAssumed?: boolean;
   description?: string;     // e.g. "Operational Sharia Boutique Hotel"
   currentStatus?: string;   // e.g. "Operational", "Vacant", "Underutilized"
 }

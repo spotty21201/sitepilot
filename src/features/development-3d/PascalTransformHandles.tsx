@@ -1,12 +1,9 @@
-'use client';
-
-import React from 'react';
 import * as THREE from 'three';
 import { BuildingMass } from '@/types';
 
 export type HandleType = 'EAST_WIDTH' | 'WEST_WIDTH' | 'SOUTH_LENGTH' | 'NORTH_LENGTH' | 'TOP_HEIGHT';
 
-interface PascalTransformHandlesProps {
+export interface PascalTransformHandlesProps {
   selectedMass: BuildingMass;
   camera: THREE.Camera;
   renderer: THREE.WebGLRenderer;

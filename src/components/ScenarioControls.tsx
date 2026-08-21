@@ -42,7 +42,6 @@ export function ScenarioControls({
   onFitMassingToEnvelope,
   onResetScenario,
   onOpenCompareModal,
-  onDuplicateScenario,
   project
 }: ScenarioControlsProps) {
   const [copied, setCopied] = useState(false);
@@ -127,8 +126,12 @@ export function ScenarioControls({
     a.download = exportFilename;
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      if (document.body.contains(a)) {
+        document.body.removeChild(a);
+      }
+      URL.revokeObjectURL(url);
+    }, 1500);
 
     setDownloadedToast(exportFilename);
     setTimeout(() => setDownloadedToast(null), 4000);

@@ -467,9 +467,10 @@ export interface SetbackEncroachmentResult {
 export function checkSetbackEncroachments(
   grossSiteArea: number,
   setbacks: Setbacks,
-  masses: BuildingMass[]
+  masses: BuildingMass[],
+  frontageWidth?: number
 ): SetbackEncroachmentResult[] {
-  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, 110);
+  const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, frontageWidth || 110);
   const results: SetbackEncroachmentResult[] = [];
 
   for (const mass of masses) {
@@ -731,6 +732,7 @@ export interface ScenarioComplianceOptions {
   maxFAR?: number;
   maxCoveragePct?: number;
   minKDHPct?: number;
+  frontageLength?: number;
 }
 
 /**
@@ -755,9 +757,14 @@ export function evaluateScenarioCompliance(
   const zoningName = options.zoningName || (hasZoningEvidence ? 'Subzone R.9' : undefined);
 
   const warnings: string[] = [];
-  const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters || 32.0;
+  const hasExplicitHeight = options.maxHeightMeters !== undefined || options.maxFloors !== undefined || hasZoningEvidence;
+  const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters || (options.maxFloors ? options.maxFloors * 3.5 : 32.0);
   const STATUTORY_MAX_FLOORS = options.maxFloors || 8;
+
+  const hasExplicitFAR = options.maxFAR !== undefined || hasZoningEvidence;
   const STATUTORY_MAX_FAR = options.maxFAR || 3.20;
+
+  const hasExplicitCoverage = options.maxCoveragePct !== undefined || hasZoningEvidence;
   const STATUTORY_MAX_KDB_PERCENT = options.maxCoveragePct || 55.0;
 
   const heightOverrunM = Math.max(0, Math.round((metrics.totalHeightMeters - STATUTORY_HEIGHT_CAP_METERS) * 10) / 10);
@@ -766,23 +773,23 @@ export function evaluateScenarioCompliance(
   const outOfBoundsAreaM2 = metrics.outOfBoundsAreaM2 || 0;
   const collisionVolumeM3 = pairwiseOverlap?.overlapVolumeM3 || 0;
 
-  // 1. Height checks (both absolute meters and floor count)
-  if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS) {
+  // 1. Height checks (only if explicit or zoning evidence exists)
+  if (hasExplicitHeight && (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS)) {
     warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds ${zoningName ? `${zoningName} ` : ''}${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m cap by +${heightOverrunM.toFixed(1)}m.`);
   }
 
-  // 2. FAR check
-  if (metrics.farKLB > STATUTORY_MAX_FAR + 0.005) {
+  // 2. FAR check (only if explicit or zoning evidence exists)
+  if (hasExplicitFAR && (metrics.farKLB > STATUTORY_MAX_FAR + 0.005)) {
     warnings.push(`FAR / KLB (${metrics.farKLB.toFixed(2)}x) exceeds allowable ${STATUTORY_MAX_FAR.toFixed(2)}x by +${farOverrun.toFixed(2)}x.`);
   }
 
-  // 3. KDB Site Coverage check
-  if (metrics.siteCoveragePercentage > STATUTORY_MAX_KDB_PERCENT + 0.05) {
+  // 3. KDB Site Coverage check (only if explicit or zoning evidence exists)
+  if (hasExplicitCoverage && (metrics.siteCoveragePercentage > STATUTORY_MAX_KDB_PERCENT + 0.05)) {
     warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds ${STATUTORY_MAX_KDB_PERCENT}% KDB limit by +${coverageOverrunPercent.toFixed(1)}%.`);
   }
 
   // 4. Setback Encroachments
-  const encroachments = checkSetbackEncroachments(grossSiteArea, setbacks, masses);
+  const encroachments = checkSetbackEncroachments(grossSiteArea, setbacks, masses, options.frontageLength);
   for (const enc of encroachments) {
     warnings.push(enc.description);
   }
@@ -830,12 +837,12 @@ export function evaluateScenarioCompliance(
       statusPillLabel = `Collision: ${collisionVolumeM3.toLocaleString()} m³ overlap`;
       decisionText = `Non-compliant: Active 3D mass collision (${collisionVolumeM3.toLocaleString()} m³ overlap volume).`;
       recommendedAction = 'Separate intersecting building masses to eliminate volumetric clash.';
-    } else if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > 8) {
+    } else if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS) {
       violationCategory = 'HEIGHT';
       assessmentStatus = 'NON_COMPLIANT_HEIGHT';
       statusPillLabel = `Height Overrun: +${heightOverrunM.toFixed(1)}m (>${STATUTORY_HEIGHT_CAP_METERS}m cap)`;
       decisionText = `Non-compliant: Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds allowable cap (${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) by +${heightOverrunM.toFixed(1)}m.`;
-      recommendedAction = `Reduce massing storeys to 8 floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal municipal height variance application.`;
+      recommendedAction = `Reduce massing storeys to ${STATUTORY_MAX_FLOORS} floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal municipal height variance application.`;
     } else if (outOfBoundsAreaM2 > 0.5) {
       violationCategory = 'OUT_OF_BOUNDS';
       assessmentStatus = 'NON_COMPLIANT_OUT_OF_BOUNDS';

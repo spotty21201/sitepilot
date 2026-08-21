@@ -5,7 +5,6 @@ import { BuildingMass, DevelopmentScenario, Setbacks } from '@/types';
 import { ArchitecturalNumericInput } from './ArchitecturalNumericInput';
 import { 
   Box, 
-  Layers, 
   Move, 
   Maximize2, 
   ArrowUpRight, 

@@ -39,7 +39,18 @@ function initializeProjectScenarios(rawProject: Project): Project {
       s.assumptionsUsed.setbacks,
       s.masses,
       s.metrics,
-      pairwiseOverlap
+      pairwiseOverlap,
+      {
+        scenarioName: s.name,
+        hasZoningEvidence: Boolean(rawProject.site.hasZoningEvidence),
+        maxFAR: rawProject.zoningLimits?.maxFAR,
+        maxCoveragePct: rawProject.zoningLimits?.maxCoveragePct,
+        minKDHPct: rawProject.zoningLimits?.minKDHPct,
+        maxHeightMeters: rawProject.zoningLimits?.maxHeightMeters,
+        maxFloors: rawProject.zoningLimits?.maxFloors,
+        zoningName: rawProject.zoningLimits?.zoneName,
+        frontageLength: rawProject.site.frontageLength
+      }
     );
     return {
       ...s,
@@ -162,14 +173,25 @@ export default function SitePilotDecisionRoom() {
       const updatedSite = { ...prev.site, grossSiteArea: newArea };
       const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
         const originalScen = prev.scenarios.find(s => s.id === scen.id) || scen;
-        const newMetrics = calculateDevelopmentMetrics(newArea, scen.masses, scen.assumptionsUsed.setbacks);
+        const newMetrics = calculateDevelopmentMetrics(newArea, scen.masses, scen.assumptionsUsed.setbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(scen.masses);
         const complianceReport = evaluateScenarioCompliance(
           newArea,
           scen.assumptionsUsed.setbacks,
           scen.masses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const updatedScenObj = {
@@ -207,7 +229,8 @@ export default function SitePilotDecisionRoom() {
         const newMetrics = calculateDevelopmentMetrics(
           prev.site.grossSiteArea, 
           updatedMasses, 
-          scen.assumptionsUsed.setbacks
+          scen.assumptionsUsed.setbacks,
+          prev.site.frontageLength
         );
         const pairwiseOverlap = calculateMassPairwiseIntersections(updatedMasses);
         const complianceReport = evaluateScenarioCompliance(
@@ -215,7 +238,18 @@ export default function SitePilotDecisionRoom() {
           scen.assumptionsUsed.setbacks,
           updatedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const tempScen: DevelopmentScenario = {
@@ -278,14 +312,25 @@ export default function SitePilotDecisionRoom() {
           return mass;
         });
 
-        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, updatedMasses, updatedSetbacks);
+        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, updatedMasses, updatedSetbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(updatedMasses);
         const complianceReport = evaluateScenarioCompliance(
           prev.site.grossSiteArea,
           updatedSetbacks,
           updatedMasses,
           newMetrics,
-          pairwiseOverlap
+          pairwiseOverlap,
+          {
+            scenarioName: scen.name,
+            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
+            maxFAR: prev.zoningLimits?.maxFAR,
+            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
+            minKDHPct: prev.zoningLimits?.minKDHPct,
+            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
+            maxFloors: prev.zoningLimits?.maxFloors,
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
+          }
         );
 
         const tempScen: DevelopmentScenario = {
@@ -333,7 +378,7 @@ export default function SitePilotDecisionRoom() {
           prev.site.frontageLength
         );
 
-        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, fittedMasses, scen.assumptionsUsed.setbacks);
+        const newMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, fittedMasses, scen.assumptionsUsed.setbacks, prev.site.frontageLength);
         const pairwiseOverlap = calculateMassPairwiseIntersections(fittedMasses);
         const complianceReport = evaluateScenarioCompliance(
           prev.site.grossSiteArea,
@@ -349,7 +394,8 @@ export default function SitePilotDecisionRoom() {
             minKDHPct: prev.zoningLimits?.minKDHPct,
             maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
             maxFloors: prev.zoningLimits?.maxFloors,
-            zoningName: prev.zoningLimits?.zoneName
+            zoningName: prev.zoningLimits?.zoneName,
+            frontageLength: prev.site.frontageLength
           }
         );
 
@@ -379,7 +425,7 @@ export default function SitePilotDecisionRoom() {
       if (!targetScenario) return prev;
 
       const baseMasses = targetScenario.originalMasses || targetScenario.masses;
-      const baselineMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, baseMasses, targetScenario.assumptionsUsed.setbacks);
+      const baselineMetrics = calculateDevelopmentMetrics(prev.site.grossSiteArea, baseMasses, targetScenario.assumptionsUsed.setbacks, prev.site.frontageLength);
       const pairwiseOverlap = calculateMassPairwiseIntersections(baseMasses);
       const complianceReport = evaluateScenarioCompliance(
         prev.site.grossSiteArea,
@@ -395,7 +441,8 @@ export default function SitePilotDecisionRoom() {
           minKDHPct: prev.zoningLimits?.minKDHPct,
           maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
           maxFloors: prev.zoningLimits?.maxFloors,
-          zoningName: prev.zoningLimits?.zoneName
+          zoningName: prev.zoningLimits?.zoneName,
+          frontageLength: prev.site.frontageLength
         }
       );
 

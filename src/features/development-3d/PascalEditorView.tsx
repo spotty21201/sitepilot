@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { BuildingMass, DevelopmentScenario, SiteGeometry } from '@/types';
 import { getCanonicalParcelBounds } from '@/lib/geometry/engine';
-import { Activity, ShieldAlert, CheckCircle2, RotateCcw, Box, Layers, Terminal } from 'lucide-react';
+import { Activity, Box, Terminal } from 'lucide-react';
 import { PascalDiagnosticsModal } from './PascalDiagnosticsModal';
 import { getPascalRuntimeDiagnostics } from './pascal-plugin';
 
@@ -25,15 +25,13 @@ const NativePascalEditor = dynamic(
 interface PascalEditorViewProps {
   site: SiteGeometry;
   activeScenario: DevelopmentScenario;
-  onUpdateScenarioMasses: (scenarioId: string, updatedMasses: BuildingMass[]) => void;
+  onUpdateScenarioMasses?: (scenarioId: string, updatedMasses: BuildingMass[]) => void;
 }
 
 export function PascalEditorView({
   site,
-  activeScenario,
-  onUpdateScenarioMasses
+  activeScenario
 }: PascalEditorViewProps) {
-  const [editorReady, setEditorReady] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const setbacks = activeScenario.assumptionsUsed.setbacks;
