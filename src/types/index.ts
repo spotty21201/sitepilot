@@ -62,6 +62,9 @@ export interface SiteGeometry {
   setbacks: Setbacks;
   frontageLength?: number;     // in meters
   accessRoadWidth?: number;    // in meters
+  address?: string;
+  projectName?: string;
+  hasZoningEvidence?: boolean;
   coordinateSystem: 'WGS84' | 'EPSG:3857';
   boundingBox?: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
@@ -140,7 +143,7 @@ export interface Assumption {
   parameter: string;           // e.g. "Maximum Height", "Front Setback", "FAR / KLB"
   workingValue: string | number;
   unit?: string;
-  source: string;              // e.g. "Standard Menteng Mixed-Use Rule of Thumb"
+  source: string;              // e.g. "Municipal Urban Planning Rule of Thumb"
   classification: EvidenceClassification;
   verificationStatus: 'VERIFIED' | 'UNVERIFIED' | 'CHALLENGED_BY_NEW_EVIDENCE';
   affectedScenarioIds: string[];
@@ -229,6 +232,10 @@ export interface DevelopmentScenario {
     statusPillLabel: string;
     isGreen: boolean;
     summaryText: string;
+    decisionText?: string;
+    recommendedAction?: string;
+    identifiedRisks?: string[];
+    assessmentStatus?: string;
     primaryWarning?: string;
     violations: string[];
   };

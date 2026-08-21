@@ -74,7 +74,7 @@ export function ViewportCanvas({
         camera.lookAt(0, 0, 0);
         break;
       case 'SOUTH':
-      case 'FRONT': // South street frontage on Teuku Umar
+      case 'FRONT': // Primary street frontage (positive Y)
         camera.position.set(0, 20, bounds.maxY + 150);
         camera.up.set(0, 1, 0);
         camera.lookAt(0, 14, 0);
@@ -238,7 +238,7 @@ export function ViewportCanvas({
     buildableEdgeLine.position.set(bCenterX, 0.06, bCenterZ);
     scene.add(buildableEdgeLine);
 
-    // 3. Arterial Frontage Road (Jl. Teuku Umar)
+    // 3. Primary Arterial Frontage Road
     const roadGeo = new THREE.PlaneGeometry(bounds.width + 40, 20);
     const roadMat = new THREE.MeshStandardMaterial({ color: '#0d1118', roughness: 0.9 });
     const roadMesh = new THREE.Mesh(roadGeo, roadMat);
@@ -830,7 +830,7 @@ export function ViewportCanvas({
 
           {(cameraPreset === 'SOUTH' || cameraPreset === 'FRONT') && (
             <div className="self-center bg-[#161c28]/95 border border-slate-700 px-3 py-1 rounded text-slate-300 text-xs font-mono font-semibold backdrop-blur-md shadow-md">
-              JL. TEUKU UMAR FRONTAGE (110.0M)
+              {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} FRONTAGE (${bounds.width.toFixed(1)}M)` : `PRIMARY STREET FRONTAGE (${bounds.width.toFixed(1)}M)`}
             </div>
           )}
         </div>

@@ -26,7 +26,7 @@ export interface CreateCaseParams {
   objective?: string;
   askingPriceAmount?: number;
   askingPriceCurrency?: string;
-  grossSiteArea: number;
+  grossSiteArea?: number;
   frontageLength?: number;
 }
 
@@ -158,7 +158,9 @@ export function resetDemoCase(): Project {
 export function createCase(params: CreateCaseParams): Project {
   const caseId = `proj-${Date.now()}`;
   const now = new Date().toISOString();
-  const grossSiteArea = Math.max(100, Math.round(params.grossSiteArea));
+  const grossSiteArea = params.grossSiteArea && !isNaN(params.grossSiteArea) && params.grossSiteArea > 0
+    ? Math.max(100, Math.round(params.grossSiteArea))
+    : 10000;
   
   // Calculate reasonable initial frontage and rectangular bounding dimensions
   const standardFrontage = params.frontageLength && params.frontageLength > 0
@@ -203,7 +205,10 @@ export function createCase(params: CreateCaseParams): Project {
 
   const metricsA = calculateDevelopmentMetrics(grossSiteArea, massesA, defaultSetbacks);
   const overlapA = calculateMassPairwiseIntersections(massesA);
-  const complianceA = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesA, metricsA, overlapA);
+  const complianceA = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesA, metricsA, overlapA, {
+    scenarioName: 'Scenario A: Baseline Concept',
+    hasZoningEvidence: false
+  });
 
   const scenarioA: DevelopmentScenario = {
     id: `scen-${caseId}-01`,
@@ -263,7 +268,10 @@ export function createCase(params: CreateCaseParams): Project {
 
   const metricsB = calculateDevelopmentMetrics(grossSiteArea, massesB, defaultSetbacks);
   const overlapB = calculateMassPairwiseIntersections(massesB);
-  const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesB, metricsB, overlapB);
+  const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, massesB, metricsB, overlapB, {
+    scenarioName: 'Scenario B: Mixed-Use Option (Preferred)',
+    hasZoningEvidence: false
+  });
 
   const scenarioB: DevelopmentScenario = {
     id: `scen-${caseId}-02`,

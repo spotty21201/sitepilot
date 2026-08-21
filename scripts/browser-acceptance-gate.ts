@@ -111,7 +111,7 @@ async function runAcceptanceGate() {
     await page.waitForSelector('role=dialog[name="New Opportunity Intake"]');
     await page.fill('input[placeholder*="Surabaya CBD"]', 'Synthetic Case Alpha');
     await page.fill('input[placeholder*="Jl. Pemuda"]', 'Jl. Industri Raya No. 45');
-    await page.fill('input[placeholder*="12500"]', '10000');
+    await page.fill('input[placeholder*="10000"]', '10000');
     await page.fill('input[placeholder*="250000000000"]', '100000000000');
     await page.fill('textarea[placeholder*="Assess yield"]', 'Synthetic feasibility trial for logistics & commercial hub.');
     await page.click('button:has-text("Create Opportunity")');
@@ -134,7 +134,7 @@ async function runAcceptanceGate() {
     await page.waitForSelector('role=dialog[name="New Opportunity Intake"]');
     await page.fill('input[placeholder*="Surabaya CBD"]', 'Synthetic Case Beta');
     await page.fill('input[placeholder*="Jl. Pemuda"]', 'Jl. Gatot Subroto No. 99');
-    await page.fill('input[placeholder*="12500"]', '18000');
+    await page.fill('input[placeholder*="10000"]', '18000');
     await page.click('button:has-text("Create Opportunity")');
     await page.waitForSelector('text=Synthetic Case Beta');
     record(5, 'Create a second case', 'PASSED', 'Created "Synthetic Case Beta" with 18,000 m² area.');

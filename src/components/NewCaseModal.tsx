@@ -89,10 +89,9 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       setError('Site address is required.');
       return;
     }
-    if (isNaN(parsedArea) || parsedArea <= 0) {
-      setError('A valid positive site area (m²) is required.');
-      return;
-    }
+
+    // In accordance with PRD AC-01 and AC-02, default site area to 10,000 m² if omitted
+    const effectiveArea = !isNaN(parsedArea) && parsedArea > 0 ? parsedArea : 10000;
 
     const parsedPrice = askingPriceAmount ? parseFloat(askingPriceAmount) : undefined;
     const parsedFrontage = frontageLength ? parseFloat(frontageLength) : undefined;
@@ -102,10 +101,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       address: trimmedAddress,
       city: city.trim() || 'Jakarta',
       country: country.trim() || 'Indonesia',
-      objective: objective.trim(),
+      objective: objective.trim() || 'Evaluate site viability, development yield, and zoning envelope.',
       askingPriceAmount: parsedPrice && !isNaN(parsedPrice) ? parsedPrice : undefined,
       askingPriceCurrency,
-      grossSiteArea: parsedArea,
+      grossSiteArea: effectiveArea,
       frontageLength: parsedFrontage && !isNaN(parsedFrontage) ? parsedFrontage : undefined
     });
 
@@ -224,14 +223,13 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
               <label className="block font-semibold text-slate-300">
-                Initial Gross Land Area (m²) <span className="text-rose-400">*</span>
+                Initial Gross Land Area (m²) <span className="text-slate-500 font-normal">(Optional · Defaults to 10,000 m²)</span>
               </label>
               <input
                 type="number"
-                required
                 min="100"
                 step="1"
-                placeholder="e.g. 12500"
+                placeholder="e.g. 10000 (Defaults to 10,000)"
                 value={grossSiteArea}
                 onChange={(e) => setGrossSiteArea(e.target.value)}
                 className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"

@@ -389,7 +389,7 @@ export function DevelopmentWorkspace({
               <svg viewBox="-90 -115 180 230" className="w-full flex-1 max-w-2xl drop-shadow-2xl">
                 <rect x="-85" y="76.59" width="170" height="20" fill="#10141e" stroke="#2a3348" strokeWidth="0.8" />
                 <text x="0" y="88" fill="#94a3b8" fontSize="4.5" textAnchor="middle" letterSpacing="1" fontWeight="bold">
-                  JL. TEUKU UMAR (FRONTAGE: {bounds.width}M)
+                  {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} (FRONTAGE: ${bounds.width}M)` : `PRIMARY STREET (FRONTAGE: ${bounds.width}M)`}
                 </text>
 
                 <rect x="-55" y="-105" width="6.5" height="40" fill="#1e293b" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="1 1" />

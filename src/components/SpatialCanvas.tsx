@@ -62,7 +62,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
         camera.lookAt(0, 0, 0);
         break;
       case 'SOUTH':
-      case 'FRONT': // South street frontage on Teuku Umar (positive Y)
+      case 'FRONT': // Primary street frontage (positive Y)
         camera.position.set(0, 18, bounds.maxY + 130);
         camera.lookAt(0, 14, 0);
         break;
@@ -180,7 +180,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
     buildableEdgeLine.position.set(bCenterX, 0.06, bCenterZ);
     scene.add(buildableEdgeLine);
 
-    // Frontage Road (Jl. Teuku Umar at positive Y / South)
+    // Primary Frontage Road (positive Y / South)
     const roadGeo = new THREE.PlaneGeometry(bounds.width + 40, 20);
     const roadMat = new THREE.MeshStandardMaterial({ color: '#0d1118', roughness: 0.9 });
     const roadMesh = new THREE.Mesh(roadGeo, roadMat);
@@ -505,7 +505,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
               {/* Frontage Road Baseline Callout */}
               {(cameraPreset === 'SOUTH' || cameraPreset === 'FRONT') && (
                 <div className="self-center bg-[#161c28]/90 border border-slate-700 px-3 py-1 rounded text-slate-300 text-xs font-mono font-semibold">
-                  JL. TEUKU UMAR FRONTAGE (110.0M)
+                  {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} FRONTAGE (${bounds.width.toFixed(1)}M)` : `PRIMARY STREET FRONTAGE (${bounds.width.toFixed(1)}M)`}
                 </div>
               )}
             </div>
@@ -519,7 +519,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
               {/* Main Road Frontage at South */}
               <rect x="-85" y="76.59" width="170" height="20" fill="#10141e" stroke="#2a3348" strokeWidth="0.8" />
               <text x="0" y="88" fill="#94a3b8" fontSize="4.5" textAnchor="middle" letterSpacing="1" fontWeight="bold">
-                JL. TEUKU UMAR (FRONTAGE: {bounds.width}M)
+                {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} (FRONTAGE: ${bounds.width}M)` : `PRIMARY STREET (FRONTAGE: ${bounds.width}M)`}
               </text>
 
               {/* 6.5m Continuous Northern Access Corridor */}

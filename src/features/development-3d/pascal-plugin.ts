@@ -15,37 +15,37 @@ export interface PascalNodeDefinition {
 export const SITEPILOT_PASCAL_NODE_DEFINITIONS: Record<string, PascalNodeDefinition> = {
   'sitepilot:site-boundary': {
     kind: 'sitepilot:site-boundary',
-    label: 'Site Cadastral Boundary (16,850 m²)',
+    label: 'Site Boundary',
     category: 'site',
-    description: '110m x 153.18m metric parcel boundary centered at origin (0,0)',
+    description: 'Metric parcel boundary polygon centered at origin (0,0)',
     isEditable: false
   },
   'sitepilot:buildable-envelope': {
     kind: 'sitepilot:buildable-envelope',
-    label: 'Net Buildable Envelope (13,718 m²)',
+    label: 'Net Buildable Envelope',
     category: 'envelope',
-    description: 'Setback-bounded buildable polygon with 10m front, 6m rear, 5m side clearances',
+    description: 'Setback-bounded buildable polygon with directional perimeter clearances',
     isEditable: false
   },
   'sitepilot:access-arterial': {
     kind: 'sitepilot:access-arterial',
-    label: 'Jl. Teuku Umar Frontage Access',
+    label: 'Primary Street Frontage Access',
     category: 'access',
-    description: '110m primary arterial roadway access datum',
+    description: 'Primary roadway access datum along site frontage',
     isEditable: false
   },
   'sitepilot:access-corridor': {
     kind: 'sitepilot:access-corridor',
-    label: 'Northern Secondary Access Strip (6.5m)',
+    label: 'Secondary Access Corridor',
     category: 'access',
-    description: '40m-long secondary access corridor along north perimeter',
+    description: 'Secondary access corridor along site perimeter',
     isEditable: false
   },
   'sitepilot:zoning-envelope': {
     kind: 'sitepilot:zoning-envelope',
-    label: 'Subzone R.9 Maximum 32m Height Envelope',
+    label: 'Regulatory Height Envelope',
     category: 'constraint',
-    description: '32.0m height cap translucent volume',
+    description: 'Statutory or assumed height cap volume',
     isEditable: false
   },
   'sitepilot:development-mass': {

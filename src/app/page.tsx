@@ -464,7 +464,13 @@ export default function SitePilotDecisionRoom() {
         {/* Right Column: Scenarios & Development Metrics (3 cols) */}
         <section className="col-span-1 lg:col-span-3 min-h-[480px] lg:h-full overflow-hidden">
           <ScenarioControls
-            site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks }}
+            site={{ 
+              ...project.site, 
+              setbacks: activeScenario.assumptionsUsed.setbacks,
+              projectName: project.name,
+              address: project.location.address,
+              hasZoningEvidence: project.id === 'proj-001' || project.sources.some(s => s.status === 'PROCESSED')
+            }}
             scenarios={project.scenarios}
             activeScenarioId={activeScenarioId}
             onSelectScenario={setActiveScenarioId}

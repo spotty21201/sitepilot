@@ -77,7 +77,7 @@ export function adaptSitePilotToPascalScene(
   nodes.push({
     id: 'node-zoning-envelope',
     kind: 'sitepilot:zoning-envelope',
-    name: `Subzone R.9 Height Envelope (32.0m / 8 Fl)`,
+    name: `Regulatory Height Envelope (${zoningHeightCapMeters.toFixed(1)}m)`,
     position: [bCenterX, zoningHeightCapMeters / 2, bCenterZ],
     dimensions: [bounds.buildableWidth, zoningHeightCapMeters, bounds.buildableLength],
     properties: {

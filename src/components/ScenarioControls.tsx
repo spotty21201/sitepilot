@@ -62,20 +62,10 @@ export function ScenarioControls({
   const metrics = activeScenario.metrics;
   const currentSetback = activeScenario.assumptionsUsed.setbacks.front;
 
-  const baselineFloors = activeScenario.id === 'scen-001' ? 4 : activeScenario.id === 'scen-002' ? 8 : 12;
-  const baselineGFA = activeScenario.id === 'scen-001' ? 24000 : activeScenario.id === 'scen-002' ? 40400 : 50400;
-
   const isFittedToSetback = activeScenario.isFittedOverride === true || activeScenario.editClassification === 'FITTED_TO_SETBACK';
-  const isUserOverride = 
-    (metrics.totalFloors !== baselineFloors || 
-     activeScenario.assumptionsUsed.setbacks.front !== 10 ||
-     activeScenario.assumptionsUsed.setbacks.rear !== 6 ||
-     activeScenario.assumptionsUsed.setbacks.sideLeft !== 5 ||
-     activeScenario.assumptionsUsed.setbacks.sideRight !== 5 ||
-     activeScenario.editClassification === 'USER_GEOMETRY_EDIT' ||
-     activeScenario.editClassification === 'HEIGHT_OVERRIDE' ||
-     activeScenario.editClassification === 'PROGRAM_OVERRIDE') &&
-    !isFittedToSetback;
+  const isUserOverride = (activeScenario.editClassification === 'USER_GEOMETRY_EDIT' || 
+    activeScenario.editClassification === 'HEIGHT_OVERRIDE' || 
+    activeScenario.editClassification === 'PROGRAM_OVERRIDE') && !isFittedToSetback;
 
   const isOverridden = isUserOverride || isFittedToSetback;
   const hasCollision = activeScenario.pairwiseOverlap?.hasOverlap;
@@ -97,12 +87,12 @@ export function ScenarioControls({
     if (isOutOfBounds) {
       return `⚠️ Out of Bounds: Massing extends ${metrics.outOfBoundsAreaM2?.toLocaleString()} m² beyond parcel perimeter.`;
     }
-    if (metrics.totalHeightMeters > 32.0) {
+    if (metrics.totalHeightMeters > 32.05) {
       const overrun = Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10;
-      return `⚠️ Non-compliant: Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 32m limit by ${overrun}m.`;
+      return `⚠️ Height Overrun: Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds allowable 32m limit by +${overrun}m.`;
     }
     if (encroachments.length > 0) {
-      return `⚠️ Non-compliant: ${encroachments[0].description}`;
+      return `⚠️ Setback Warning: ${encroachments[0].description}`;
     }
     return activeScenario.description;
   })();
@@ -172,6 +162,13 @@ export function ScenarioControls({
     masses: activeScenario.masses.map(m => ({ id: m.id, floors: m.floors, pos: m.position, dim: m.dimensions }))
   });
 
+  const baseFloors = activeScenario.originalMasses 
+    ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
+    : metrics.totalFloors;
+  const baseGFA = activeScenario.originalMasses
+    ? activeScenario.originalMasses.reduce((acc, m) => acc + m.gfa, 0)
+    : metrics.totalGFA;
+
   const isAssessmentStale = Boolean(assessment && assessedSnapshot && assessedSnapshot !== getCurrentSnapshot());
 
   const handleGenerateAssessment = async () => {
@@ -187,7 +184,9 @@ export function ScenarioControls({
           scenarioName: activeScenario.name,
           grossSiteArea: site.grossSiteArea,
           setbacks: activeScenario.assumptionsUsed.setbacks,
-          masses: activeScenario.masses
+          projectName: site.projectName,
+          address: site.address,
+          hasZoningEvidence: Boolean(site.hasZoningEvidence)
         })
       });
       const data = await res.json();
@@ -375,7 +374,7 @@ export function ScenarioControls({
           <div className="p-2.5 bg-indigo-950/30 border border-indigo-800/50 rounded-lg space-y-1 text-xs">
             <div className="flex items-center justify-between text-slate-300 text-[11px]">
               <span className="text-slate-400">Base Concept:</span>
-              <span className="font-mono">{baselineFloors} Storeys ({baselineGFA.toLocaleString()} m² GFA)</span>
+              <span className="font-mono">{baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
             </div>
             <div className="flex items-center justify-between text-indigo-200 font-semibold text-[11px]">
               <span className="text-indigo-300">Working Geometry:</span>
@@ -384,7 +383,7 @@ export function ScenarioControls({
           </div>
         ) : (
           <div className="flex items-center justify-between text-[10px] text-slate-400 bg-[#161c28] px-2.5 py-1.5 rounded border border-[#222c40]">
-            <span>Base Concept: {baselineFloors} Storeys</span>
+            <span>Base Concept: {baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
             <span className="font-mono text-emerald-400 font-semibold">Active Baseline</span>
           </div>
         )}

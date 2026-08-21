@@ -625,7 +625,7 @@ export function checkConstraintViolations(
   const maxH = constraints.maxHeightMeters || 32.0;
   if (metrics.totalHeightMeters > maxH + 0.05 || (constraints.maxHeightFloors && metrics.totalFloors > constraints.maxHeightFloors)) {
     const overrunMeters = Math.max(0, Math.round((metrics.totalHeightMeters - maxH) * 10) / 10);
-    warnings.push(`Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds Subzone R.9 maximum allowable height (${maxH.toFixed(1)}m / ${constraints.maxHeightFloors || 8} floors) by ${overrunMeters.toFixed(1)}m.`);
+    warnings.push(`Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds maximum allowable height (${maxH.toFixed(1)}m / ${constraints.maxHeightFloors || 8} floors) by +${overrunMeters.toFixed(1)}m.`);
   }
 
   if (constraints.maxFAR && metrics.farKLB > constraints.maxFAR + 0.005) {
@@ -679,6 +679,15 @@ export interface CanonicalComplianceReport {
   };
 }
 
+export interface ScenarioComplianceOptions {
+  scenarioName?: string;
+  hasZoningEvidence?: boolean;
+  zoningName?: string;
+  maxHeightMeters?: number;
+  maxFAR?: number;
+  maxCoveragePct?: number;
+}
+
 /**
  * Single authoritative source of truth for compliance evaluation across the entire application.
  */
@@ -688,12 +697,22 @@ export function evaluateScenarioCompliance(
   masses: BuildingMass[],
   metrics: DevelopmentMetrics,
   pairwiseOverlap?: { hasOverlap: boolean; overlapVolumeM3: number; overlaps: { massA: string; massB: string }[], maxIntersectionDepthM?: number },
-  scenarioName?: string
+  scenarioNameOrOptions?: string | ScenarioComplianceOptions
 ): CanonicalComplianceReport {
+  const options: ScenarioComplianceOptions = typeof scenarioNameOrOptions === 'string'
+    ? { scenarioName: scenarioNameOrOptions }
+    : (scenarioNameOrOptions || {});
+
+  const scenarioName = options.scenarioName;
+  const hasZoningEvidence = options.hasZoningEvidence !== undefined
+    ? options.hasZoningEvidence
+    : (grossSiteArea === 16850 || (scenarioName ? (scenarioName.includes('Menteng') || scenarioName.includes('Subzone')) : false));
+  const zoningName = options.zoningName || (hasZoningEvidence ? 'Subzone R.9' : undefined);
+
   const warnings: string[] = [];
-  const STATUTORY_HEIGHT_CAP_METERS = 32.0;
-  const STATUTORY_MAX_FAR = 3.20;
-  const STATUTORY_MAX_KDB_PERCENT = 55.0;
+  const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters || 32.0;
+  const STATUTORY_MAX_FAR = options.maxFAR || 3.20;
+  const STATUTORY_MAX_KDB_PERCENT = options.maxCoveragePct || 55.0;
 
   const heightOverrunM = Math.max(0, Math.round((metrics.totalHeightMeters - STATUTORY_HEIGHT_CAP_METERS) * 10) / 10);
   const farOverrun = Math.max(0, Math.round((metrics.farKLB - STATUTORY_MAX_FAR) * 100) / 100);
@@ -702,18 +721,18 @@ export function evaluateScenarioCompliance(
   const collisionVolumeM3 = pairwiseOverlap?.overlapVolumeM3 || 0;
 
   // 1. Height checks (both absolute meters and floor count)
-  if (metrics.totalHeightMeters > 32.05 || metrics.totalFloors > 8) {
-    warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m cap by +${heightOverrunM.toFixed(1)}m.`);
+  if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > 8) {
+    warnings.push(`Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds ${zoningName ? `${zoningName} ` : ''}${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m cap by +${heightOverrunM.toFixed(1)}m.`);
   }
 
   // 2. FAR check
-  if (metrics.farKLB > 3.205) {
+  if (metrics.farKLB > STATUTORY_MAX_FAR + 0.005) {
     warnings.push(`FAR / KLB (${metrics.farKLB.toFixed(2)}x) exceeds allowable ${STATUTORY_MAX_FAR.toFixed(2)}x by +${farOverrun.toFixed(2)}x.`);
   }
 
   // 3. KDB Site Coverage check
-  if (metrics.siteCoveragePercentage > 55.05) {
-    warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds 55% KDB limit by +${coverageOverrunPercent.toFixed(1)}%.`);
+  if (metrics.siteCoveragePercentage > STATUTORY_MAX_KDB_PERCENT + 0.05) {
+    warnings.push(`Site coverage (${metrics.siteCoveragePercentage}%) exceeds ${STATUTORY_MAX_KDB_PERCENT}% KDB limit by +${coverageOverrunPercent.toFixed(1)}%.`);
   }
 
   // 4. Setback Encroachments
@@ -738,25 +757,39 @@ export function evaluateScenarioCompliance(
   // Determine primary violation category and labels
   let violationCategory: ComplianceViolationCategory = 'NONE';
   let assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' = 'COMPLIANT';
-  let statusPillLabel = 'Zoning: Compliant · Within Envelope';
-  let decisionText = `Compliant: Fully conforms to Subzone R.9 height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m), FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x), and setback envelopes.`;
-  let recommendedAction = scenarioName 
-    ? `Proceed with architectural schematic design and preliminary zoning verification for "${scenarioName}".`
-    : 'Proceed with architectural schematic design and preliminary zoning verification.';
+  
+  let statusPillLabel = hasZoningEvidence
+    ? 'Zoning: Compliant · Within Envelope'
+    : 'Provisional Study · Within Envelope';
+
+  let decisionText = hasZoningEvidence
+    ? `Compliant: Fully conforms to ${zoningName || 'applicable zoning'} height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m), FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x), and setback envelopes.`
+    : `Provisional Study: Envelope conforms to working geometric parameters (Height: ${metrics.totalHeightMeters.toFixed(1)}m, FAR: ${metrics.farKLB.toFixed(2)}x). Statutory municipal zoning compliance is UNKNOWN because official planning evidence (RDTR / KRK) is absent.`;
+
+  let recommendedAction = hasZoningEvidence
+    ? (scenarioName 
+        ? `Proceed with architectural schematic design and preliminary zoning verification for "${scenarioName}".`
+        : 'Proceed with architectural schematic design and preliminary zoning verification.')
+    : 'Obtain official municipal planning certificate (RDTR / KRK) to establish binding statutory FAR, height cap, and setback requirements.';
+
+  let summaryText = hasZoningEvidence
+    ? `Fully complies with ${zoningName || 'applicable zoning'} limits.`
+    : 'Geometric envelope contained. Statutory zoning compliance is unverified (no RDTR/KRK on file).';
 
   if (!isCompliant) {
+    summaryText = warnings[0];
     if (pairwiseOverlap && pairwiseOverlap.hasOverlap) {
       violationCategory = 'COLLISION';
       assessmentStatus = 'COLLISION_DETECTED';
       statusPillLabel = `Collision: ${collisionVolumeM3.toLocaleString()} m³ overlap`;
       decisionText = `Non-compliant: Active 3D mass collision (${collisionVolumeM3.toLocaleString()} m³ overlap volume).`;
       recommendedAction = 'Separate intersecting building masses to eliminate volumetric clash.';
-    } else if (metrics.totalHeightMeters > 32.05 || metrics.totalFloors > 8) {
+    } else if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > 8) {
       violationCategory = 'HEIGHT';
       assessmentStatus = 'NON_COMPLIANT_HEIGHT';
-      statusPillLabel = `Height Overrun: +${heightOverrunM.toFixed(1)}m (>32m cap)`;
-      decisionText = `Non-compliant: Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds Subzone R.9 statutory cap (${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) by +${heightOverrunM.toFixed(1)}m.`;
-      recommendedAction = `Reduce massing storeys to 8 floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal RDTR height variance application.`;
+      statusPillLabel = `Height Overrun: +${heightOverrunM.toFixed(1)}m (>${STATUTORY_HEIGHT_CAP_METERS}m cap)`;
+      decisionText = `Non-compliant: Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds allowable cap (${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) by +${heightOverrunM.toFixed(1)}m.`;
+      recommendedAction = `Reduce massing storeys to 8 floors (≤${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m) or submit a formal municipal height variance application.`;
     } else if (outOfBoundsAreaM2 > 0.5) {
       violationCategory = 'OUT_OF_BOUNDS';
       assessmentStatus = 'NON_COMPLIANT_OUT_OF_BOUNDS';
@@ -768,19 +801,19 @@ export function evaluateScenarioCompliance(
       assessmentStatus = 'NON_COMPLIANT_SETBACK';
       statusPillLabel = `Setback Encroachment (${encroachments[0].edge})`;
       decisionText = `Non-compliant: ${encroachments[0].description}`;
-      recommendedAction = 'Adjust building mass position inward to clear statutory setback boundaries.';
-    } else if (metrics.farKLB > 3.205) {
+      recommendedAction = 'Adjust building mass position inward to clear setback boundaries.';
+    } else if (metrics.farKLB > STATUTORY_MAX_FAR + 0.005) {
       violationCategory = 'FAR';
       assessmentStatus = 'NON_COMPLIANT_FAR';
       statusPillLabel = `FAR Limit Exceeded (${metrics.farKLB.toFixed(2)}x)`;
-      decisionText = `Non-compliant: Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_FAR.toFixed(2)}x) by +${farOverrun.toFixed(2)}x.`;
-      recommendedAction = `Reduce total gross floor area by ${(metrics.totalGFA - grossSiteArea * STATUTORY_MAX_FAR).toLocaleString()} m² to conform to 3.20x FAR limit.`;
-    } else if (metrics.siteCoveragePercentage > 55.05) {
+      decisionText = `Non-compliant: Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds allowable maximum (${STATUTORY_MAX_FAR.toFixed(2)}x) by +${farOverrun.toFixed(2)}x.`;
+      recommendedAction = `Reduce total gross floor area by ${(metrics.totalGFA - grossSiteArea * STATUTORY_MAX_FAR).toLocaleString()} m² to conform to ${STATUTORY_MAX_FAR.toFixed(2)}x FAR limit.`;
+    } else if (metrics.siteCoveragePercentage > STATUTORY_MAX_KDB_PERCENT + 0.05) {
       violationCategory = 'COVERAGE';
       assessmentStatus = 'NON_COMPLIANT_COVERAGE';
       statusPillLabel = `Coverage Exceeded (${metrics.siteCoveragePercentage}%)`;
-      decisionText = `Non-compliant: Building footprint coverage (${metrics.siteCoveragePercentage}%) exceeds Subzone R.9 allowable maximum (${STATUTORY_MAX_KDB_PERCENT}%) by +${coverageOverrunPercent.toFixed(1)}%.`;
-      recommendedAction = 'Reduce ground footprint area to stay within 55.0% KDB limit.';
+      decisionText = `Non-compliant: Building footprint coverage (${metrics.siteCoveragePercentage}%) exceeds allowable maximum (${STATUTORY_MAX_KDB_PERCENT}%) by +${coverageOverrunPercent.toFixed(1)}%.`;
+      recommendedAction = `Reduce ground footprint area to stay within ${STATUTORY_MAX_KDB_PERCENT.toFixed(1)}% KDB limit.`;
     } else {
       statusPillLabel = 'Non-compliant: Exceeds Constraints';
       decisionText = `Non-compliant: ${warnings[0]}`;
@@ -790,29 +823,36 @@ export function evaluateScenarioCompliance(
   // Derive tailored identified risks strictly from violationCategory
   let identifiedRisks: string[] = [];
   if (violationCategory === 'NONE') {
-    identifiedRisks = [
-      'Northern access corridor (6.5m width) requires traffic management for residential volume.',
-      'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'
-    ];
+    if (hasZoningEvidence) {
+      identifiedRisks = [
+        'Northern access corridor (6.5m width) requires traffic management for residential volume.',
+        'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'
+      ];
+    } else {
+      identifiedRisks = [
+        'Municipal zoning parameters unverified against official planning certificate (RDTR/KRK).',
+        'Permissible building height and FAR limits remain provisional planning assumptions.'
+      ];
+    }
   } else if (violationCategory === 'HEIGHT') {
     identifiedRisks = [
-      `Height overrun of +${heightOverrunM.toFixed(1)}m requires municipal RDTR rezoning variance.`,
-      'High probability of building permit rejection by DKI Jakarta planning bureau.'
+      `Height overrun of +${heightOverrunM.toFixed(1)}m requires municipal rezoning variance.`,
+      'High probability of building permit rejection by municipal planning authorities.'
     ];
   } else if (violationCategory === 'FAR') {
     identifiedRisks = [
-      `Floor Area Ratio of ${metrics.farKLB.toFixed(2)}x exceeds 3.20x statutory limit (+${farOverrun.toFixed(2)}x overrun), triggering density penalty or municipal rejection.`,
+      `Floor Area Ratio of ${metrics.farKLB.toFixed(2)}x exceeds ${STATUTORY_MAX_FAR.toFixed(2)}x statutory limit (+${farOverrun.toFixed(2)}x overrun), triggering density penalty or municipal rejection.`,
       'Requires reduction of buildable area or acquisition of transferable development rights.'
     ];
   } else if (violationCategory === 'COVERAGE') {
     identifiedRisks = [
-      `Building footprint coverage of ${metrics.siteCoveragePercentage}% exceeds 55.0% KDB statutory limit (+${coverageOverrunPercent.toFixed(1)}% overrun).`,
+      `Building footprint coverage of ${metrics.siteCoveragePercentage}% exceeds ${STATUTORY_MAX_KDB_PERCENT.toFixed(1)}% KDB statutory limit (+${coverageOverrunPercent.toFixed(1)}% overrun).`,
       'Violates open space ratio and reduces permeable ground surface required for municipal stormwater drainage compliance.'
     ];
   } else if (violationCategory === 'SETBACK') {
     identifiedRisks = [
-      `${encroachments[0]?.description || 'Building mass penetrates statutory setback envelope.'}`,
-      'Encroachment creates statutory non-compliance, risking municipal stop-work order or mandatory demolition.'
+      `${encroachments[0]?.description || 'Building mass penetrates setback envelope.'}`,
+      'Encroachment creates compliance violation, risking municipal stop-work order or mandatory demolition.'
     ];
   } else if (violationCategory === 'COLLISION') {
     identifiedRisks = [
@@ -833,7 +873,7 @@ export function evaluateScenarioCompliance(
     assessmentStatus,
     statusPillLabel,
     isGreen: isCompliant,
-    summaryText: isCompliant ? 'Fully complies with Subzone R.9 zoning limits.' : warnings[0],
+    summaryText,
     decisionText,
     recommendedAction,
     identifiedRisks,
@@ -852,10 +892,10 @@ export function evaluateScenarioCompliance(
 /**
  * Generates an exact, meter-scaled, SketchUp-compatible COLLADA (.dae) XML string.
  * Output uses exact canonical parcel boundary coordinates and distinct layer components:
- * - SITE_BOUNDARY (16,850 m² canonical geometry)
+ * - SITE_BOUNDARY (Canonical geometry)
  * - BUILDABLE_AREA (Net buildable boundary)
- * - ACCESS_JL_TEUKU_UMAR (Main arterial road frontage)
- * - ACCESS_NORTHERN_CORRIDOR_6_5M (Continuous 40m corridor)
+ * - ACCESS_PRIMARY_FRONTAGE (Main arterial road frontage)
+ * - ACCESS_SECONDARY_CORRIDOR (Continuous secondary corridor)
  * - BUILDING_MASS_* (Distinct podium and tower solids with zero overlap)
  */
 export function exportToColladaDAE(
@@ -871,7 +911,7 @@ export function exportToColladaDAE(
   let geometriesXml = '';
   let visualNodesXml = '';
 
-  // 1. SITE_BOUNDARY Geometry (Exact Gross Site Area: 110m x 153.182m = 16,850m2)
+  // 1. SITE_BOUNDARY Geometry
   const siteVertices = [
     bounds.minX, bounds.minY, 0,
     bounds.maxX, bounds.minY, 0,
@@ -906,7 +946,7 @@ export function exportToColladaDAE(
         <instance_geometry url="#geom-site-boundary"/>
       </node>`;
 
-  // 2. BUILDABLE_AREA Geometry (Net Buildable Area: 100m x 137.182m = 13,718.18m2)
+  // 2. BUILDABLE_AREA Geometry
   const buildableVertices = [
     bounds.buildableMinX, bounds.buildableMinY, 0.05,
     bounds.buildableMaxX, bounds.buildableMinY, 0.05,
@@ -941,7 +981,7 @@ export function exportToColladaDAE(
         <instance_geometry url="#geom-buildable-area"/>
       </node>`;
 
-  // 3. ACCESS_JL_TEUKU_UMAR (Main Arterial Frontage Road at positive Y)
+  // 3. Primary Arterial Frontage Road at positive Y
   const roadVertices = [
     bounds.minX - 20, bounds.maxY, 0,
     bounds.maxX + 20, bounds.maxY, 0,
@@ -949,8 +989,12 @@ export function exportToColladaDAE(
     bounds.minX - 20, bounds.maxY + 18, 0
   ].join(' ');
 
+  const frontageNodeName = (site.address && site.address.includes('Teuku Umar')) || (site.grossSiteArea === 16850 && !site.address)
+    ? 'ACCESS_JL_TEUKU_UMAR'
+    : (site.address ? `ACCESS_${site.address.split(',')[0].replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}` : 'ACCESS_PRIMARY_FRONTAGE');
+
   geometriesXml += `
-    <geometry id="geom-access-teuku-umar" name="ACCESS_JL_TEUKU_UMAR">
+    <geometry id="geom-access-frontage" name="${frontageNodeName}">
       <mesh>
         <source id="geom-access-positions">
           <float_array id="geom-access-positions-array" count="12">${roadVertices}</float_array>
@@ -972,11 +1016,11 @@ export function exportToColladaDAE(
     </geometry>`;
 
   visualNodesXml += `
-      <node id="node-access-teuku-umar" name="ACCESS_JL_TEUKU_UMAR">
-        <instance_geometry url="#geom-access-teuku-umar"/>
+      <node id="node-access-frontage" name="${frontageNodeName}">
+        <instance_geometry url="#geom-access-frontage"/>
       </node>`;
 
-  // 4. ACCESS_NORTHERN_CORRIDOR (Continuous 6.5m wide secondary corridor: 40.3m long connecting rear road to podium)
+  // 4. Secondary Continuous Access Corridor
   const corridorVertices = [
     bounds.minX, bounds.minY - 15, 0.02,
     bounds.minX + 6.5, bounds.minY - 15, 0.02,
@@ -985,21 +1029,21 @@ export function exportToColladaDAE(
   ].join(' ');
 
   geometriesXml += `
-    <geometry id="geom-access-northern" name="ACCESS_NORTHERN_CORRIDOR_6_5M">
+    <geometry id="geom-access-corridor" name="ACCESS_SECONDARY_CORRIDOR">
       <mesh>
-        <source id="geom-access-northern-positions">
-          <float_array id="geom-access-northern-positions-array" count="12">${corridorVertices}</float_array>
+        <source id="geom-access-corridor-positions">
+          <float_array id="geom-access-corridor-positions-array" count="12">${corridorVertices}</float_array>
           <technique_common>
-            <accessor source="#geom-access-northern-positions-array" count="4" stride="3">
+            <accessor source="#geom-access-corridor-positions-array" count="4" stride="3">
               <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
             </accessor>
           </technique_common>
         </source>
-        <vertices id="geom-access-northern-vertices">
-          <input semantic="POSITION" source="#geom-access-northern-positions"/>
+        <vertices id="geom-access-corridor-vertices">
+          <input semantic="POSITION" source="#geom-access-corridor-positions"/>
         </vertices>
         <polylist count="1">
-          <input semantic="VERTEX" source="#geom-access-northern-vertices" offset="0"/>
+          <input semantic="VERTEX" source="#geom-access-corridor-vertices" offset="0"/>
           <vcount>4</vcount>
           <p>0 1 2 3</p>
         </polylist>
@@ -1007,8 +1051,8 @@ export function exportToColladaDAE(
     </geometry>`;
 
   visualNodesXml += `
-      <node id="node-access-northern" name="ACCESS_NORTHERN_CORRIDOR_6_5M">
-        <instance_geometry url="#geom-access-northern"/>
+      <node id="node-access-corridor" name="ACCESS_SECONDARY_CORRIDOR">
+        <instance_geometry url="#geom-access-corridor"/>
       </node>`;
 
   // 5. BUILDING_MASS_* Geometries (Exact non-overlapping solids)
