@@ -1,7 +1,7 @@
 /**
  * Google GenAI & Vertex AI Configuration for SitePilot
  * 
- * Complies with All Things Agentic Hackathon:
+ * Google technology implementation used by the hackathon project:
  * - Uses official Google GenAI SDK (@google/genai)
  * - Supports Vertex AI with IAM Application Default Credentials (ADC) on Google Cloud Run
  * - Supports Gemini API Key for local development
@@ -23,7 +23,7 @@ export function getAiConfig(): AiConfig {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || '';
   const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.GCP_REGION || 'asia-southeast2';
   
-  // Verified Gemini 3.5+ model (Gemini 3.7 Flash) for Hackathon Compliance
+  // Repository-wide configured model; live authenticated inference is verified separately.
   const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 
   if (projectId) {

@@ -1,6 +1,6 @@
 # 🏙️ SitePilot — Intelligent Site Due Diligence & Spatial Decision Room
 
-> **Built for the Google Cloud & All Things Agentic Hackathon**  
+> **Built for the [All Things Agentic Hackathon](https://allthingsagentichackathon.devpost.com/)**
 > *Transforming weeks of fragmented real estate due diligence, zoning bylaws, and manual CAD modeling into an instant, evidence-grounded 3D spatial decision room.*
 
 ---
@@ -18,29 +18,35 @@ graph TD
     UI --> CenterCol["3D Spatial Model & 2D Cadastral View"]
     UI --> RightCol["Scenario Yields & Compliance Controls"]
     CenterCol --> ThreeJS["Three.js / React Three Fiber Viewport"]
-    CenterCol --> PascalHandles["Pascal Direct Transform Handles & HUD"]
+    CenterCol --> EditHandles["Canonical Direct-Edit Handles & HUD"]
   end
 
   subgraph CloudRun ["Google Cloud Platform (Cloud Run)"]
-    API_Extract["/api/evidence/extract (Node.js)"]
-    API_Export["/api/export/dae (Node.js)"]
-    API_Health["/api/health (Liveness Probe)"]
+    App["SitePilot Next.js service"]
+    API_Extract["/api/evidence/extract"]
+    API_Assess["/api/assessment"]
+    API_Export["/api/export/dae"]
+    Gateway["sitepilot-vertex /analyze gateway"]
   end
 
   subgraph GoogleAI ["Google Vertex AI / Gemini API"]
-    VertexAI["Gemini 2.5 Flash<br/>(Structured Schema Output)"]
+    VertexAI["Gemini 3.7 Flash<br/>(Structured Schema Output)"]
   end
 
-  UI --> API_Extract
-  UI --> API_Export
+  UI --> App
+  App --> API_Extract
+  App --> API_Assess
+  App --> API_Export
   API_Extract -->|IAM ADC Auth| VertexAI
+  API_Assess -->|Authenticated server request| Gateway
+  Gateway -->|IAM ADC Auth| VertexAI
 ```
 
 ---
 
 ## 🚀 Key Features
 
-1. **3D Spatial Development Workspace:** Live 3D WebGL/WebGPU massing canvas with on-canvas chevron handles (`+X`, `-X`, `+Z`, `-Z`, `+Y`), live measurement pill HUD ($0.5\text{m}$ grid snap), interactive compass widget, and pairwise collision detection.
+1. **3D Spatial Development Workspace:** Live WebGL massing canvas with canonical move, resize, floor and exact numeric editing, a direct-manipulation delta HUD (0.5 m grid snap), interactive north indicator, and pairwise collision detection.
 2. **Restrained Spatial Camera Bar:** Precision orthographic elevations (`SOUTH`, `NORTH`, `EAST`, `WEST`), plan view (`TOP`), and axonometric view (`ISO`, `RESET`) with spatial height ticks (`+0m`, `+9m`, `+30m`, `+32m`).
 3. **2D Cadastral Map View:** Non-colliding SVG plan view with normalized indexed badges (`[1] Podium`, `[2] West Wing`, `[3] East Wing`).
 4. **Deterministic Zoning & Geometry Engine:** Pure mathematical computation of Gross Floor Area (GFA), Floor Area Ratio (FAR / KLB), Building Coverage (KDB), open green space (KDH), and Subzone R.9 height limits.
@@ -56,7 +62,7 @@ graph TD
 * **3D Graphics & Engine:** Three.js `0.185.1`, React Three Fiber `9.7.0`, React Three Drei `10.7.8`, Turf.js `7.4.0`
 * **Pascal Framework:** `@pascal-app/core` `0.9.2`, `@pascal-app/viewer` `0.9.2`, `@pascal-app/nodes` `0.1.1`
 * **AI & Agent Framework:** Google GenAI SDK (`@google/genai` v2.17.1)
-* **AI Model:** Google Vertex AI (`gemini-2.5-flash`)
+* **Configured AI Model:** Google Vertex AI (`gemini-3.7-flash`)
 * **Cloud Infrastructure:** Google Cloud Run, Google Artifact Registry, Google Cloud Build, Google Cloud Logging
 * **Testing & Quality:** Vitest `4.1.10`, Testing Library React `16.3.2`, ESLint 9
 
@@ -71,7 +77,7 @@ graph TD
 ### Installation & Execution
 ```bash
 # 1. Clone repository
-git clone https://github.com/your-org/sitepilot.git
+git clone https://github.com/spotty21201/sitepilot.git
 cd sitepilot
 
 # 2. Install dependencies
@@ -88,6 +94,10 @@ npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) (or `http://localhost:3005`) to view the application.
 
+### Spatial renderer release control
+
+`NEXT_PUBLIC_SPATIAL_EDITOR_ENGINE` is an optional build-time flag. When it is unset, SitePilot selects `spatial-console`. Explicit `spatial-console` selects the same renderer; explicit `legacy` activates the retained legacy renderer. Any other explicit value fails closed to legacy, and Spatial Console initialization or synchronization failure also falls back to legacy without mounting both renderers.
+
 ---
 
 ## 🧪 Testing & Quality Gates
@@ -95,7 +105,7 @@ Open [http://localhost:3000](http://localhost:3000) (or `http://localhost:3005`)
 SitePilot enforces strict quality gates across linting, type-checking, and unit/integration tests:
 
 ```bash
-# Run unit & integration tests (22 tests across 5 suites)
+# Run unit & integration tests (currently 136 tests across 21 files)
 npx vitest run
 
 # Run full-codebase ESLint
@@ -136,12 +146,12 @@ See the comprehensive [Google Cloud Deployment Guide](docs/GOOGLE_CLOUD_DEPLOYME
 
 ## 🏆 Hackathon Compliance & Disclosures
 
-See [Hackathon Compliance Matrix](docs/HACKATHON_COMPLIANCE.md) for full compliance verification.
-* **AI Tool Disclosure:** Antigravity CLI and autonomous agents were used strictly as development and testing assistants.
-* **Production Runtime:** The running application executes `@google/genai` against Google Vertex AI and Google Cloud Run.
+See the [official rules](https://allthingsagentichackathon.devpost.com/rules), [FAQ](https://allthingsagentichackathon.devpost.com/details/faqs), [resources](https://allthingsagentichackathon.devpost.com/resources), and [SitePilot compliance/readiness audit](docs/HACKATHON_COMPLIANCE.md). Source-level required technologies are present, but the current one-shot assessment is not yet a qualifying autonomous agent; submission readiness is conditional on the documented agentic vertical slice and owner attestations.
+* **AI Tool Disclosure:** Kimi was used as an AI design/coding assistant under the owner's direction for the SitePilot-specific Spatial Console. Antigravity and other AI coding agents assisted development, review, integration, and testing. See [Spatial Console provenance](docs/SPATIAL_CONSOLE_PROVENANCE.md).
+* **Configured Production Path:** Server source uses `@google/genai` with Vertex AI ADC and includes Cloud Run/Cloud Build configuration. This repository snapshot does not by itself prove that a hosted service is currently healthy or that authenticated inference has run.
 
 ---
 
 ## 📄 License
 
-MIT License. See individual package disclosures for third-party open-source components.
+No root project `LICENSE` file is currently present. The owner must select and add the intended project license before submission. Third-party packages and fonts remain governed by their respective licenses; see [Spatial Console provenance](docs/SPATIAL_CONSOLE_PROVENANCE.md).

@@ -9,7 +9,7 @@ This guide details the reproducible, production-ready deployment of SitePilot on
 ```mermaid
 graph LR
   User([Urban Architect / User]) --> CloudRun[Google Cloud Run<br/>Next.js 16 Standalone Container]
-  CloudRun -->|IAM ADC Auth| VertexAI[Google Vertex AI<br/>Gemini 2.5 Flash]
+  CloudRun -->|IAM ADC Auth| VertexAI[Google Vertex AI<br/>Gemini 3.7 Flash]
   CloudRun -->|Structured Logs| CloudLogging[Google Cloud Logging]
   CloudBuild[Google Cloud Build CI/CD] -->|Image Push| ArtifactRegistry[Artifact Registry<br/>sitepilot-repo]
   ArtifactRegistry -->|Pull Image| CloudRun
@@ -112,7 +112,7 @@ gcloud run deploy sitepilot \
   --cpu=1 \
   --timeout=120s \
   --service-account=sitepilot-runner@YOUR_PROJECT_ID.iam.gserviceaccount.com \
-  --set-env-vars=GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-flash,NODE_ENV=production
+  --set-env-vars=GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,GOOGLE_CLOUD_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-3.7-flash,NODE_ENV=production
 ```
 
 ---
@@ -123,6 +123,8 @@ gcloud run deploy sitepilot \
 * **Concurrency & Max Instances (`--max-instances=2`):** Prevents unexpected billing spikes during testing.
 * **Zero Secret Leakage:** Uses Google Cloud Workload Identity / IAM Application Default Credentials. No API keys or service account JSON files are stored in the image or committed to Git.
 * **Health Monitoring:** Cloud Run monitors `GET /api/health` for container liveness.
+
+This guide documents repository configuration only. It does not assert that a deployment is currently healthy or that authenticated inference was executed during release consolidation.
 
 ---
 

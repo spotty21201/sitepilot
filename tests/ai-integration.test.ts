@@ -14,7 +14,7 @@ describe('Google GenAI & Vertex AI Integration Suite', () => {
     process.env = originalEnv;
   });
 
-  it('configures Vertex AI with verified Gemini 3.5+ model (gemini-3.7-flash) when GOOGLE_CLOUD_PROJECT is set', () => {
+  it('configures Vertex AI with the repository model gemini-3.7-flash when GOOGLE_CLOUD_PROJECT is set', () => {
     process.env.GOOGLE_CLOUD_PROJECT = 'sitepilot-hackathon-proj';
     process.env.GOOGLE_CLOUD_LOCATION = 'asia-southeast2';
     process.env.GEMINI_MODEL = 'gemini-3.7-flash';

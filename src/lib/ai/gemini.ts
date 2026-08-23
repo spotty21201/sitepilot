@@ -1,7 +1,7 @@
 /**
  * Google GenAI (Vertex AI & Gemini API) Integration for SitePilot
  * 
- * Complies with All Things Agentic Hackathon:
+ * Google technology implementation used by the hackathon project:
  * - Deterministic extraction of Facts, Claims, Assumptions
  * - Multimodal document & image understanding
  * - Strict structured outputs via Zod / JSON schema
