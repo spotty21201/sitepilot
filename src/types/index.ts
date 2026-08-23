@@ -203,6 +203,16 @@ export type ScenarioEditClassification =
   | 'PROGRAM_OVERRIDE'
   | 'INVALID_CONFLICT';
 
+export interface CanonicalScenarioRevision {
+  schemaVersion: 1;
+  revisionId: string;
+  revisionHash: string;
+  sequence: number;
+  commandId: string;
+  sourceRevisionId: string | null;
+  timestamp: string;
+}
+
 export interface DevelopmentScenario {
   id: string;
   projectId: string;
@@ -244,6 +254,7 @@ export interface DevelopmentScenario {
     overlapVolumeM3: number;
     overlaps: { massA: string; massB: string; overlapAreaM2: number; overlapVolumeM3: number }[];
   };
+  canonicalRevision?: CanonicalScenarioRevision;
   risks: string[];
   opportunities: string[];
   createdAt: string;

@@ -174,4 +174,31 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
     expect(overheightComp.statusPillLabel).toContain('Height Overrun: +1.0m');
     expect(overheightComp.violations[0]).toContain('exceeds Subzone R.9 32.0m cap by +1.0m');
   });
+
+  it('derives Scenario C constraint status from the golden project zoning evidence', () => {
+    const scenarioC = GOLDEN_PROJECT.scenarios[2];
+    const report = evaluateScenarioCompliance(
+      GOLDEN_PROJECT.site.grossSiteArea,
+      scenarioC.assumptionsUsed.setbacks,
+      scenarioC.masses,
+      scenarioC.metrics,
+      calculateMassPairwiseIntersections(scenarioC.masses),
+      {
+        scenarioName: scenarioC.name,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        maxFAR: GOLDEN_PROJECT.zoningLimits?.maxFAR,
+        maxCoveragePct: GOLDEN_PROJECT.zoningLimits?.maxCoveragePct,
+        minKDHPct: GOLDEN_PROJECT.zoningLimits?.minKDHPct,
+        maxHeightMeters: GOLDEN_PROJECT.zoningLimits?.maxHeightMeters,
+        maxFloors: GOLDEN_PROJECT.zoningLimits?.maxFloors,
+        zoningName: GOLDEN_PROJECT.zoningLimits?.zoneName,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength
+      }
+    );
+
+    expect(GOLDEN_PROJECT.site.hasZoningEvidence).toBe(true);
+    expect(report.isCompliant).toBe(false);
+    expect(report.assessmentStatus).toBe('NON_COMPLIANT_HEIGHT');
+    expect(report.statusPillLabel).toBe('Height Overrun: +11.2m (>32m cap)');
+  });
 });

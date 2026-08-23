@@ -40,6 +40,7 @@ export const GOLDEN_PROJECT: Project = {
   site: {
     grossSiteArea: 16850, // Confirmed Certificate Fact
     buildableArea: 13718, // Calculated from canonical 110m frontage & setbacks
+    hasZoningEvidence: true,
     coordinateSystem: 'WGS84',
     frontageLength: 110,
     accessRoadWidth: 6.5,
@@ -58,6 +59,22 @@ export const GOLDEN_PROJECT: Project = {
         [106.8307, -6.1965],
         [106.8305, -6.1948]
       ]]
+    }
+  },
+
+  zoningLimits: {
+    zoneCode: 'R.9',
+    zoneName: 'Subzone R.9',
+    maxFAR: 3.2,
+    maxCoveragePct: 55,
+    minKDHPct: 20,
+    maxHeightMeters: 32,
+    maxFloors: 8,
+    setbacks: {
+      front: 10,
+      rear: 6,
+      sideLeft: 5,
+      sideRight: 5
     }
   },
 

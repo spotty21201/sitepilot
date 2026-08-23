@@ -14,6 +14,7 @@ import {
   getCanonicalParcelBounds,
   fitMassesToBuildableEnvelope
 } from '@/lib/geometry/engine';
+import { ensureCanonicalProjectRevisions } from '@/lib/spatial/canonical-command-service';
 
 const STORAGE_VERSION = 'v1';
 const CASES_STORAGE_KEY = `sitepilot_cases_${STORAGE_VERSION}`;
@@ -70,24 +71,140 @@ function isBrowser(): boolean {
   return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 }
 
-function getStoredCasesMap(): Record<string, Project> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function hasUniqueStringIds(values: unknown[]): boolean {
+  const ids = values.map((value) => isRecord(value) ? value.id : undefined);
+  return ids.every((id): id is string => typeof id === 'string' && id.length > 0)
+    && new Set(ids).size === ids.length;
+}
+
+function isSetbacksSpine(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return ['front', 'rear', 'sideLeft', 'sideRight'].every((key) => isFiniteNumber(value[key]));
+}
+
+function isMassSpine(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const position = value.position;
+  const dimensions = value.dimensions;
+  if (!isRecord(position) || !isRecord(dimensions)) return false;
+  return typeof value.id === 'string'
+    && value.id.length > 0
+    && typeof value.name === 'string'
+    && typeof value.type === 'string'
+    && typeof value.program === 'string'
+    && ['footprintArea', 'floors', 'floorToFloorHeight', 'height', 'gfa'].every((key) => isFiniteNumber(value[key]))
+    && ['x', 'y', 'z'].every((key) => isFiniteNumber(position[key]))
+    && ['width', 'length', 'height'].every((key) => isFiniteNumber(dimensions[key]));
+}
+
+function isMetricsSpine(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return [
+    'grossSiteArea',
+    'netBuildableArea',
+    'buildingFootprintArea',
+    'siteCoveragePercentage',
+    'totalGFA',
+    'farKLB',
+    'openSpaceArea',
+    'openSpacePercentage',
+    'totalFloors',
+    'totalHeightMeters',
+  ].every((key) => isFiniteNumber(value[key]));
+}
+
+function isScenarioSpine(value: unknown, projectId: string): boolean {
+  if (!isRecord(value) || !Array.isArray(value.masses) || value.masses.length === 0) return false;
+  if (!hasUniqueStringIds(value.masses) || !value.masses.every(isMassSpine)) return false;
+  const assumptionsUsed = value.assumptionsUsed;
+  if (!isRecord(assumptionsUsed) || !isSetbacksSpine(assumptionsUsed.setbacks)) return false;
+  if (!['heightFloors', 'heightMeters', 'targetFAR', 'targetCoverageKDB', 'unverifiedAssumptionsCount']
+    .every((key) => isFiniteNumber(assumptionsUsed[key]))) return false;
+  return typeof value.id === 'string'
+    && value.id.length > 0
+    && value.projectId === projectId
+    && typeof value.name === 'string'
+    && typeof value.description === 'string'
+    && isMetricsSpine(value.metrics)
+    && Array.isArray(value.risks)
+    && Array.isArray(value.opportunities)
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function isProjectSpine(value: unknown): value is Project {
+  if (!isRecord(value) || typeof value.id !== 'string' || value.id.length === 0) return false;
+  const projectId = value.id;
+  if (!isRecord(value.location) || !isRecord(value.location.center)) return false;
+  if (!isRecord(value.site) || !isRecord(value.site.boundary)) return false;
+  if (!Array.isArray(value.scenarios) || value.scenarios.length === 0 || !hasUniqueStringIds(value.scenarios)) return false;
+  const aggregateArrays = ['sources', 'findings', 'contradictions', 'assumptions', 'issues', 'actions'];
+  if (!aggregateArrays.every((key) => Array.isArray(value[key]))) return false;
+  if (!isRecord(value.executiveSummary)) return false;
+  return typeof value.name === 'string'
+    && typeof value.objective === 'string'
+    && typeof value.location.address === 'string'
+    && typeof value.location.city === 'string'
+    && typeof value.location.country === 'string'
+    && isFiniteNumber(value.location.center.lat)
+    && isFiniteNumber(value.location.center.lng)
+    && isFiniteNumber(value.site.grossSiteArea)
+    && isFiniteNumber(value.site.buildableArea)
+    && isSetbacksSpine(value.site.setbacks)
+    && Array.isArray(value.site.boundary.coordinates)
+    && typeof value.site.coordinateSystem === 'string'
+    && value.scenarios.every((scenario) => isScenarioSpine(scenario, projectId))
+    && Array.isArray(value.executiveSummary.topOpportunities)
+    && Array.isArray(value.executiveSummary.criticalRisks)
+    && Array.isArray(value.executiveSummary.criticalUnknowns)
+    && typeof value.executiveSummary.recommendedNextMove === 'string'
+    && typeof value.createdAt === 'string'
+    && typeof value.updatedAt === 'string';
+}
+
+function getStoredCasesRecord(): Record<string, unknown> | null {
   if (!isBrowser()) return {};
   try {
     const raw = localStorage.getItem(CASES_STORAGE_KEY);
     if (!raw) return {};
-    return JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      console.warn('[SitePilot Case Repository] Stored case root is malformed and will not be overwritten.');
+      return null;
+    }
+    return parsed as Record<string, unknown>;
   } catch (e) {
     console.warn('[SitePilot Case Repository] Failed to load stored cases:', e);
-    return {};
+    return null;
   }
 }
 
-function saveStoredCasesMap(cases: Record<string, Project>): void {
-  if (!isBrowser()) return;
+function getStoredCasesMap(): Record<string, Project> {
+  const record = getStoredCasesRecord();
+  if (!record) return {};
+  return Object.fromEntries(
+    Object.entries(record).filter((entry): entry is [string, Project] => (
+      isProjectSpine(entry[1]) && entry[0] === entry[1].id
+    ))
+  );
+}
+
+function saveStoredCasesRecord(cases: Record<string, unknown>): boolean {
+  if (!isBrowser()) return false;
   try {
     localStorage.setItem(CASES_STORAGE_KEY, JSON.stringify(cases));
+    return true;
   } catch (e) {
     console.error('[SitePilot Case Repository] Failed to persist cases:', e);
+    return false;
   }
 }
 
@@ -128,7 +245,9 @@ export function listCases(): CaseSummary[] {
 export function getActiveCaseId(): string {
   if (!isBrowser()) return GOLDEN_PROJECT.id;
   try {
-    return localStorage.getItem(ACTIVE_CASE_KEY) || GOLDEN_PROJECT.id;
+    const activeId = localStorage.getItem(ACTIVE_CASE_KEY);
+    if (!activeId || activeId === GOLDEN_PROJECT.id) return GOLDEN_PROJECT.id;
+    return getStoredCasesMap()[activeId] ? activeId : GOLDEN_PROJECT.id;
   } catch {
     return GOLDEN_PROJECT.id;
   }
@@ -146,31 +265,31 @@ export function setActiveCaseId(caseId: string): void {
 export function getCase(id: string): Project {
   if (id === GOLDEN_PROJECT.id) {
     const stored = getStoredCasesMap();
-    return stored[id] || GOLDEN_PROJECT;
+    return ensureCanonicalProjectRevisions(stored[id] || GOLDEN_PROJECT);
   }
 
   const stored = getStoredCasesMap();
   if (stored[id]) {
-    return stored[id];
+    return ensureCanonicalProjectRevisions(stored[id]);
   }
 
-  return GOLDEN_PROJECT;
+  return ensureCanonicalProjectRevisions(GOLDEN_PROJECT);
 }
 
-export function saveCase(project: Project): void {
-  const stored = getStoredCasesMap();
-  stored[project.id] = {
-    ...project,
-    updatedAt: new Date().toISOString()
-  };
-  saveStoredCasesMap(stored);
+export function saveCase(project: Project): boolean {
+  const stored = getStoredCasesRecord();
+  if (!stored) return false;
+  const normalized = ensureCanonicalProjectRevisions(project);
+  stored[project.id] = normalized;
+  return saveStoredCasesRecord(stored);
 }
 
 export function deleteCase(id: string): void {
   if (id === GOLDEN_PROJECT.id) return;
-  const stored = getStoredCasesMap();
+  const stored = getStoredCasesRecord();
+  if (!stored) return;
   delete stored[id];
-  saveStoredCasesMap(stored);
+  saveStoredCasesRecord(stored);
 
   if (getActiveCaseId() === id) {
     setActiveCaseId(GOLDEN_PROJECT.id);
@@ -179,11 +298,13 @@ export function deleteCase(id: string): void {
 
 export function resetDemo(): Project {
   if (isBrowser()) {
-    const stored = getStoredCasesMap();
-    stored[GOLDEN_PROJECT.id] = GOLDEN_PROJECT;
-    saveStoredCasesMap(stored);
+    const stored = getStoredCasesRecord();
+    if (stored) {
+      stored[GOLDEN_PROJECT.id] = ensureCanonicalProjectRevisions(GOLDEN_PROJECT);
+      saveStoredCasesRecord(stored);
+    }
   }
-  return GOLDEN_PROJECT;
+  return ensureCanonicalProjectRevisions(GOLDEN_PROJECT);
 }
 
 export const resetDemoCase = resetDemo;
@@ -765,9 +886,10 @@ export function createCase(params: CreateCaseParams): Project {
     updatedAt: now
   };
 
-  saveCase(newProject);
-  setActiveCaseId(newProject.id);
-  return newProject;
+  const normalizedProject = ensureCanonicalProjectRevisions(newProject);
+  saveCase(normalizedProject);
+  setActiveCaseId(normalizedProject.id);
+  return normalizedProject;
 }
 
 /**
@@ -776,7 +898,7 @@ export function createCase(params: CreateCaseParams): Project {
 export function addScenarioToCase(caseId: string, scenario: DevelopmentScenario): Project {
   const project = getCase(caseId);
   const updatedScenarios = [...project.scenarios, scenario];
-  const updatedProject = { ...project, scenarios: updatedScenarios };
+  const updatedProject = ensureCanonicalProjectRevisions({ ...project, scenarios: updatedScenarios });
   saveCase(updatedProject);
   return updatedProject;
 }
@@ -788,15 +910,17 @@ export function duplicateScenarioInCase(caseId: string, sourceScenarioId: string
   const project = getCase(caseId);
   const source = project.scenarios.find(s => s.id === sourceScenarioId) || project.scenarios[0];
   const newId = `scen-${caseId}-${Date.now()}`;
+  const sourceCopy = structuredClone(source);
   
   const duplicated: DevelopmentScenario = {
-    ...source,
+    ...sourceCopy,
     id: newId,
     name: `${source.name} (Copy)`,
     isPreferred: false,
     editClassification: 'USER_GEOMETRY_EDIT',
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    canonicalRevision: undefined,
   };
 
   return addScenarioToCase(caseId, duplicated);
