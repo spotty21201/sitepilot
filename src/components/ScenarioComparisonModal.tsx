@@ -55,22 +55,22 @@ export function ScenarioComparisonModal({
       <div
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#10141e] border border-[#2b3548] rounded-xl max-w-5xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+        className="dialog-shell max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div className="p-4 border-b border-[#232938] flex items-center justify-between bg-[#151a27]">
+        <div className="dialog-header p-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
+            <div className="dialog-icon--spatial w-8 h-8 flex items-center justify-center font-bold shadow-md">
               <Scale className="w-4 h-4" />
             </div>
             <div>
-              <h3 id="scenario-comparison-title" className="text-sm font-bold text-slate-100 flex items-center gap-2">
+              <h3 id="scenario-comparison-title" className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
                 <span>Scenario Comparison Matrix</span>
-                <span className="text-[11px] font-normal text-slate-400 font-mono">
+                <span className="text-[11px] font-normal text-[var(--text-muted)] font-mono">
                   ({project.name})
                 </span>
               </h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-[var(--text-secondary)]">
                 Side-by-side evaluation of yield, height, statutory compliance, and investment economics.
               </p>
             </div>
@@ -78,7 +78,7 @@ export function ScenarioComparisonModal({
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-[#20283b] cursor-pointer"
+            className="dialog-close p-1.5 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -89,9 +89,9 @@ export function ScenarioComparisonModal({
           <div className="min-w-[650px] space-y-4">
             {/* Grid Header with Scenarios */}
             <div className={`grid gap-3 grid-cols-${scenarios.length + 1}`}>
-              <div className="p-3 bg-[#0c0f17] border border-[#232d40] rounded-xl flex flex-col justify-end">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">Metrics / Schemes</span>
-                <span className="text-xs font-semibold text-slate-300">Site: {project.site.grossSiteArea.toLocaleString()} m²</span>
+              <div className="surface-inspector p-3 flex flex-col justify-end">
+                <span className="text-[10px] uppercase font-bold text-[var(--text-muted)] tracking-wider">Metrics / Schemes</span>
+                <span className="text-xs font-semibold text-[var(--text-secondary)]">Site: <span className="font-mono tabular-nums">{project.site.grossSiteArea.toLocaleString()} m²</span></span>
               </div>
 
               {scenarios.map((scen) => {
@@ -99,38 +99,39 @@ export function ScenarioComparisonModal({
                 return (
                   <div
                     key={scen.id}
-                    className={`p-3 rounded-xl border flex flex-col justify-between transition-all ${
+                    className={`p-3 rounded-[var(--radius-card)] border flex flex-col justify-between transition-colors ${
                       isActive
-                        ? 'bg-[#182338] border-[#38bdf8] shadow-lg ring-1 ring-[#38bdf8]/40'
-                        : 'bg-[#121622] border-[#252f44]'
+                        ? 'bg-[var(--spatial-selection-surface)] border-[var(--spatial-selection)] shadow-[var(--shadow-elevated)] ring-1 ring-[var(--spatial-selection)]'
+                        : 'bg-[var(--bg-tertiary)] border-[var(--border-subtle)]'
                     }`}
                   >
                     <div>
                       <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold ${
-                          scen.isPreferred ? 'bg-indigo-950 text-indigo-300 border border-indigo-700/60' : 'bg-slate-800 text-slate-400'
+                        <span className={`status-badge !min-h-0 !px-1.5 !py-0.5 text-[9px] ${
+                          scen.isPreferred ? 'status-badge--verified' : 'status-badge--investigation'
                         }`}>
                           {scen.isPreferred ? 'PREFERRED' : 'STUDY'}
                         </span>
                         {isActive && (
-                          <span className="text-[9px] font-mono text-[#38bdf8] font-bold flex items-center gap-0.5">
+                          <span className="text-[9px] font-mono text-[var(--spatial-selection-strong)] font-bold flex items-center gap-0.5">
                             <Check className="w-3 h-3" /> ACTIVE
                           </span>
                         )}
                       </div>
-                      <h4 className="text-xs font-bold text-slate-100 line-clamp-2">{scen.name}</h4>
+                      <h4 className="text-xs font-bold text-[var(--text-primary)] line-clamp-2">{scen.name}</h4>
                     </div>
 
-                    <div className="mt-3 pt-2 border-t border-[#232938] flex items-center justify-between">
+                    <div className="mt-3 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between">
                       <button
                         onClick={() => {
                           onSelectScenario(scen.id);
                           onClose();
                         }}
-                        className={`w-full py-1 px-2 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                        aria-current={isActive ? 'true' : undefined}
+                        className={`button-secondary w-full min-h-[var(--control-height-sm)] py-1 px-2 text-[11px] font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1 ${
                           isActive
-                            ? 'bg-[#2563eb] text-white shadow'
-                            : 'bg-[#1e2738] hover:bg-[#28354c] text-slate-200 border border-[#2e3b52]'
+                            ? '!text-[var(--spatial-selection-strong)] !bg-[var(--spatial-selection-surface)] !border-[var(--spatial-selection)]'
+                            : ''
                         }`}
                       >
                         <span>{isActive ? 'Current View' : 'Switch to Scheme'}</span>
@@ -143,35 +144,35 @@ export function ScenarioComparisonModal({
             </div>
 
             {/* Comparison Rows */}
-            <div className="border border-[#222b3d] rounded-xl overflow-hidden divide-y divide-[#1e2638] text-xs">
+            <div className="border border-[var(--border-default)] rounded-[var(--radius-card)] overflow-hidden divide-y divide-[var(--border-subtle)] text-xs">
               {/* Row 1: Total GFA */}
-              <div className={`grid gap-3 p-3 bg-[#0d1017] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-[#38bdf8]" />
+              <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)] flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-[var(--status-evidence)]" />
                   <span>Total Gross Floor Area (GFA)</span>
                 </div>
                 {scenarios.map((scen) => (
-                  <div key={scen.id} className="font-mono font-bold text-slate-100 text-right sm:text-left">
+                  <div key={scen.id} className="font-mono tabular-nums font-bold text-[var(--text-primary)] text-right sm:text-left">
                     {scen.metrics.totalGFA.toLocaleString()} m²
                   </div>
                 ))}
               </div>
 
               {/* Row 2: FAR / KLB */}
-              <div className={`grid gap-3 p-3 bg-[#111622] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Floor Area Ratio (KLB)</span>
-                  <span className="text-[10px] text-slate-500 block">(Statutory Cap: {statMaxFAR.toFixed(2)}x)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">(Statutory Cap: {statMaxFAR.toFixed(2)}x)</span>
                 </div>
                 {scenarios.map((scen) => {
                   const farExceeded = scen.metrics.farKLB > statMaxFAR + 0.01;
                   return (
-                    <div key={scen.id} className="font-mono text-right sm:text-left">
-                      <span className={`font-bold ${farExceeded ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
+                      <span className={`font-bold ${farExceeded ? 'text-[var(--status-error)]' : 'text-[var(--status-verified)]'}`}>
                         {scen.metrics.farKLB.toFixed(2)}x
                       </span>
                       {farExceeded && (
-                        <span className="text-[10px] text-rose-400 block">
+                        <span className="text-[10px] text-[var(--status-error)] block">
                           (+{(scen.metrics.farKLB - statMaxFAR).toFixed(2)}x overrun)
                         </span>
                       )}
@@ -181,32 +182,32 @@ export function ScenarioComparisonModal({
               </div>
 
               {/* Row 3: Floors & Total Height */}
-              <div className={`grid gap-3 p-3 bg-[#0d1017] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Building Floors & Height</span>
                 </div>
                 {scenarios.map((scen) => (
-                  <div key={scen.id} className="font-mono text-slate-200 text-right sm:text-left">
+                  <div key={scen.id} className="font-mono tabular-nums text-[var(--text-secondary)] text-right sm:text-left">
                     <span className="font-bold">{scen.metrics.totalFloors} Floors</span>
-                    <span className="text-[10px] text-slate-400 block">({scen.metrics.totalHeightMeters.toFixed(1)}m total)</span>
+                    <span className="text-[10px] text-[var(--text-muted)] block">({scen.metrics.totalHeightMeters.toFixed(1)}m total)</span>
                   </div>
                 ))}
               </div>
 
               {/* Row 4: Site Coverage (KDB) */}
-              <div className={`grid gap-3 p-3 bg-[#111622] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Site Coverage (KDB)</span>
-                  <span className="text-[10px] text-slate-500 block">(Statutory Limit: {statMaxCoverage}%)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">(Statutory Limit: {statMaxCoverage}%)</span>
                 </div>
                 {scenarios.map((scen) => {
                   const covExceeded = scen.metrics.siteCoveragePercentage > statMaxCoverage + 0.1;
                   return (
-                    <div key={scen.id} className="font-mono text-right sm:text-left">
-                      <span className={`font-bold ${covExceeded ? 'text-rose-400' : 'text-slate-200'}`}>
+                    <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
+                      <span className={`font-bold ${covExceeded ? 'text-[var(--status-error)]' : 'text-[var(--text-primary)]'}`}>
                         {scen.metrics.siteCoveragePercentage}%
                       </span>
-                      <span className="text-[10px] text-slate-500 block">
+                      <span className="text-[10px] text-[var(--text-muted)] block">
                         ({scen.metrics.buildingFootprintArea.toLocaleString()} m² footprint)
                       </span>
                     </div>
@@ -215,34 +216,34 @@ export function ScenarioComparisonModal({
               </div>
 
               {/* Row 5: Open Space & KDH */}
-              <div className={`grid gap-3 p-3 bg-[#0d1017] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Open Space (KDH Basis)</span>
-                  <span className="text-[10px] text-slate-500 block">(Target: ≥{statMinKDH}%)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">(Target: ≥{statMinKDH}%)</span>
                 </div>
                 {scenarios.map((scen) => (
-                  <div key={scen.id} className="font-mono text-slate-200 text-right sm:text-left">
-                    <span className="font-bold text-emerald-400">{scen.metrics.openSpacePercentage}%</span>
-                    <span className="text-[10px] text-slate-400 block">({scen.metrics.openSpaceArea.toLocaleString()} m² unbuilt)</span>
+                  <div key={scen.id} className="font-mono tabular-nums text-[var(--text-secondary)] text-right sm:text-left">
+                    <span className="font-bold text-[var(--status-verified)]">{scen.metrics.openSpacePercentage}%</span>
+                    <span className="text-[10px] text-[var(--text-muted)] block">({scen.metrics.openSpaceArea.toLocaleString()} m² unbuilt)</span>
                   </div>
                 ))}
               </div>
 
               {/* Row 6: Land Cost per GFA */}
               {askingPrice && (
-                <div className={`grid gap-3 p-3 bg-[#111622] grid-cols-${scenarios.length + 1}`}>
-                  <div className="font-semibold text-slate-300">
+                <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                  <div className="font-semibold text-[var(--text-secondary)]">
                     <span>Land Cost Allocation / GFA</span>
-                    <span className="text-[10px] text-slate-500 block">(At Rp {(askingPrice / 1e9).toFixed(1)}B asking price)</span>
+                    <span className="text-[10px] text-[var(--text-muted)] block">(At Rp {(askingPrice / 1e9).toFixed(1)}B asking price)</span>
                   </div>
                   {scenarios.map((scen) => {
                     const costPerGFA = scen.metrics.totalGFA > 0 ? Math.round(askingPrice / scen.metrics.totalGFA) : 0;
                     return (
-                      <div key={scen.id} className="font-mono text-right sm:text-left">
-                        <span className="font-bold text-[#e2b170]">
+                      <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
+                        <span className="font-bold text-[var(--status-assumed)]">
                           Rp {(costPerGFA / 1e6).toFixed(1)}M / m²
                         </span>
-                        <span className="text-[10px] text-slate-500 block">per buildable m²</span>
+                        <span className="text-[10px] text-[var(--text-muted)] block">per buildable m²</span>
                       </div>
                     );
                   })}
@@ -250,18 +251,18 @@ export function ScenarioComparisonModal({
               )}
 
               {/* Row 7: Compliance Status */}
-              <div className={`grid gap-3 p-3 bg-[#0d1017] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Compliance Verdict</span>
                 </div>
                 {scenarios.map((scen) => {
                   const isCompliant = scen.complianceReport?.isCompliant ?? (scen.status === 'VALID');
                   return (
                     <div key={scen.id} className="text-right sm:text-left">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                      <span className={`status-badge ${
                         isCompliant
-                          ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
-                          : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                          ? 'status-badge--verified'
+                          : 'status-badge--error'
                       }`}>
                         {isCompliant ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
                         <span>{isCompliant ? 'COMPLIANT' : 'CONSTRAINED'}</span>
@@ -272,12 +273,12 @@ export function ScenarioComparisonModal({
               </div>
 
               {/* Row 8: Key Strategic Consideration */}
-              <div className={`grid gap-3 p-3 bg-[#111622] grid-cols-${scenarios.length + 1}`}>
-                <div className="font-semibold text-slate-300">
+              <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Strategic Intent</span>
                 </div>
                 {scenarios.map((scen) => (
-                  <div key={scen.id} className="text-[11px] text-slate-400 leading-relaxed text-right sm:text-left">
+                  <div key={scen.id} className="text-[11px] text-[var(--text-secondary)] leading-relaxed text-right sm:text-left">
                     {scen.description}
                   </div>
                 ))}
@@ -287,13 +288,13 @@ export function ScenarioComparisonModal({
         </div>
 
         {/* Footer */}
-        <div className="p-3 border-t border-[#232938] flex items-center justify-between bg-[#151a27] text-xs">
-          <span className="text-slate-400 text-[11px]">
+        <div className="dialog-header p-3 flex items-center justify-between text-xs">
+          <span className="text-[var(--text-secondary)] text-[11px]">
             Switching schemes updates 3D massing, metrics, and DAE export immediately.
           </span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg font-semibold cursor-pointer"
+            className="button-primary px-4 py-1.5 font-semibold cursor-pointer"
           >
             Close Matrix
           </button>

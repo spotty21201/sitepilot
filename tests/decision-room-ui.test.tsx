@@ -98,9 +98,21 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
     const scenarioB = GOLDEN_PROJECT.scenarios[1];
     const { getByText } = render(
       <DevelopmentWorkspace
+        caseId={GOLDEN_PROJECT.id}
         site={GOLDEN_PROJECT.site}
         activeScenario={scenarioB}
-        onUpdateScenarioMasses={vi.fn()}
+        project={GOLDEN_PROJECT}
+        onProposeCommand={vi.fn(() => true)}
+        onCommitSpatialCommand={vi.fn(() => ({
+          accepted: false as const,
+          project: GOLDEN_PROJECT,
+          code: 'NO_CHANGE' as const,
+          reason: 'test',
+        }))}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
       />
     );
 
@@ -136,6 +148,31 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
     expect(screen.getByText('Podium Roof Datum (2 Fl)')).toBeDefined();
     expect(screen.getByText('+0m')).toBeDefined();
     expect(screen.getByText('Ground Datum (0,0)')).toBeDefined();
+  });
+
+  it('commits scenario range gestures exactly once at pointer release', () => {
+    const scenarioB = GOLDEN_PROJECT.scenarios[1];
+    const onUpdateScenarioParam = vi.fn();
+    render(
+      <ScenarioControls
+        site={GOLDEN_PROJECT.site}
+        project={GOLDEN_PROJECT}
+        scenarios={GOLDEN_PROJECT.scenarios}
+        activeScenarioId={scenarioB.id}
+        onSelectScenario={vi.fn()}
+        onUpdateScenarioParam={onUpdateScenarioParam}
+        onFitMassingToEnvelope={vi.fn()}
+        onResetScenario={vi.fn()}
+      />
+    );
+    const range = screen.getByLabelText('Building Height in Storeys');
+    fireEvent.pointerDown(range);
+    fireEvent.change(range, { target: { value: '9' } });
+    fireEvent.change(range, { target: { value: '10' } });
+    expect(onUpdateScenarioParam).not.toHaveBeenCalled();
+    fireEvent.pointerUp(range, { target: { value: '10' } });
+    expect(onUpdateScenarioParam).toHaveBeenCalledTimes(1);
+    expect(onUpdateScenarioParam).toHaveBeenCalledWith(scenarioB.id, 'floors', 10);
   });
 
   it('manages XML modal lifecycle, focus trap, Escape dismissal, and focus restoration', () => {

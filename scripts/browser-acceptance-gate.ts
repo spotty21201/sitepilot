@@ -442,7 +442,7 @@ async function runAcceptanceGate() {
       daeValid ? 'PASSED' : 'FAILED',
       8,
       8,
-      `Downloaded "${suggestedFilename}" (${sizeKb} KB, SHA-256: ${sha256Hash.slice(0, 16)}...). Validated COLLADA 1.4.1 XML schema, meter scaling (1.0), ${geometryCount} geometries, ${meshCount} meshes, ${nodeCount} scene nodes, Y_UP orientation, and 0 Menteng leaks.`
+      `Downloaded "${suggestedFilename}" (${sizeKb} KB, SHA-256: ${sha256Hash.slice(0, 16)}...). Validated COLLADA 1.4.1 XML schema, meter scaling (1.0), ${geometryCount} geometries, ${meshCount} meshes, ${nodeCount} scene nodes, Z_UP orientation, and 0 Menteng leaks.`
     );
 
     // Save acceptance summary artifact

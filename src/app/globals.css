@@ -1,23 +1,73 @@
 @import "tailwindcss";
 
 :root {
-  --font-sans: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-sans: var(--font-sitepilot-sans), "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-display: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
-  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-mono: var(--font-sitepilot-mono), "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  /* Surface hierarchy */
   --bg-primary: #0e1013;
   --bg-secondary: #14171c;
   --bg-tertiary: #1a1e24;
+  --bg-inspector: #171a20;
+  --bg-hover: #20242b;
+  --bg-selected: #25231f;
+  --bg-disabled: #17191d;
+
+  /* Border hierarchy */
   --border-subtle: #2a2d31;
-  --border-focus: #54585d;
+  --border-default: #34383e;
+  --border-strong: #54585d;
+
+  /* Text hierarchy */
   --text-primary: #eeeae1;
   --text-secondary: #a6a29a;
-  --text-muted: #706f6a;
+  --text-muted: #8a867e;
+  --text-disabled: #6f716f;
+
+  /* Command and spatial accents */
+  --action-primary: #6f9fb8;
+  --action-primary-hover: #86b3c7;
+  --action-primary-surface: #17242b;
+  --spatial-selection: #d2af78;
+  --spatial-selection-strong: #e0bf85;
+  --spatial-selection-surface: #29241c;
+
+  /* Semantic states */
+  --status-verified: #91b89f;
+  --status-verified-surface: #17231e;
+  --status-assumed: #c8b47f;
+  --status-assumed-surface: #262218;
+  --status-warning: #d49a6a;
+  --status-warning-surface: #2a2018;
+  --status-error: #d68178;
+  --status-error-surface: #2a1b1c;
+  --status-evidence: #8db8c5;
+  --status-evidence-surface: #172328;
+  --status-investigation: #aaa3c8;
+  --status-investigation-surface: #211e2b;
+
+  /* Interaction, dimensions, and elevation */
+  --focus-ring: #f0c77e;
+  --focus-ring-offset: #0e1013;
+  --control-height-sm: 28px;
+  --control-height-md: 32px;
+  --control-height-lg: 36px;
+  --icon-size-sm: 12px;
+  --icon-size-md: 16px;
+  --icon-size-lg: 20px;
+  --radius-control: 3px;
+  --radius-card: 6px;
+  --radius-panel: 6px;
+  --shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.32);
+  --shadow-focus: 0 0 0 3px rgba(240, 199, 126, 0.2);
+
+  /* Compatibility aliases retained for existing spatial and evidence modules. */
   --accent-gold: #d2af78;
   --accent-blue: #8db8c5;
-  --status-verified: #91b89f;
   --status-claim: #d2af78;
   --status-assumption: #a7a0c4;
-  --status-warning: #c77b72;
+  --border-focus: var(--border-strong);
 }
 
 body {
@@ -27,6 +77,26 @@ body {
   overflow: hidden;
   height: 100vh;
   margin: 0;
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  font-family: inherit;
+}
+
+:where(button, input, select, textarea, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 2px !important;
+  box-shadow: var(--shadow-focus) !important;
+}
+
+:where(button, input, select, textarea):disabled,
+[aria-disabled="true"] {
+  color: var(--text-disabled);
+  cursor: not-allowed;
 }
 
 /* Custom Scrollbars */
@@ -67,10 +137,258 @@ body {
   letter-spacing: 0.08em;
 }
 
+.font-mono,
+.font-metadata,
+[data-numeric-readout="true"] {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
 .panel-shell {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: 2px;
+  border-radius: var(--radius-panel);
+}
+
+.surface-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-panel);
+}
+
+.surface-elevated {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+}
+
+.surface-inspector {
+  background: var(--bg-inspector);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+
+.surface-hover:hover {
+  background: var(--bg-hover);
+}
+
+.ui-segmented {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  min-height: var(--control-height-lg);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+
+.ui-segment {
+  min-height: var(--control-height-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+}
+
+.ui-segment:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ui-segment[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--action-primary-surface);
+  border-color: color-mix(in srgb, var(--action-primary) 58%, transparent);
+}
+
+.ui-segment--spatial[aria-pressed="true"] {
+  color: var(--spatial-selection-strong);
+  background: var(--spatial-selection-surface);
+  border-color: var(--spatial-selection);
+}
+
+.button-primary {
+  min-height: var(--control-height-md);
+  color: #101316;
+  background: var(--action-primary);
+  border: 1px solid var(--action-primary);
+  border-radius: var(--radius-control);
+}
+
+.button-primary:hover {
+  background: var(--action-primary-hover);
+  border-color: var(--action-primary-hover);
+}
+
+.button-secondary {
+  min-height: var(--control-height-sm);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+}
+
+.button-secondary:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+/* Bounded dialog grammar for intake and comparison workflows. */
+.dialog-shell {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-elevated);
+  color: var(--text-primary);
+}
+
+.dialog-header {
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dialog-close {
+  color: var(--text-muted);
+  border-radius: var(--radius-control);
+}
+
+.dialog-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.dialog-icon--action {
+  color: #101316;
+  background: var(--action-primary);
+  border-radius: var(--radius-control);
+}
+
+.dialog-icon--spatial {
+  color: #17130d;
+  background: var(--spatial-selection);
+  border-radius: var(--radius-control);
+}
+
+.intake-tabs {
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.intake-tab {
+  min-height: var(--control-height-lg);
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+}
+
+.intake-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.intake-tab[aria-pressed="true"] {
+  color: var(--text-primary);
+  background: var(--action-primary-surface);
+  border-color: color-mix(in srgb, var(--action-primary) 58%, transparent);
+}
+
+.intake-control {
+  min-height: var(--control-height-lg);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+}
+
+.intake-control::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+.intake-control:hover {
+  border-color: var(--border-strong);
+}
+
+.intake-control option {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.intake-control--textarea {
+  min-height: auto;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 22px;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.status-badge--verified {
+  color: var(--status-verified);
+  background: var(--status-verified-surface);
+}
+
+.status-badge--assumed {
+  color: var(--status-assumed);
+  background: var(--status-assumed-surface);
+}
+
+.status-badge--warning {
+  color: var(--status-warning);
+  background: var(--status-warning-surface);
+}
+
+.status-badge--error {
+  color: var(--status-error);
+  background: var(--status-error-surface);
+}
+
+.status-badge--evidence {
+  color: var(--status-evidence);
+  background: var(--status-evidence-surface);
+}
+
+.status-badge--investigation {
+  color: var(--status-investigation);
+  background: var(--status-investigation-surface);
+}
+
+.type-page-title {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.type-section-title {
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.type-body {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.type-metadata {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 .hairline-rule {

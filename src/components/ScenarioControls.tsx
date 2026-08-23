@@ -20,6 +20,69 @@ import {
   ArrowRight
 } from 'lucide-react';
 
+interface CommittedRangeInputProps {
+  min: number;
+  max: number;
+  value: number;
+  ariaLabel: string;
+  className: string;
+  onCommit: (value: number) => void;
+}
+
+function CommittedRangeInput({
+  min,
+  max,
+  value,
+  ariaLabel,
+  className,
+  onCommit,
+}: CommittedRangeInputProps) {
+  const [draft, setDraft] = useState(value);
+  const pointerActive = useRef(false);
+
+  useEffect(() => {
+    if (!pointerActive.current) setDraft(value);
+  }, [value]);
+
+  const commit = (nextValue: number) => {
+    setDraft(nextValue);
+    if (nextValue !== value) onCommit(nextValue);
+  };
+
+  return (
+    <input
+      type="range"
+      min={min}
+      max={max}
+      step={1}
+      value={draft}
+      aria-label={ariaLabel}
+      onPointerDown={() => {
+        pointerActive.current = true;
+      }}
+      onPointerUp={(event) => {
+        pointerActive.current = false;
+        commit(Number(event.currentTarget.value));
+      }}
+      onPointerCancel={() => {
+        pointerActive.current = false;
+        setDraft(value);
+      }}
+      onBlur={(event) => {
+        if (!pointerActive.current) return;
+        pointerActive.current = false;
+        commit(Number(event.currentTarget.value));
+      }}
+      onChange={(event) => {
+        const nextValue = Number(event.currentTarget.value);
+        setDraft(nextValue);
+        if (!pointerActive.current) commit(nextValue);
+      }}
+      className={className}
+    />
+  );
+}
+
 interface ScenarioControlsProps {
   site: SiteGeometry;
   scenarios: DevelopmentScenario[];
@@ -266,17 +329,17 @@ export function ScenarioControls({
   }, [showXmlModal, handleCloseXmlModal]);
 
   return (
-    <div className="flex flex-col h-full bg-[#11141d] border border-[#232938] rounded-xl overflow-hidden shadow-lg select-none">
+    <div className="panel-shell flex flex-col h-full overflow-hidden select-none">
       {/* Real Download Toast Notification */}
       {downloadedToast && (
-        <div className="bg-emerald-950/90 border-b border-emerald-600/70 p-2.5 flex items-center justify-between text-xs text-emerald-200 animate-in fade-in slide-in-from-top duration-200">
+        <div className="bg-[var(--status-verified-surface)] border-b border-[var(--status-verified)] p-2.5 flex items-center justify-between text-xs text-[var(--status-verified)] animate-in fade-in slide-in-from-top duration-200">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
             <span className="truncate">Saved <strong>{downloadedToast}</strong> to downloads.</span>
           </div>
           <button 
             onClick={() => setDownloadedToast(null)}
-            className="text-emerald-400 hover:text-white text-xs px-1 cursor-pointer"
+            className="text-[var(--status-verified)] hover:text-[var(--text-primary)] text-xs px-1 cursor-pointer"
           >
             ✕
           </button>
@@ -284,11 +347,11 @@ export function ScenarioControls({
       )}
 
       {/* Header & Export Actions */}
-      <div className="p-3 border-b border-[#232938] bg-[#141824]">
+      <div className="p-3 border-b border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
         <div className="flex items-center justify-between mb-2.5">
           <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-[#e2b170]" />
-            <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">Development Scenarios</h3>
+            <Building2 className="w-4 h-4 text-[var(--spatial-selection)]" />
+            <h3 className="type-section-title">Development Scenarios</h3>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -297,7 +360,7 @@ export function ScenarioControls({
                 onClick={onOpenCompareModal}
                 title="Compare all scenarios side-by-side"
                 aria-label="Compare all scenarios side-by-side"
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1e293b] hover:bg-[#283852] text-[#38bdf8] text-[11px] font-semibold border border-[#38bdf8]/40 shadow-sm transition-all active:scale-95 cursor-pointer"
+                className="button-secondary flex items-center gap-1 px-2.5 py-1.5 text-[var(--status-evidence)] text-[11px] font-semibold transition-colors cursor-pointer"
               >
                 <span>Compare</span>
               </button>
@@ -307,36 +370,36 @@ export function ScenarioControls({
               onClick={handleOpenXmlModal}
               title="Inspect & Copy Raw COLLADA XML"
               aria-label="Inspect and Copy Raw COLLADA XML"
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-[#182030] hover:bg-[#222d42] text-slate-300 text-[11px] font-semibold border border-[#2e3b52] shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="button-secondary flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer"
             >
-              <Code2 className="w-3.5 h-3.5 text-slate-400" />
-              <span>XML</span>
+              <Code2 className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              <span className="sr-only">XML</span>
             </button>
 
             <button
               onClick={handleCopyXML}
               title="Copy DAE to Clipboard"
               aria-label="Copy DAE to Clipboard"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#182030] hover:bg-[#222d42] text-slate-300 text-[11px] font-semibold border border-[#2e3b52] shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="button-secondary flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold transition-colors cursor-pointer"
             >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
+              {copied ? <Check className="w-3.5 h-3.5 text-[var(--status-verified)]" /> : <Copy className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
+              <span className="sr-only">{copied ? 'Copied' : 'Copy'}</span>
             </button>
 
             <button
               onClick={handleClientDownloadBlob}
               title="Download COLLADA DAE File"
               aria-label="Download COLLADA DAE File"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1e2738] hover:bg-[#28354c] text-[#38bdf8] text-xs font-semibold border border-[#38bdf8]/40 shadow-sm transition-all active:scale-95 cursor-pointer"
+              className="button-secondary flex items-center gap-1.5 px-3 py-1.5 text-[var(--status-evidence)] text-xs font-semibold transition-colors cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export DAE</span>
+              <span className="sr-only">Export DAE</span>
             </button>
           </div>
         </div>
 
         {/* Scenario Switcher Tabs */}
-        <div className={`grid gap-1.5 p-1 bg-[#181d2a] rounded-lg border border-[#272f42] grid-cols-${scenarios.length}`}>
+        <div className={`grid gap-1.5 p-1 bg-[var(--bg-secondary)] rounded-[var(--radius-card)] border border-[var(--border-subtle)] grid-cols-${scenarios.length}`}>
           {scenarios.map((s) => {
             const isSelected = s.id === activeScenario.id;
             const sOrigFloors = s.id === 'scen-001' ? 4 : s.id === 'scen-002' ? 8 : 12;
@@ -347,14 +410,14 @@ export function ScenarioControls({
                 key={s.id}
                 onClick={() => onSelectScenario(s.id)}
                 aria-pressed={isSelected}
-                className={`py-2 px-1.5 rounded-md text-[11px] font-semibold transition-all text-center truncate cursor-pointer ${
+                className={`py-2 px-1.5 rounded-[var(--radius-control)] border text-[11px] font-semibold transition-colors text-center truncate cursor-pointer ${
                   isSelected
-                    ? 'bg-[#2563eb] text-white shadow-md'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#1e2434]'
+                    ? 'bg-[var(--spatial-selection-surface)] text-[var(--spatial-selection-strong)] border-[var(--spatial-selection)]'
+                    : 'text-[var(--text-secondary)] border-transparent hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
                 <div className="truncate">{s.name.split('(')[0].replace('Scenario ', '')}</div>
-                <div className={`text-[9px] font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                <div className={`text-[9px] font-mono ${isSelected ? 'text-[var(--spatial-selection)]' : 'text-[var(--text-muted)]'}`}>
                   {s.metrics.totalFloors} Fl · {s.metrics.totalGFA.toLocaleString()} m²
                   {sOverridden && ' *'}
                 </div>
@@ -365,25 +428,25 @@ export function ScenarioControls({
       </div>
 
       {/* Active Scenario Overview & Explicit State Strip */}
-      <div className="p-3 border-b border-[#232938] bg-[#121620]/50 space-y-2">
+      <div className="p-3 border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="space-y-1">
-            <h4 className="text-xs font-bold text-slate-100">{activeScenario.name}</h4>
+            <h4 className="text-xs font-bold text-[var(--text-primary)]">{activeScenario.name}</h4>
 
             {/* Explicit State Badges Strip */}
             <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-              <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-[#151a26] text-slate-300 border border-[#263147]">
+              <span className="px-2 py-0.5 rounded-[var(--radius-control)] text-[9px] font-mono font-bold bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border-default)]">
                 [BASE CONCEPT]
               </span>
 
               {isUserOverride && (
-                <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-indigo-950/80 text-indigo-300 border border-indigo-700/60">
+                <span className="status-badge status-badge--investigation !min-h-0 !rounded-[var(--radius-control)] !px-2 !py-0.5 text-[9px]">
                   [USER OVERRIDE]
                 </span>
               )}
 
               {isFittedToSetback && (
-                <span className="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-sky-950/80 text-sky-300 border border-sky-700/60">
+                <span className="status-badge status-badge--evidence !min-h-0 !rounded-[var(--radius-control)] !px-2 !py-0.5 text-[9px]">
                   [FITTED TO SETBACK]
                 </span>
               )}
@@ -391,8 +454,8 @@ export function ScenarioControls({
 
             <p className={`text-[11px] mt-1 leading-relaxed ${
               hasCollision || isOutOfBounds || metrics.totalHeightMeters > 32.0 
-                ? 'text-rose-300 font-medium' 
-                : 'text-slate-400'
+                ? 'text-[var(--status-error)] font-medium'
+                : 'text-[var(--text-secondary)]'
             }`}>
               {dynamicDescription}
             </p>
@@ -403,40 +466,40 @@ export function ScenarioControls({
             onClick={() => onResetScenario(activeScenario.id)}
             title="Reset active scenario to original baseline concept"
             aria-label="Reset scenario to baseline concept"
-            className="flex items-center gap-1 px-2.5 py-1 text-slate-300 hover:text-white bg-[#182030] hover:bg-[#222d42] rounded-lg border border-[#2b3952] text-[11px] font-mono font-semibold transition-all cursor-pointer shrink-0"
+            className="button-secondary flex items-center gap-1 px-2.5 py-1 text-[11px] font-mono font-semibold transition-colors cursor-pointer shrink-0"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-[#38bdf8]" />
+            <RotateCcw className="w-3.5 h-3.5 text-[var(--status-evidence)]" />
             <span>Reset</span>
           </button>
         </div>
 
         {/* Base Concept vs Working Override Geometry Readout */}
         {isOverridden ? (
-          <div className="p-2.5 bg-indigo-950/30 border border-indigo-800/50 rounded-lg space-y-1 text-xs">
-            <div className="flex items-center justify-between text-slate-300 text-[11px]">
-              <span className="text-slate-400">Base Concept:</span>
+          <div className="p-2.5 bg-[var(--status-investigation-surface)] border border-[var(--status-investigation)] rounded-[var(--radius-card)] space-y-1 text-xs">
+            <div className="flex items-center justify-between text-[var(--text-secondary)] text-[11px]">
+              <span className="text-[var(--text-muted)]">Base Concept:</span>
               <span className="font-mono">{baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
             </div>
-            <div className="flex items-center justify-between text-indigo-200 font-semibold text-[11px]">
-              <span className="text-indigo-300">Working Geometry:</span>
+            <div className="flex items-center justify-between text-[var(--status-investigation)] font-semibold text-[11px]">
+              <span>Working Geometry:</span>
               <span className="font-mono font-bold">{metrics.totalFloors} Storeys ({metrics.totalGFA.toLocaleString()} m² GFA)</span>
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between text-[10px] text-slate-400 bg-[#161c28] px-2.5 py-1.5 rounded border border-[#222c40]">
+          <div className="flex items-center justify-between text-[10px] text-[var(--text-secondary)] bg-[var(--bg-inspector)] px-2.5 py-1.5 rounded-[var(--radius-control)] border border-[var(--border-subtle)]">
             <span>Base Concept: {baseFloors} Storeys ({baseGFA.toLocaleString()} m² GFA)</span>
-            <span className="font-mono text-emerald-400 font-semibold">Active Baseline</span>
+            <span className="font-mono text-[var(--status-verified)] font-semibold">Active Baseline</span>
           </div>
         )}
 
         {/* Pairwise Collision Alert Banner */}
         {hasCollision && (
-          <div className="p-2.5 bg-rose-950/90 border border-rose-600 rounded-lg space-y-1.5 text-xs text-rose-200 shadow-md">
+          <div className="p-2.5 bg-[var(--status-error-surface)] border border-[var(--status-error)] rounded-[var(--radius-card)] space-y-1.5 text-xs text-[var(--status-error)]">
             <div className="flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-rose-200 block">Mass Collision Active!</span>
-                <span className="text-[11px] text-rose-300">
+                <span className="font-bold text-[var(--text-primary)] block">Mass Collision Active!</span>
+                <span className="text-[11px] text-[var(--status-error)]">
                   {activeScenario.pairwiseOverlap?.overlaps[0]?.massA} intersects with {activeScenario.pairwiseOverlap?.overlaps[0]?.massB} (Overlap volume: {activeScenario.pairwiseOverlap?.overlapVolumeM3.toLocaleString()} m³).
                 </span>
               </div>
@@ -446,9 +509,9 @@ export function ScenarioControls({
 
         {/* Setback Encroachment Alert & Fit Action */}
         {(activeScenario.status === 'WARNING_EXCEEDS_CONSTRAINT' || encroachments.length > 0) && (
-          <div className="p-2.5 bg-rose-950/70 border border-rose-800 rounded-lg space-y-2 text-xs text-rose-200 shadow-sm">
+          <div className="p-2.5 bg-[var(--status-error-surface)] border border-[var(--status-error)] rounded-[var(--radius-card)] space-y-2 text-xs text-[var(--status-error)]">
             <div className="flex items-start gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
               <div className="flex-1 leading-snug">
                 {encroachments.length > 0 
                   ? encroachments[0].description 
@@ -459,7 +522,7 @@ export function ScenarioControls({
             {encroachments.length > 0 && (
               <button
                 onClick={() => onFitMassingToEnvelope(activeScenario.id)}
-                className="w-full py-1.5 px-2.5 bg-rose-900/80 hover:bg-rose-800 text-white rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow"
+                className="button-secondary w-full py-1.5 px-2.5 text-[var(--status-error)] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 Fit Massing to Setback Envelope
@@ -472,37 +535,35 @@ export function ScenarioControls({
       {/* Main Content: Metrics & Interactive Parameter Adjuster */}
       <div className="p-3 flex-1 overflow-y-auto space-y-3.5">
         {/* Interactive Parameter Adjuster */}
-        <div className="bg-[#161b28] border border-[#273146] rounded-lg p-3 shadow-inner">
+        <div className="surface-inspector p-3">
           <div className="flex items-center justify-between mb-2.5">
-            <div className="flex items-center gap-1.5 text-[#38bdf8] text-xs font-bold uppercase tracking-wider">
+            <div className="flex items-center gap-1.5 text-[var(--text-primary)] text-xs font-semibold">
               <Sliders className="w-3.5 h-3.5" />
               Scenario Parameters ({activeScenario.name.split(':')[0]})
             </div>
-            <span className="text-[10px] text-slate-400 font-mono">Independent</span>
+            <span className="type-metadata">Independent</span>
           </div>
 
           <div className="space-y-3">
             {/* Floors Slider */}
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-slate-300">Building Height (Storeys)</span>
-                <span className="font-mono font-bold text-slate-100 bg-[#1f283d] px-2 py-0.5 rounded text-[11px]">
+                <span className="text-[var(--text-secondary)]">Building Height (Storeys)</span>
+                <span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">
                   {metrics.totalFloors} Floors ({metrics.totalHeightMeters.toFixed(1)}m)
                 </span>
               </div>
-              <input
-                type="range"
-                min="2"
-                max="16"
-                step="1"
+              <CommittedRangeInput
+                min={2}
+                max={16}
                 value={metrics.totalFloors}
-                aria-label="Building Height in Storeys"
-                onChange={(e) => onUpdateScenarioParam(activeScenario.id, 'floors', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[#38bdf8]"
+                ariaLabel="Building Height in Storeys"
+                onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'floors', value)}
+                className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)]"
               />
-              <div className="flex justify-between text-[9px] text-slate-500 font-mono mt-0.5">
+              <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5">
                 <span>Min: 2 Fl</span>
-                <span className="text-amber-400 font-semibold">Zoning Cap: 8 Fl (32m)</span>
+                <span className="text-[var(--status-warning)] font-semibold">Zoning Cap: 8 Fl (32m)</span>
                 <span>Max: 16 Fl</span>
               </div>
             </div>
@@ -510,41 +571,39 @@ export function ScenarioControls({
             {/* Front Setback Slider */}
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-slate-300">Front Setback</span>
-                <span className="font-mono font-bold text-slate-100 bg-[#1f283d] px-2 py-0.5 rounded text-[11px]">
+                <span className="text-[var(--text-secondary)]">Front Setback</span>
+                <span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">
                   {currentSetback} Meters
                 </span>
               </div>
-              <input
-                type="range"
-                min="5"
-                max="60"
-                step="1"
+              <CommittedRangeInput
+                min={5}
+                max={60}
                 value={currentSetback}
-                aria-label="Front Setback in Meters"
-                onChange={(e) => onUpdateScenarioParam(activeScenario.id, 'frontSetback', parseInt(e.target.value))}
-                className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[#e2b170]"
+                ariaLabel="Front Setback in Meters"
+                onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'frontSetback', value)}
+                className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--spatial-selection)]"
               />
-              <div className="flex justify-between text-[9px] text-slate-500 font-mono mt-0.5">
+              <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5">
                 <span>5m</span>
-                <span className="text-emerald-400">10m (Standard)</span>
-                <span className="text-rose-400">47m (Encroaches)</span>
+                <span className="text-[var(--status-verified)]">10m (Standard)</span>
+                <span className="text-[var(--status-error)]">47m (Encroaches)</span>
                 <span>60m</span>
               </div>
             </div>
 
             {/* Encroachment Status Line */}
-            <div className="pt-2 border-t border-[#222c40] flex items-center justify-between text-[11px]">
-              <span className="text-slate-400">Buildable: {metrics.netBuildableArea.toLocaleString()} m²</span>
+            <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-[11px]">
+              <span className="text-[var(--text-secondary)]">Buildable: {metrics.netBuildableArea.toLocaleString()} m²</span>
               {encroachments.length === 0 ? (
-                <span className="text-emerald-400 text-[10px] flex items-center gap-1 font-semibold">
+                <span className="text-[var(--status-verified)] text-[10px] flex items-center gap-1 font-semibold">
                   <CheckCircle2 className="w-3 h-3" /> Fully Contained
                 </span>
               ) : (
                 <button
                   onClick={() => onFitMassingToEnvelope(activeScenario.id)}
                   aria-label="Fit massing to setback"
-                  className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-1 font-semibold bg-rose-950/80 px-2 py-1 rounded border border-rose-800 transition-all cursor-pointer"
+                  className="button-secondary text-[10px] text-[var(--status-error)] flex items-center gap-1 font-semibold px-2 py-1 transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3" /> Fit to Setback
                 </button>
@@ -555,7 +614,7 @@ export function ScenarioControls({
 
         {/* Live Yield Metrics Grid */}
         <div>
-          <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">
+          <h4 className="text-[11px] font-semibold text-[var(--text-secondary)] mb-2.5">
             Deterministic Yield Metrics
           </h4>
 
@@ -566,39 +625,39 @@ export function ScenarioControls({
 
             return (
               <div className="grid grid-cols-2 gap-2">
-                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-                  <span className="text-[10px] text-slate-400 block">Total GFA</span>
-                  <span className="text-base font-bold text-slate-100 font-mono">
-                    {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                <div className="surface-inspector p-2.5">
+                  <span className="text-[10px] text-[var(--text-secondary)] block">Total GFA</span>
+                  <span className="text-base font-bold text-[var(--text-primary)] font-mono">
+                    {metrics.totalGFA.toLocaleString()} <span className="text-xs font-normal text-[var(--text-muted)]">m²</span>
                   </span>
                 </div>
 
-                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-                  <span className="text-[10px] text-slate-400 block">FAR / KLB Ratio</span>
-                  <span className={`text-base font-bold font-mono ${metrics.farKLB > maxFAR + 0.01 ? 'text-rose-400' : 'text-[#38bdf8]'}`}>
+                <div className="surface-inspector p-2.5">
+                  <span className="text-[10px] text-[var(--text-secondary)] block">FAR / KLB Ratio</span>
+                  <span className={`text-base font-bold font-mono ${metrics.farKLB > maxFAR + 0.01 ? 'text-[var(--status-error)]' : 'text-[var(--status-evidence)]'}`}>
                     {metrics.farKLB.toFixed(2)}x
                   </span>
-                  <span className="text-[9px] text-slate-500 block">
+                  <span className="text-[9px] text-[var(--text-muted)] block">
                     {hasZoningEvidence ? 'Statutory Cap' : 'Target'}: {maxFAR.toFixed(2)}x
                   </span>
                 </div>
 
-                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-                  <span className="text-[10px] text-slate-400 block">Site Coverage (KDB)</span>
-                  <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-rose-400' : 'text-slate-100'}`}>
+                <div className="surface-inspector p-2.5">
+                  <span className="text-[10px] text-[var(--text-secondary)] block">Site Coverage (KDB)</span>
+                  <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-[var(--status-error)]' : 'text-[var(--text-primary)]'}`}>
                     {metrics.siteCoveragePercentage}%
                   </span>
-                  <span className="text-[9px] text-slate-500 block">
+                  <span className="text-[9px] text-[var(--text-muted)] block">
                     {hasZoningEvidence ? 'Statutory Limit' : 'Limit'}: {maxCoverage}%
                   </span>
                 </div>
 
-                <div className="bg-[#161b28] border border-[#273146] p-2.5 rounded-lg">
-                  <span className="text-[10px] text-slate-400 block">Unbuilt Site Area</span>
-                  <span className="text-base font-bold text-emerald-400 font-mono">
-                    {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-slate-400">m²</span>
+                <div className="surface-inspector p-2.5">
+                  <span className="text-[10px] text-[var(--text-secondary)] block">Unbuilt Site Area</span>
+                  <span className="text-base font-bold text-[var(--status-verified)] font-mono">
+                    {metrics.openSpaceArea.toLocaleString()} <span className="text-xs font-normal text-[var(--text-muted)]">m²</span>
                   </span>
-                  <span className="text-[9px] text-slate-500 block">({metrics.openSpacePercentage}% unbuilt)</span>
+                  <span className="text-[9px] text-[var(--text-muted)] block">({metrics.openSpacePercentage}% unbuilt)</span>
                 </div>
               </div>
             );
@@ -606,20 +665,20 @@ export function ScenarioControls({
         </div>
 
         {/* Evidence-Backed AI Planning & Investment Advisor */}
-        <div className="pt-2 border-t border-[#232938] space-y-2.5">
+        <div className="pt-2 border-t border-[var(--border-subtle)] space-y-2.5">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-purple-300 text-xs font-bold uppercase tracking-wider">
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            <div className="flex items-center gap-1.5 text-[var(--status-investigation)] text-xs font-semibold">
+              <Sparkles className="w-3.5 h-3.5" />
               <span>AI Investment Advisor</span>
             </div>
-            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/80 border border-purple-800/60 text-purple-300">
+            <span className="status-badge status-badge--investigation !min-h-0 !rounded-[var(--radius-control)] !px-1.5 !py-0.5 text-[9px]">
               gemini-3.7-flash
             </span>
           </div>
 
           {/* Interactive Investor Prompt Box */}
-          <div className="space-y-1.5 p-2 bg-[#141824] rounded-lg border border-[#263147]">
-            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+          <div className="surface-inspector space-y-1.5 p-2">
+            <label className="block text-[10px] font-semibold text-[var(--text-secondary)]">
               Investor Inquiry / Custom Prompt
             </label>
             <div className="flex gap-1.5">
@@ -634,13 +693,13 @@ export function ScenarioControls({
                   }
                 }}
                 placeholder="e.g. Evaluate Rp 125.3B yield vs NJOP benchmark"
-                className="flex-1 bg-[#0c0f17] border border-[#252f44] rounded px-2.5 py-1.5 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+                className="flex-1 min-h-[var(--control-height-md)] bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-[var(--radius-control)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--focus-ring)]"
               />
               <button
                 type="button"
                 onClick={() => handleGenerateAssessment(investorQuery)}
                 disabled={isLoadingAssessment}
-                className="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                className="button-primary px-3 py-1.5 text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 <span>Ask</span>
               </button>
@@ -661,7 +720,7 @@ export function ScenarioControls({
                     handleGenerateAssessment(chip);
                   }}
                   disabled={isLoadingAssessment}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-[#1e2436] hover:bg-[#28324a] text-purple-300 border border-purple-800/40 cursor-pointer transition-all"
+                  className="button-secondary !min-h-[24px] text-[9px] px-1.5 py-0.5 text-[var(--status-investigation)] cursor-pointer transition-colors"
                 >
                   {chip}
                 </button>
@@ -673,24 +732,24 @@ export function ScenarioControls({
             onClick={() => handleGenerateAssessment(investorQuery)}
             disabled={isLoadingAssessment}
             aria-label="Generate AI Planning Assessment"
-            className="w-full py-2 px-3 bg-gradient-to-r from-purple-900/70 via-indigo-900/70 to-blue-900/70 hover:from-purple-800/90 hover:via-indigo-800/90 hover:to-blue-800/90 text-white rounded-lg text-xs font-semibold flex items-center justify-center gap-2 border border-purple-500/40 shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+            className="w-full button-primary py-2 px-3 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
           >
             {isLoadingAssessment ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-300" />
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                 <span>Evaluating with Gemini 3.7 Flash...</span>
               </>
             ) : (
               <>
-                <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                <Sparkles className="w-3.5 h-3.5" />
                 <span>Generate Comprehensive Assessment</span>
               </>
             )}
           </button>
 
           {assessmentError && (
-            <div className="p-3 bg-rose-950/80 border border-rose-700/60 rounded-lg text-xs text-rose-300 space-y-2">
-              <div className="flex items-center gap-1.5 font-semibold text-rose-200">
+            <div className="p-3 bg-[var(--status-error-surface)] border border-[var(--status-error)] rounded-[var(--radius-card)] text-xs text-[var(--status-error)] space-y-2">
+              <div className="flex items-center gap-1.5 font-semibold text-[var(--text-primary)]">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span>Assessment Request Failed</span>
               </div>
@@ -699,7 +758,7 @@ export function ScenarioControls({
               </p>
               <button
                 onClick={() => handleGenerateAssessment()}
-                className="px-2.5 py-1 bg-rose-900/70 hover:bg-rose-800 text-white rounded text-[11px] font-semibold border border-rose-600/60 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                className="button-secondary px-2.5 py-1 text-[var(--status-error)] text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
               >
                 <RefreshCw className="w-3 h-3" />
                 <span>Retry Assessment</span>
@@ -708,44 +767,44 @@ export function ScenarioControls({
           )}
 
           {assessment && (
-            <div className="p-3 bg-[#151926] border border-[#2b374e] rounded-xl space-y-2 text-xs shadow-inner">
+            <div className="surface-inspector p-3 space-y-2 text-xs">
               {isAssessmentStale && (
-                <div className="p-2 bg-amber-950/80 border border-amber-600/70 rounded-lg flex items-center justify-between gap-2 text-amber-200 text-[11px]">
+                <div className="p-2 bg-[var(--status-warning-surface)] border border-[var(--status-warning)] rounded-[var(--radius-card)] flex items-center justify-between gap-2 text-[var(--status-warning)] text-[11px]">
                   <div className="flex items-center gap-1.5 font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     <span>[STALE] Inputs changed since assessment</span>
                   </div>
                   <button
                     onClick={() => handleGenerateAssessment()}
                     disabled={isLoadingAssessment}
-                    className="px-2 py-0.5 bg-amber-800/80 hover:bg-amber-700 text-white rounded text-[10px] font-semibold cursor-pointer shrink-0"
+                    className="button-secondary !min-h-[24px] px-2 py-0.5 text-[var(--status-warning)] text-[10px] font-semibold cursor-pointer shrink-0"
                   >
                     Re-evaluate
                   </button>
                 </div>
               )}
 
-              <div className="flex items-center justify-between pb-1.5 border-b border-[#222c40]">
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Executive Verdict</span>
-                <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold ${
+              <div className="flex items-center justify-between pb-1.5 border-b border-[var(--border-subtle)]">
+                <span className="text-[10px] font-semibold text-[var(--text-secondary)]">Executive Verdict</span>
+                <span className={`status-badge !min-h-0 !px-2 !py-0.5 text-[9px] ${
                   assessment.status === 'COMPLIANT' 
-                    ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60' 
-                    : 'bg-rose-950/80 text-rose-300 border border-rose-700/60'
+                    ? 'status-badge--verified'
+                    : 'status-badge--error'
                 }`}>
                   [{assessment.status}]
                 </span>
               </div>
 
-              <p className="text-slate-200 font-medium leading-relaxed text-[11px]">
+              <p className="text-[var(--text-primary)] font-medium leading-relaxed text-[11px]">
                 {assessment.decision}
               </p>
 
               {assessment.supportingEvidence.length > 0 && (
                 <div className="space-y-1 pt-1">
-                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                  <span className="text-[10px] text-[var(--text-secondary)] font-semibold block">
                     Supporting Evidence:
                   </span>
-                  <ul className="space-y-0.5 text-[11px] text-slate-300 list-disc list-inside">
+                  <ul className="space-y-0.5 text-[11px] text-[var(--text-secondary)] list-disc list-inside marker:text-[var(--status-evidence)]">
                     {assessment.supportingEvidence.map((ev, idx) => (
                       <li key={idx} className="leading-snug">{ev}</li>
                     ))}
@@ -755,10 +814,10 @@ export function ScenarioControls({
 
               {assessment.identifiedRisks.length > 0 && (
                 <div className="space-y-1 pt-1">
-                  <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider block">
+                  <span className="text-[10px] text-[var(--status-warning)] font-semibold block">
                     Identified Risks:
                   </span>
-                  <ul className="space-y-0.5 text-[11px] text-amber-200/90 list-disc list-inside">
+                  <ul className="space-y-0.5 text-[11px] text-[var(--text-secondary)] list-disc list-inside marker:text-[var(--status-warning)]">
                     {assessment.identifiedRisks.map((rk, idx) => (
                       <li key={idx} className="leading-snug">{rk}</li>
                     ))}
@@ -766,17 +825,17 @@ export function ScenarioControls({
                 </div>
               )}
 
-              <div className="pt-1.5 border-t border-[#222c40]">
-                <span className="text-[10px] text-sky-400 font-semibold uppercase tracking-wider block mb-0.5">
+              <div className="pt-1.5 border-t border-[var(--border-subtle)]">
+                <span className="text-[10px] text-[var(--status-evidence)] font-semibold block mb-0.5">
                   Recommended Action:
                 </span>
-                <div className="p-2 bg-[#1b2333] rounded border border-[#2d3a52] text-[11px] text-sky-200 flex items-start gap-1.5">
-                  <ArrowRight className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+                <div className="p-2 bg-[var(--status-evidence-surface)] rounded-[var(--radius-control)] border border-[var(--status-evidence)] text-[11px] text-[var(--text-primary)] flex items-start gap-1.5">
+                  <ArrowRight className="w-3.5 h-3.5 text-[var(--status-evidence)] shrink-0 mt-0.5" />
                   <span>{assessment.recommendedAction}</span>
                 </div>
               </div>
 
-              <div className="pt-1 flex items-center justify-between text-[9px] text-slate-500 font-mono">
+              <div className="pt-1 flex items-center justify-between text-[9px] text-[var(--text-muted)] font-mono">
                 <span>Model: {assessment.model}</span>
                 <span>{new Date(assessment.generatedAt).toLocaleTimeString()}</span>
               </div>
@@ -785,18 +844,18 @@ export function ScenarioControls({
         </div>
 
         {/* Building Mass Composition */}
-        <div className="pt-2 border-t border-[#232938]">
-          <h5 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
+        <div className="pt-2 border-t border-[var(--border-subtle)]">
+          <h5 className="text-[11px] font-semibold text-[var(--text-secondary)] mb-2">
             {hasCollision ? 'Massing Blocks (Collision Active)' : 'Massing Blocks (Zero Overlap)'}
           </h5>
           <div className="space-y-1.5">
             {activeScenario.masses.map((m) => (
-              <div key={m.id} className="flex items-center justify-between text-xs bg-[#141926] px-3 py-2 rounded-lg border border-[#222c40]">
+              <div key={m.id} className="surface-inspector flex items-center justify-between text-xs px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-sm ${m.type === 'PODIUM' ? 'bg-[#38bdf8]' : 'bg-[#e2b170]'}`} />
-                  <span className="text-slate-200 font-medium">{m.name}</span>
+                  <span className={`w-2.5 h-2.5 rounded-sm ${m.type === 'PODIUM' ? 'bg-[var(--status-evidence)]' : 'bg-[var(--spatial-selection)]'}`} />
+                  <span className="text-[var(--text-primary)] font-medium">{m.name}</span>
                 </div>
-                <div className="text-slate-400 font-mono text-[11px]">
+                <div className="text-[var(--text-secondary)] font-mono text-[11px]">
                   {m.floors} Fl · {m.gfa.toLocaleString()} m²
                 </div>
               </div>
@@ -818,40 +877,40 @@ export function ScenarioControls({
           <div 
             ref={modalRef}
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#121622] border border-[#2b3548] rounded-xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden"
+            className="bg-[var(--bg-secondary)] border border-[var(--border-default)] rounded-[var(--radius-panel)] max-w-2xl w-full max-h-[80vh] flex flex-col shadow-[var(--shadow-elevated)] overflow-hidden"
           >
-            <div className="p-3 border-b border-[#232938] flex items-center justify-between bg-[#161c2b]">
+            <div className="p-3 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-tertiary)]">
               <div className="flex items-center gap-2">
-                <Code2 className="w-4 h-4 text-[#38bdf8]" />
-                <h4 id="xml-modal-title" className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                <Code2 className="w-4 h-4 text-[var(--status-evidence)]" />
+                <h4 id="xml-modal-title" className="type-section-title">
                   COLLADA XML ({exportFilename})
                 </h4>
               </div>
               <button
                 onClick={handleCloseXmlModal}
                 aria-label="Close dialog"
-                className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#20283b] cursor-pointer"
+                className="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-control)] hover:bg-[var(--bg-hover)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="p-3 flex-1 overflow-hidden flex flex-col">
-              <p id="xml-modal-desc" className="text-[11px] text-slate-400 mb-2">
+              <p id="xml-modal-desc" className="text-[11px] text-[var(--text-secondary)] mb-2">
                 Click inside the code box to select all, then press <kbd className="bg-slate-800 px-1 py-0.5 rounded text-white font-mono text-[10px]">Ctrl+C</kbd> (or <kbd className="bg-slate-800 px-1 py-0.5 rounded text-white font-mono text-[10px]">Cmd+C</kbd>):
               </p>
               <textarea
                 readOnly
                 value={rawXml}
                 onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-                className="w-full flex-1 min-h-[300px] bg-[#0c0f17] border border-[#252f44] rounded-lg p-3 text-xs font-mono text-slate-300 focus:outline-none focus:border-[#38bdf8] resize-none"
+                className="w-full flex-1 min-h-[300px] bg-[var(--bg-primary)] border border-[var(--border-default)] rounded-[var(--radius-control)] p-3 text-xs font-mono text-[var(--text-secondary)] focus:border-[var(--focus-ring)] resize-none"
               />
             </div>
 
-            <div className="p-3 border-t border-[#232938] flex justify-between items-center bg-[#161c2b]">
+            <div className="p-3 border-t border-[var(--border-subtle)] flex justify-between items-center bg-[var(--bg-tertiary)]">
               <button
                 onClick={handleClientDownloadBlob}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1e2738] hover:bg-[#28354c] text-[#38bdf8] rounded text-xs font-semibold border border-[#38bdf8]/40 cursor-pointer"
+                className="button-secondary flex items-center gap-1.5 px-3 py-1.5 text-[var(--status-evidence)] text-xs font-semibold cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Save .dae File</span>
@@ -859,7 +918,7 @@ export function ScenarioControls({
 
               <button
                 onClick={handleCloseXmlModal}
-                className="px-3 py-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded text-xs font-semibold cursor-pointer"
+                className="button-primary px-3 py-1.5 text-xs font-semibold cursor-pointer"
               >
                 Close (Esc)
               </button>

@@ -186,19 +186,19 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       <div
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#121622] border border-[#2b3548] rounded-xl max-w-2xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+        className="dialog-shell max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden"
       >
         {/* Header */}
-        <div className="p-4 border-b border-[#232938] flex items-center justify-between bg-[#161c2b]">
+        <div className="dialog-header p-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#2563eb] to-[#38bdf8] flex items-center justify-center font-bold text-white shadow-md">
+            <div className="dialog-icon--action w-8 h-8 flex items-center justify-center font-bold shadow-md">
               <Building2 className="w-4 h-4" />
             </div>
             <div>
-              <h3 id="new-case-modal-title" className="text-sm font-bold text-slate-100">
+              <h3 id="new-case-modal-title" className="text-sm font-bold text-[var(--text-primary)]">
                 New Opportunity Intake & Parameter Setup
               </h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-[var(--text-secondary)]">
                 Capture property facts, existing asset baseline, statutory zoning limits, and valuation benchmarks.
               </p>
             </div>
@@ -206,20 +206,19 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           <button
             onClick={onClose}
             aria-label="Close dialog"
-            className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-[#20283b] cursor-pointer"
+            className="dialog-close p-1.5 cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Tab Navigation */}
-        <div className="grid grid-cols-4 gap-1 p-2 bg-[#0e121a] border-b border-[#232938] text-xs font-semibold">
+        <div className="intake-tabs grid grid-cols-4 gap-1 p-2 text-xs font-semibold" role="group" aria-label="Opportunity intake sections">
           <button
             type="button"
             onClick={() => setActiveTab('SITE')}
-            className={`py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'SITE' ? 'bg-[#2563eb] text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-[#182030]'
-            }`}
+            aria-pressed={activeTab === 'SITE'}
+            className="intake-tab py-2 px-2.5 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <Building2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">1. Opportunity</span>
@@ -229,9 +228,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           <button
             type="button"
             onClick={() => setActiveTab('EXISTING')}
-            className={`py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'EXISTING' ? 'bg-[#2563eb] text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-[#182030]'
-            }`}
+            aria-pressed={activeTab === 'EXISTING'}
+            className="intake-tab py-2 px-2.5 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <Layers className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">2. Existing Asset</span>
@@ -241,9 +239,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           <button
             type="button"
             onClick={() => setActiveTab('ZONING')}
-            className={`py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'ZONING' ? 'bg-[#2563eb] text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-[#182030]'
-            }`}
+            aria-pressed={activeTab === 'ZONING'}
+            className="intake-tab py-2 px-2.5 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">3. Planning Limits</span>
@@ -253,9 +250,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           <button
             type="button"
             onClick={() => setActiveTab('VALUATION')}
-            className={`py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-              activeTab === 'VALUATION' ? 'bg-[#2563eb] text-white shadow-md' : 'text-slate-400 hover:text-slate-200 hover:bg-[#182030]'
-            }`}
+            aria-pressed={activeTab === 'VALUATION'}
+            className="intake-tab py-2 px-2.5 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">4. Commercials</span>
@@ -266,7 +262,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
         {/* Body Form */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 flex-1 overflow-y-auto space-y-4 text-xs">
           {error && (
-            <div className="p-3 bg-rose-950/80 border border-rose-700 text-rose-200 rounded-lg text-xs font-medium">
+            <div className="p-3 bg-[var(--status-error-surface)] border border-[var(--status-error)] text-[var(--status-error)] rounded-[var(--radius-card)] text-xs font-medium" role="alert">
               {error}
             </div>
           )}
@@ -275,8 +271,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           {activeTab === 'SITE' && (
             <div className="space-y-3.5">
               <div className="space-y-1">
-                <label className="block font-semibold text-slate-300">
-                  Opportunity / Project Title <span className="text-rose-400">*</span>
+                <label className="block font-semibold text-[var(--text-secondary)]">
+                  Opportunity / Project Title <span className="text-[var(--status-error)]">*</span>
                 </label>
                 <input
                   ref={nameInputRef}
@@ -285,14 +281,14 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   placeholder="e.g. Hotel Sofyan Betawi — Acquisition & Expansion"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                  className="intake-control w-full px-3 py-2"
                 />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                 <div className="sm:col-span-2 space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Site Address <span className="text-rose-400">*</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Site Address <span className="text-[var(--status-error)]">*</span>
                   </label>
                   <input
                     type="text"
@@ -300,33 +296,33 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. Jl. Cut Mutiah No. 9, Menteng"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">City</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">City</label>
                   <input
                     type="text"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Country</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Country</label>
                   <input
                     type="text"
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Gross Land Area (m²) <span className="text-slate-500 font-normal">(e.g. 2,014 m²)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Gross Land Area (m²) <span className="text-[var(--text-muted)] font-normal">(e.g. 2,014 m²)</span>
                   </label>
                   <input
                     type="number"
@@ -335,12 +331,12 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 2014"
                     value={grossSiteArea}
                     onChange={(e) => setGrossSiteArea(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Primary Frontage Width (m) <span className="text-slate-500 font-normal">(e.g. 40m)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Primary Frontage Width (m) <span className="text-[var(--text-muted)] font-normal">(e.g. 40m)</span>
                   </label>
                   <input
                     type="number"
@@ -349,13 +345,13 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 40.0"
                     value={frontageLength}
                     onChange={(e) => setFrontageLength(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="block font-semibold text-slate-300">
+                <label className="block font-semibold text-[var(--text-secondary)]">
                   Development Intent / Investment Thesis
                 </label>
                 <textarea
@@ -363,7 +359,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   placeholder="e.g. Evaluate acquisition yield, operational continuity, and 10,000 m² phased lifestyle expansion feasibility."
                   value={objective}
                   onChange={(e) => setObjective(e.target.value)}
-                  className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg p-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8] resize-none"
+                  className="intake-control intake-control--textarea w-full p-2.5 resize-none"
                 />
               </div>
             </div>
@@ -372,20 +368,20 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           {/* TAB 2: EXISTING ASSET (BROWNFIELD) */}
           {activeTab === 'EXISTING' && (
             <div className="space-y-3.5">
-              <div className="p-3 bg-[#161d2c] border border-[#26344d] rounded-lg text-slate-300 space-y-1">
-                <div className="font-semibold text-blue-300 flex items-center gap-1.5">
+              <div className="surface-inspector p-3 text-[var(--text-secondary)] space-y-1">
+                <div className="font-semibold text-[var(--status-evidence)] flex items-center gap-1.5">
                   <Layers className="w-3.5 h-3.5" />
                   <span>Existing Asset / Brownfield Structure Baseline</span>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
+                <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
                   If this site contains an existing structure (e.g. operational hotel or commercial building), provide its facts to establish Baseline Scenario A and calculate expansion headroom.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Existing Building GFA (m²) <span className="text-slate-500 font-normal">(e.g. 3,760 m²)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Existing Building GFA (m²) <span className="text-[var(--text-muted)] font-normal">(e.g. 3,760 m²)</span>
                   </label>
                   <input
                     type="number"
@@ -394,12 +390,12 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 3760"
                     value={existingBuildingGFA}
                     onChange={(e) => setExistingBuildingGFA(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Existing Storeys / Floors <span className="text-slate-500 font-normal">(Optional · leave blank if unknown)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Existing Storeys / Floors <span className="text-[var(--text-muted)] font-normal">(Optional · leave blank if unknown)</span>
                   </label>
                   <input
                     type="number"
@@ -408,28 +404,28 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 4 (leave blank if unconfirmed)"
                     value={existingFloors}
                     onChange={(e) => setExistingFloors(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Existing Asset Description</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Existing Asset Description</label>
                   <input
                     type="text"
                     placeholder="e.g. Operational Sharia Boutique Hotel"
                     value={existingAssetDescription}
                     onChange={(e) => setExistingAssetDescription(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Current Operational Status</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Current Operational Status</label>
                   <select
                     value={existingAssetStatus}
                     onChange={(e) => setExistingAssetStatus(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   >
                     <option value="Operational">Operational (Cash-flowing)</option>
                     <option value="Vacant">Vacant / Ready for Conversion</option>
@@ -446,31 +442,31 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <div className="space-y-3.5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Zoning Code / Subzone</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Zoning Code / Subzone</label>
                   <input
                     type="text"
                     placeholder="e.g. KT + K-1 (Commercial / Hospitality)"
                     value={zoneCode}
                     onChange={(e) => setZoneCode(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Subzone Name</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Subzone Name</label>
                   <input
                     type="text"
                     placeholder="e.g. Commercial / Hospitality"
                     value={zoneName}
                     onChange={(e) => setZoneName(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Max FAR / KLB <span className="text-slate-500 font-normal">(e.g. 6.65)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Max FAR / KLB <span className="text-[var(--text-muted)] font-normal">(e.g. 6.65)</span>
                   </label>
                   <input
                     type="number"
@@ -478,12 +474,12 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="0.05"
                     value={statutoryMaxFAR}
                     onChange={(e) => setStatutoryMaxFAR(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Max KDB % <span className="text-slate-500 font-normal">(e.g. 55%)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Max KDB % <span className="text-[var(--text-muted)] font-normal">(e.g. 55%)</span>
                   </label>
                   <input
                     type="number"
@@ -492,12 +488,12 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="1"
                     value={statutoryMaxCoveragePct}
                     onChange={(e) => setStatutoryMaxCoveragePct(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Min KDH % <span className="text-slate-500 font-normal">(e.g. 20%)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Min KDH % <span className="text-[var(--text-muted)] font-normal">(e.g. 20%)</span>
                   </label>
                   <input
                     type="number"
@@ -506,11 +502,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="1"
                     value={statutoryMinKDHPct}
                     onChange={(e) => setStatutoryMinKDHPct(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Max Floors</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Max Floors</label>
                   <input
                     type="number"
                     min="1"
@@ -518,11 +514,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 14 (leave blank if unknown)"
                     value={statutoryMaxFloors}
                     onChange={(e) => setStatutoryMaxFloors(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Max Height (m)</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Max Height (m)</label>
                   <input
                     type="number"
                     min="3"
@@ -531,14 +527,14 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 48 (leave blank if unknown)"
                     value={statutoryMaxHeightMeters}
                     onChange={(e) => setStatutoryMaxHeightMeters(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Front Setback (m)</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Front Setback (m)</label>
                   <input
                     type="number"
                     min="0"
@@ -546,11 +542,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 8 (standard assumption)"
                     value={setbackFront}
                     onChange={(e) => setSetbackFront(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Rear Setback (m)</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Rear Setback (m)</label>
                   <input
                     type="number"
                     min="0"
@@ -558,11 +554,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 5 (standard assumption)"
                     value={setbackRear}
                     onChange={(e) => setSetbackRear(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Side Setbacks (m)</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Side Setbacks (m)</label>
                   <input
                     type="number"
                     min="0"
@@ -570,7 +566,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 4 (standard assumption)"
                     value={setbackSide}
                     onChange={(e) => setSetbackSide(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
               </div>
@@ -582,8 +578,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <div className="space-y-3.5">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2 space-y-1">
-                  <label className="block font-semibold text-slate-300">
-                    Asking Price <span className="text-slate-500 font-normal">(e.g. 125,290,000,000 / Rp 125.29B)</span>
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Asking Price <span className="text-[var(--text-muted)] font-normal">(e.g. 125,290,000,000 / Rp 125.29B)</span>
                   </label>
                   <input
                     type="number"
@@ -592,20 +588,20 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     placeholder="e.g. 125290000000"
                     value={askingPriceAmount}
                     onChange={(e) => setAskingPriceAmount(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2 font-mono"
                   />
                   {parsedPrice > 0 && (
-                    <span className="text-[10px] text-amber-400 font-mono block">
+                    <span className="text-[10px] text-[var(--status-assumed)] font-mono block">
                       {formatRupiahHelper(parsedPrice)}
                     </span>
                   )}
                 </div>
                 <div className="space-y-1">
-                  <label className="block font-semibold text-slate-300">Currency</label>
+                  <label className="block font-semibold text-[var(--text-secondary)]">Currency</label>
                   <select
                     value={askingPriceCurrency}
                     onChange={(e) => setAskingPriceCurrency(e.target.value)}
-                    className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-[#38bdf8]"
+                    className="intake-control w-full px-3 py-2"
                   >
                     <option value="IDR">IDR (Rp)</option>
                     <option value="USD">USD ($)</option>
@@ -615,8 +611,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
               </div>
 
               <div className="space-y-1">
-                <label className="block font-semibold text-slate-300">
-                  Government Tax Benchmark / NJOP (IDR) <span className="text-slate-500 font-normal">(e.g. Rp 104,405,760,000)</span>
+                <label className="block font-semibold text-[var(--text-secondary)]">
+                  Government Tax Benchmark / NJOP (IDR) <span className="text-[var(--text-muted)] font-normal">(e.g. Rp 104,405,760,000)</span>
                 </label>
                 <input
                   type="number"
@@ -625,66 +621,66 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   placeholder="e.g. 104405760000"
                   value={njopAmount}
                   onChange={(e) => setNjopAmount(e.target.value)}
-                  className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg px-3 py-2 text-slate-100 font-mono placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8]"
+                  className="intake-control w-full px-3 py-2 font-mono"
                 />
                 {parsedNJOP > 0 && (
-                  <span className="text-[10px] text-sky-400 font-mono block">
+                  <span className="text-[10px] text-[var(--status-evidence)] font-mono block">
                     {formatRupiahHelper(parsedNJOP)}
                   </span>
                 )}
               </div>
 
               <div className="space-y-1">
-                <label className="block font-semibold text-slate-300">Valuation Notes & Deal Terms</label>
+                <label className="block font-semibold text-[var(--text-secondary)]">Valuation Notes & Deal Terms</label>
                 <textarea
                   rows={2}
                   placeholder="e.g. Target acquisition price equates to ~Rp 62.21M/m² land basis or Rp 9.35M/m² permissible statutory GFA basis."
                   value={valuationBasisNotes}
                   onChange={(e) => setValuationBasisNotes(e.target.value)}
-                  className="w-full bg-[#0c0f17] border border-[#252f44] rounded-lg p-2.5 text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-[#38bdf8] resize-none"
+                  className="intake-control intake-control--textarea w-full p-2.5 resize-none"
                 />
               </div>
             </div>
           )}
 
           {/* LIVE METRIC SUMMARY CARD */}
-          <div className="p-3 bg-[#0d1017] border border-[#222b3d] rounded-xl space-y-2">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-300">
-              <div className="flex items-center gap-1.5 text-[#38bdf8]">
+          <div className="surface-inspector p-3 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-secondary)]">
+              <div className="flex items-center gap-1.5 text-[var(--status-evidence)]">
                 <Calculator className="w-3.5 h-3.5" />
                 <span>Live Intake Yield & Financial Synthesis</span>
               </div>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/80 border border-blue-800/60 text-blue-300">
+              <span className="status-badge status-badge--assumed !min-h-0 !px-1.5 !py-0.5 text-[10px]">
                 PROVISIONAL
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[#1d2536] text-[11px]">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-[var(--border-subtle)] text-[11px]">
               <div>
-                <span className="text-[10px] text-slate-500 block">Site Area Basis</span>
-                <span className="font-mono font-bold text-slate-200">{effectiveArea.toLocaleString()} m²</span>
+                <span className="text-[10px] text-[var(--text-muted)] block">Site Area Basis</span>
+                <span className="font-mono font-bold text-[var(--text-primary)]">{effectiveArea.toLocaleString()} m²</span>
               </div>
               <div>
-                <span className="text-[10px] text-slate-500 block">Max Permissible GFA</span>
-                <span className="font-mono font-bold text-emerald-400">{maxGFA.toLocaleString()} m²</span>
-                <span className="text-[9px] text-slate-500 block">({parsedFAR.toFixed(2)}x FAR)</span>
+                <span className="text-[10px] text-[var(--text-muted)] block">Max Permissible GFA</span>
+                <span className="font-mono font-bold text-[var(--status-verified)]">{maxGFA.toLocaleString()} m²</span>
+                <span className="text-[9px] text-[var(--text-muted)] block">({parsedFAR.toFixed(2)}x FAR)</span>
               </div>
               <div>
-                <span className="text-[10px] text-slate-500 block">Expansion Headroom</span>
-                <span className="font-mono font-bold text-amber-300">
+                <span className="text-[10px] text-[var(--text-muted)] block">Expansion Headroom</span>
+                <span className="font-mono font-bold text-[var(--status-assumed)]">
                   {parsedExistingGFA > 0 ? `+${headroomGFA.toLocaleString()} m²` : `${maxGFA.toLocaleString()} m²`}
                 </span>
-                <span className="text-[9px] text-slate-500 block">
+                <span className="text-[9px] text-[var(--text-muted)] block">
                   {parsedExistingGFA > 0 ? `(Preserving ${parsedExistingGFA.toLocaleString()} m²)` : '(Greenfield)'}
                 </span>
               </div>
               <div>
-                <span className="text-[10px] text-slate-500 block">Derived Land Price</span>
-                <span className="font-mono font-bold text-slate-200">
+                <span className="text-[10px] text-[var(--text-muted)] block">Derived Land Price</span>
+                <span className="font-mono font-bold text-[var(--text-primary)]">
                   {pricePerM2 > 0 ? `Rp ${(pricePerM2 / 1e6).toFixed(1)}M/m²` : 'Unpriced'}
                 </span>
                 {parsedPrice > 0 && (
-                  <span className="text-[9px] text-slate-500 block">
+                  <span className="text-[9px] text-[var(--text-muted)] block">
                     (Rp {(parsedPrice / 1e9).toFixed(1)}B Total)
                   </span>
                 )}
@@ -693,22 +689,22 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           </div>
 
           {/* Provenance & Local Storage Notice */}
-          <div className="p-3 bg-[#161d2c] border border-[#26344d] rounded-lg flex items-start gap-2.5">
-            <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div className="text-[11px] text-slate-300 leading-relaxed space-y-1">
+          <div className="p-3 bg-[var(--status-assumed-surface)] border border-[var(--status-assumed)] rounded-[var(--radius-card)] flex items-start gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-[var(--status-assumed)] shrink-0 mt-0.5" />
+            <div className="text-[11px] text-[var(--text-secondary)] leading-relaxed space-y-1">
               <div>
-                <span className="font-semibold text-amber-300">Provenance: [USER_ENTERED_ASSUMPTION]. </span>
+                <span className="font-semibold text-[var(--status-assumed)]">Provenance: [USER_ENTERED_ASSUMPTION]. </span>
                 Initial study envelopes are generated as illustrative study baselines until confirmed by title scans or cadastral surveys.
               </div>
-              <div className="text-[10px] text-slate-400 border-t border-[#232f44] pt-1">
+              <div className="text-[10px] text-[var(--text-secondary)] border-t border-[var(--border-default)] pt-1">
                 ⚠️ Release 1 stores cases locally in this browser. Use synthetic test cases for exploration.
               </div>
             </div>
           </div>
 
           {/* Actions */}
-          <div className="pt-3 border-t border-[#232938] flex items-center justify-between">
-            <div className="text-[11px] text-slate-400">
+          <div className="pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">
+            <div className="text-[11px] text-[var(--text-secondary)]">
               {activeTab === 'SITE' && <span>Next: Existing Asset or Planning Limits →</span>}
               {activeTab === 'EXISTING' && <span>Next: Planning Limits →</span>}
               {activeTab === 'ZONING' && <span>Next: Commercial Valuation →</span>}
@@ -719,13 +715,13 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 bg-[#161c28] hover:bg-[#202838] text-slate-300 rounded-lg text-xs font-semibold border border-[#273247] cursor-pointer"
+                className="button-secondary px-4 py-2 text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-4 py-2 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-lg text-xs font-semibold shadow-md transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+                className="button-primary px-4 py-2 text-xs font-semibold shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Create Opportunity & 3 Schemes</span>
@@ -737,4 +733,3 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
     </div>
   );
 }
-
