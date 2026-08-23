@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { BuildingMass, DevelopmentScenario, SiteGeometry } from '@/types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { BuildingMass, DevelopmentScenario, Project, SiteGeometry } from '@/types';
 import { 
   ViewportDisplayMode, 
   CameraProjectionMode, 
@@ -9,6 +9,11 @@ import {
   ManipulationTool 
 } from './types';
 import { ViewportCanvas } from './ViewportCanvas';
+import { SpatialConsoleViewport } from './spatial-console/SpatialConsoleViewport';
+import {
+  buildSpatialConsoleSnapshot,
+  resolveSpatialEditorEngine,
+} from './spatial-editor-adapter';
 import { Toolbar } from './Toolbar';
 import { MassPropertiesPanel } from './MassPropertiesPanel';
 import { PascalFloatingLevelSelector } from './PascalFloatingLevelSelector';
@@ -19,25 +24,47 @@ import { getPascalRuntimeDiagnostics } from './pascal-plugin';
 import { 
   getCanonicalParcelBounds, 
   evaluateScenarioCompliance,
-  fitMassesToBuildableEnvelope,
   findNonOverlappingDuplicatePosition
 } from '@/lib/geometry/engine';
+import {
+  CanonicalSpatialCommand,
+  CanonicalCommandResult,
+  createCanonicalCommandId,
+} from '@/lib/spatial/canonical-command-service';
+import {
+  evaluateSpatialProposal,
+  spatialProposalToCommand,
+  type SpatialEditProposal,
+  type SpatialProposalCommitResult,
+  type SpatialProposalViewResult,
+} from './spatial-console/spatial-editing-bridge';
 import { 
   Layers, 
   Box, 
   ShieldAlert, 
   CheckCircle2, 
-  Navigation,
   Undo2,
   Redo2,
   Terminal
 } from 'lucide-react';
 
 interface DevelopmentWorkspaceProps {
+  caseId: string;
   site: SiteGeometry;
   activeScenario: DevelopmentScenario;
-  onUpdateScenarioMasses: (scenarioId: string, updatedMasses: BuildingMass[]) => void;
+  project: Project;
+  onProposeCommand: (command: CanonicalSpatialCommand) => boolean;
+  onCommitSpatialCommand: (command: CanonicalSpatialCommand) => CanonicalCommandResult;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: (scenarioId: string) => void;
+  onRedo: (scenarioId: string) => void;
+  zoningHeightLimitMeters?: number;
 }
+
+const configuredSpatialEditorEngine = resolveSpatialEditorEngine(
+  process.env.NEXT_PUBLIC_SPATIAL_EDITOR_ENGINE,
+);
 
 function getNormalizedMassName(mass: BuildingMass, index: number): string {
   const nameLower = mass.name.toLowerCase();
@@ -54,25 +81,36 @@ function getNormalizedMassName(mass: BuildingMass, index: number): string {
 }
 
 export function DevelopmentWorkspace({
+  caseId,
   site,
   activeScenario,
-  onUpdateScenarioMasses
+  project,
+  onProposeCommand,
+  onCommitSpatialCommand,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  zoningHeightLimitMeters,
 }: DevelopmentWorkspaceProps) {
   const [viewType, setViewType] = useState<'3D' | '2D'>('3D');
   const [displayMode, setDisplayMode] = useState<ViewportDisplayMode>('DEVELOPMENT');
   const [projectionMode, setProjectionMode] = useState<CameraProjectionMode>('PERSPECTIVE');
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>('ISO');
   const [activeTool, setActiveTool] = useState<ManipulationTool>('SELECT');
-  const [selectedMassId, setSelectedMassId] = useState<string | null>(null);
+  const selectionScope = `${caseId}:${activeScenario.id}`;
+  const [massSelection, setMassSelection] = useState<{ scope: string; massId: string } | null>(null);
+  const selectedMassId = massSelection?.scope === selectionScope ? massSelection.massId : null;
+  const setSelectedMassId = useCallback((massId: string | null) => {
+    setMassSelection(massId ? { scope: selectionScope, massId } : null);
+  }, [selectionScope]);
   const [activeLevel, setActiveLevel] = useState<number | null>(null);
   const [isRotating, setIsRotating] = useState(false);
   const [showDimensions, setShowDimensions] = useState(true);
   const [showZoningCap, setShowZoningCap] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-
-  // Undo / Redo history state stack
-  const [history, setHistory] = useState<BuildingMass[][]>([]);
-  const [future, setFuture] = useState<BuildingMass[][]>([]);
+  const [activeSpatialEngine, setActiveSpatialEngine] = useState(configuredSpatialEditorEngine);
+  const [spatialConsoleDiagnostic, setSpatialConsoleDiagnostic] = useState<string | null>(null);
 
   const setbacks = activeScenario.assumptionsUsed.setbacks;
   const bounds = getCanonicalParcelBounds(site.grossSiteArea, setbacks, site.frontageLength || 110);
@@ -87,28 +125,128 @@ export function DevelopmentWorkspace({
     activeScenario.pairwiseOverlap
   );
 
-  // Mass mutation handlers (translating interaction into deterministic SitePilot model updates)
-  const commitMassUpdates = useCallback((updatedMasses: BuildingMass[]) => {
-    setHistory(prev => [...prev, activeScenario.masses]);
-    setFuture([]);
-    onUpdateScenarioMasses(activeScenario.id, updatedMasses);
-  }, [activeScenario.id, activeScenario.masses, onUpdateScenarioMasses]);
+  const spatialConsoleSnapshotResult = useMemo(() => {
+    if (activeSpatialEngine !== 'spatial-console') return { snapshot: null, error: null };
+    try {
+      return {
+        snapshot: buildSpatialConsoleSnapshot({
+          caseId,
+          site,
+          scenario: activeScenario,
+          complianceReport: compliance,
+          zoningHeightLimitMeters,
+        }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        snapshot: null,
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
+  }, [activeScenario, activeSpatialEngine, caseId, compliance, site, zoningHeightLimitMeters]);
+
+  const handleSpatialConsoleInitializationError = useCallback((error: Error) => {
+    const message = `Spatial Console initialization failed: ${error.message}`;
+    console.warn(`[SitePilot Spatial Console] ${message}`);
+    setSpatialConsoleDiagnostic(message);
+    setActiveSpatialEngine('legacy');
+  }, []);
+
+  const effectiveSpatialDiagnostic = spatialConsoleDiagnostic
+    ?? (spatialConsoleSnapshotResult.error
+      ? `Spatial Console snapshot rejected: ${spatialConsoleSnapshotResult.error.message}`
+      : null);
+
+  const handlePreviewSpatialProposal = useCallback((proposal: SpatialEditProposal): SpatialProposalViewResult => {
+    const evaluation = evaluateSpatialProposal(project, proposal);
+    const previewScenario = evaluation.scenario;
+    if (!previewScenario?.complianceReport) return evaluation;
+    return {
+      ...evaluation,
+      snapshot: buildSpatialConsoleSnapshot({
+        caseId,
+        site,
+        scenario: previewScenario,
+        complianceReport: previewScenario.complianceReport,
+        zoningHeightLimitMeters,
+      }),
+    };
+  }, [caseId, project, site, zoningHeightLimitMeters]);
+
+  const handleCommitSpatialProposal = useCallback((proposal: SpatialEditProposal): SpatialProposalCommitResult => {
+    const evaluation = evaluateSpatialProposal(project, proposal);
+    if (!evaluation.valid) {
+      return { accepted: false, code: evaluation.code, reason: evaluation.reason };
+    }
+    const result = onCommitSpatialCommand(spatialProposalToCommand(proposal));
+    if (!result.accepted) return { accepted: false, code: result.code, reason: result.reason };
+    return { accepted: true, revisionId: result.committedCommand.resultingRevisionId };
+  }, [onCommitSpatialCommand, project]);
+
+  const handleAddSpatialMass = useCallback((): SpatialProposalCommitResult => {
+    const sourceMass = selectedMass ?? activeScenario.masses[0];
+    const revision = activeScenario.canonicalRevision;
+    if (!sourceMass || !revision) {
+      return { accepted: false, code: 'TARGET_NOT_FOUND', reason: 'No source mass is available.' };
+    }
+    const id = createCanonicalCommandId('mass');
+    const mass: BuildingMass = {
+      ...structuredClone(sourceMass),
+      id,
+      name: 'New Mass',
+      position: findNonOverlappingDuplicatePosition(sourceMass, activeScenario.masses, bounds),
+      footprintPolygon: undefined,
+    };
+    const result = handleCommitSpatialProposal({
+      type: 'ADD_MASS', caseId, scenarioId: activeScenario.id, targetId: id,
+      expectedSourceRevisionId: revision.revisionId, mass,
+    });
+    if (result.accepted) setSelectedMassId(id);
+    return result;
+  }, [activeScenario, bounds, caseId, handleCommitSpatialProposal, selectedMass, setSelectedMassId]);
+
+  const handleDuplicateSpatialMass = useCallback((): SpatialProposalCommitResult => {
+    const sourceMass = selectedMass;
+    const revision = activeScenario.canonicalRevision;
+    if (!sourceMass || !revision) {
+      return { accepted: false, code: 'TARGET_NOT_FOUND', reason: 'Select a mass to duplicate.' };
+    }
+    const id = createCanonicalCommandId('mass');
+    const mass = {
+      ...structuredClone(sourceMass),
+      id,
+      name: `${sourceMass.name} (Copy)`,
+      position: findNonOverlappingDuplicatePosition(sourceMass, activeScenario.masses, bounds),
+    };
+    const result = handleCommitSpatialProposal({
+      type: 'DUPLICATE_MASS', caseId, scenarioId: activeScenario.id, targetId: id,
+      expectedSourceRevisionId: revision.revisionId, sourceMassId: sourceMass.id, mass,
+    });
+    if (result.accepted) setSelectedMassId(id);
+    return result;
+  }, [activeScenario, bounds, caseId, handleCommitSpatialProposal, selectedMass, setSelectedMassId]);
+
+  const handleDeleteSpatialMass = useCallback((): SpatialProposalCommitResult => {
+    const revision = activeScenario.canonicalRevision;
+    if (!selectedMass || !revision) {
+      return { accepted: false, code: 'TARGET_NOT_FOUND', reason: 'Select a mass to delete.' };
+    }
+    const result = handleCommitSpatialProposal({
+      type: 'DELETE_MASS', caseId, scenarioId: activeScenario.id, targetId: selectedMass.id,
+      expectedSourceRevisionId: revision.revisionId,
+    });
+    if (result.accepted) setSelectedMassId(null);
+    return result;
+  }, [activeScenario.canonicalRevision, activeScenario.id, caseId, handleCommitSpatialProposal, selectedMass, setSelectedMassId]);
 
   const handleUndo = useCallback(() => {
-    if (history.length === 0) return;
-    const previous = history[history.length - 1];
-    setHistory(prev => prev.slice(0, prev.length - 1));
-    setFuture(prev => [activeScenario.masses, ...prev]);
-    onUpdateScenarioMasses(activeScenario.id, previous);
-  }, [history, activeScenario.id, activeScenario.masses, onUpdateScenarioMasses]);
+    if (canUndo) onUndo(activeScenario.id);
+  }, [activeScenario.id, canUndo, onUndo]);
 
   const handleRedo = useCallback(() => {
-    if (future.length === 0) return;
-    const next = future[0];
-    setFuture(prev => prev.slice(1));
-    setHistory(prev => [...prev, activeScenario.masses]);
-    onUpdateScenarioMasses(activeScenario.id, next);
-  }, [future, activeScenario.id, activeScenario.masses, onUpdateScenarioMasses]);
+    if (canRedo) onRedo(activeScenario.id);
+  }, [activeScenario.id, canRedo, onRedo]);
 
   // Keyboard shortcut listener for Ctrl+Z / Ctrl+Shift+Z / Cmd+Z
   useEffect(() => {
@@ -126,22 +264,61 @@ export function DevelopmentWorkspace({
   }, [handleUndo, handleRedo]);
 
   const handleUpdateMass = (massId: string, updates: Partial<BuildingMass>) => {
-    const updatedMasses = activeScenario.masses.map(m => {
-      if (m.id !== massId) return m;
-      return {
-        ...m,
-        ...updates,
-        dimensions: {
-          ...m.dimensions,
-          ...(updates.dimensions || {})
-        },
-        position: {
-          ...m.position,
-          ...(updates.position || {})
-        }
+    const mass = activeScenario.masses.find((item) => item.id === massId);
+    const revision = activeScenario.canonicalRevision;
+    if (!mass || !revision) return false;
+    const base = {
+      id: createCanonicalCommandId('legacy-mass'),
+      caseId,
+      scenarioId: activeScenario.id,
+      targetId: massId,
+      expectedSourceRevisionId: revision.revisionId,
+      issuedAt: new Date().toISOString(),
+      source: 'LEGACY_EDITOR' as const,
+    };
+    let command: CanonicalSpatialCommand;
+    if (updates.position) {
+      command = {
+        ...base,
+        type: 'MOVE_MASS',
+        payload: { position: { ...mass.position, ...updates.position } },
+        description: `Move ${mass.name}`,
       };
-    });
-    commitMassUpdates(updatedMasses);
+    } else if (updates.floorToFloorHeight !== undefined) {
+      command = {
+        ...base,
+        type: 'SET_FLOOR_TO_FLOOR_HEIGHT',
+        payload: { floorToFloorHeight: updates.floorToFloorHeight },
+        description: `Set ${mass.name} floor-to-floor height`,
+      };
+    } else if (updates.floors !== undefined) {
+      command = {
+        ...base,
+        type: 'SET_MASS_FLOORS',
+        payload: { floors: updates.floors },
+        description: `Set ${mass.name} storeys`,
+      };
+    } else if (updates.program !== undefined) {
+      command = {
+        ...base,
+        type: 'SET_MASS_PROGRAM',
+        payload: { program: updates.program },
+        description: `Set ${mass.name} programme`,
+      };
+    } else if (updates.dimensions) {
+      command = {
+        ...base,
+        type: 'RESIZE_MASS',
+        payload: {
+          width: updates.dimensions.width ?? mass.dimensions.width,
+          length: updates.dimensions.length ?? mass.dimensions.length,
+        },
+        description: `Resize ${mass.name}`,
+      };
+    } else {
+      return false;
+    }
+    return onProposeCommand(command);
   };
 
   const handleDuplicateMass = (massId: string) => {
@@ -149,7 +326,7 @@ export function DevelopmentWorkspace({
     if (!sourceMass) return;
 
     const newPos = findNonOverlappingDuplicatePosition(sourceMass, activeScenario.masses, bounds);
-    const newMassId = `mass-${Date.now()}`;
+    const newMassId = createCanonicalCommandId('mass');
     const duplicated: BuildingMass = {
       ...sourceMass,
       id: newMassId,
@@ -157,22 +334,59 @@ export function DevelopmentWorkspace({
       position: newPos
     };
 
-    commitMassUpdates([...activeScenario.masses, duplicated]);
-    setSelectedMassId(newMassId);
+    const revision = activeScenario.canonicalRevision;
+    if (!revision) return;
+    const accepted = onProposeCommand({
+      id: createCanonicalCommandId('duplicate-mass'),
+      type: 'DUPLICATE_MASS',
+      caseId,
+      scenarioId: activeScenario.id,
+      targetId: newMassId,
+      expectedSourceRevisionId: revision.revisionId,
+      issuedAt: new Date().toISOString(),
+      source: 'LEGACY_EDITOR',
+      description: `Duplicate ${sourceMass.name}`,
+      payload: { sourceMassId: sourceMass.id, mass: duplicated },
+    });
+    if (accepted) setSelectedMassId(newMassId);
   };
 
   const handleDeleteMass = (massId: string) => {
     if (activeScenario.masses.length <= 1) return;
-    const filtered = activeScenario.masses.filter(m => m.id !== massId);
-    commitMassUpdates(filtered);
-    if (selectedMassId === massId) {
+    const revision = activeScenario.canonicalRevision;
+    if (!revision) return;
+    const accepted = onProposeCommand({
+      id: createCanonicalCommandId('delete-mass'),
+      type: 'DELETE_MASS',
+      caseId,
+      scenarioId: activeScenario.id,
+      targetId: massId,
+      expectedSourceRevisionId: revision.revisionId,
+      issuedAt: new Date().toISOString(),
+      source: 'LEGACY_EDITOR',
+      description: `Delete ${activeScenario.masses.find((mass) => mass.id === massId)?.name || massId}`,
+      payload: {},
+    });
+    if (accepted && selectedMassId === massId) {
       setSelectedMassId(null);
     }
   };
 
   const handleFitMassing = () => {
-    const fitted = fitMassesToBuildableEnvelope(site.grossSiteArea, setbacks, activeScenario.masses);
-    commitMassUpdates(fitted);
+    const revision = activeScenario.canonicalRevision;
+    if (!revision) return;
+    onProposeCommand({
+      id: createCanonicalCommandId('fit-envelope'),
+      type: 'FIT_TO_ENVELOPE',
+      caseId,
+      scenarioId: activeScenario.id,
+      targetId: activeScenario.id,
+      expectedSourceRevisionId: revision.revisionId,
+      issuedAt: new Date().toISOString(),
+      source: 'LEGACY_EDITOR',
+      description: `Fit ${activeScenario.name} to its setback envelope`,
+      payload: {},
+    });
   };
 
   const handleAddFloor = (massId: string) => {
@@ -223,52 +437,63 @@ export function DevelopmentWorkspace({
 
   return (
     <Development3DErrorBoundary fallbackTitle="3D Spatial Development Workspace">
-      <div className="relative w-full h-full min-h-[460px] bg-[#0c0f17] border border-[#232938] rounded-xl overflow-hidden flex flex-col shadow-inner select-none">
-        {/* Top Header Bar: 2D/3D Mode Switcher, Undo/Redo & Live Compliance Pill */}
-        <div className="p-2.5 bg-[#121622]/95 border-b border-[#232938] flex flex-wrap items-center justify-between gap-2 z-20">
-          <div className="flex items-center gap-1.5 bg-[#161c2b] p-1 rounded-lg border border-[#2b3548]">
+      <div className="relative w-full h-full min-h-[460px] bg-[var(--bg-primary)] border border-[var(--border-subtle)] rounded-[var(--radius-panel)] overflow-hidden flex flex-col select-none">
+        {/* Primary workspace toolbar. The Spatial Console keeps secondary controls in canvas context. */}
+        <div className={`bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center justify-between gap-2 z-20 ${
+          activeSpatialEngine === 'spatial-console' && viewType === '3D'
+            ? 'min-h-[44px] px-2 py-1.5 flex-nowrap'
+            : 'p-2.5 flex-wrap'
+        }`}>
+          <div className="ui-segmented">
             <button
               onClick={() => setViewType('2D')}
               aria-label="2D Site Plan (Illustrative) view"
               aria-pressed={viewType === '2D'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                viewType === '2D' ? 'bg-[#2563eb] text-white shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-[#1f2738]'
-              }`}
+              className="ui-segment flex items-center gap-1.5 px-2 py-1 text-xs font-semibold transition-colors cursor-pointer"
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>2D Site Plan (Illustrative)</span>
+              <span className="hidden sm:inline">2D Site Plan (Illustrative)</span><span className="sm:hidden">2D</span>
             </button>
             <button
               onClick={() => setViewType('3D')}
               aria-label="3D Spatial Model view"
               aria-pressed={viewType === '3D'}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                viewType === '3D' ? 'bg-[#2563eb] text-white shadow' : 'text-slate-400 hover:text-slate-100 hover:bg-[#1f2738]'
-              }`}
+              className="ui-segment flex items-center gap-1.5 px-2 py-1 text-xs font-semibold transition-colors cursor-pointer"
             >
               <Box className="w-3.5 h-3.5" />
-              <span>3D Spatial Model</span>
+              <span className="hidden sm:inline">3D Spatial Model</span><span className="sm:hidden">3D</span>
             </button>
           </div>
 
-          {/* Undo / Redo & Diagnostics HUD */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {!compliance.isCompliant ? (
+              <div className="status-badge status-badge--error !min-h-[var(--control-height-sm)] !rounded-[var(--radius-control)] !px-2 !py-1 !font-sans text-[11px] font-medium whitespace-nowrap">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                <span>{compliance.statusPillLabel}</span>
+              </div>
+            ) : (
+              <div className="status-badge status-badge--verified !min-h-[var(--control-height-sm)] !rounded-[var(--radius-control)] !px-2 !py-1 !font-sans text-[11px] font-medium whitespace-nowrap">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{compliance.statusPillLabel}</span>
+              </div>
+            )}
+
             <div className="flex items-center gap-1">
               <button
                 onClick={handleUndo}
-                disabled={history.length === 0}
+                disabled={!canUndo}
                 title="Undo (Ctrl+Z)"
                 aria-label="Undo action"
-                className="p-1.5 bg-[#161c28] hover:bg-[#20293a] disabled:opacity-40 disabled:hover:bg-[#161c28] text-slate-300 rounded border border-[#273247] cursor-pointer"
+                className="button-secondary p-1.5 disabled:opacity-50 text-[var(--text-secondary)] cursor-pointer"
               >
                 <Undo2 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={handleRedo}
-                disabled={future.length === 0}
+                disabled={!canRedo}
                 title="Redo (Ctrl+Shift+Z)"
                 aria-label="Redo action"
-                className="p-1.5 bg-[#161c28] hover:bg-[#20293a] disabled:opacity-40 disabled:hover:bg-[#161c28] text-slate-300 rounded border border-[#273247] cursor-pointer"
+                className="button-secondary p-1.5 disabled:opacity-50 text-[var(--text-secondary)] cursor-pointer"
               >
                 <Redo2 className="w-3.5 h-3.5" />
               </button>
@@ -278,36 +503,16 @@ export function DevelopmentWorkspace({
               onClick={() => setShowDiagnostics(true)}
               title="Inspect System Runtime Diagnostics"
               aria-label="Inspect System Runtime Diagnostics"
-              className="flex items-center gap-1 px-2.5 py-1.5 bg-[#182030] hover:bg-[#222d42] text-sky-400 rounded-lg text-[11px] font-mono font-bold border border-[#2b3952] cursor-pointer"
+              className="button-secondary p-1.5 text-[var(--status-evidence)] cursor-pointer"
             >
               <Terminal className="w-3 h-3" />
-              <span>Diagnostics</span>
+              <span className="sr-only">Diagnostics</span>
             </button>
-          </div>
-
-          {/* Single Authoritative Compliance Status Pill */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-[#161c2b] border border-[#2b3548] px-2 py-1 rounded-lg text-slate-300 text-[10px] font-mono font-bold">
-              <Navigation className="w-3.5 h-3.5 text-rose-400 rotate-[-45deg]" />
-              <span>N</span>
-            </div>
-
-            {!compliance.isCompliant ? (
-              <div className="flex items-center gap-1.5 bg-rose-950/90 border border-rose-600/70 text-rose-200 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md shadow">
-                <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span>{compliance.statusPillLabel}</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 bg-emerald-950/90 border border-emerald-600/70 text-emerald-200 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md shadow">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>{compliance.statusPillLabel}</span>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Workspace Toolbar */}
-        {viewType === '3D' && (
+        {/* Legacy renderer retains its existing toolbar; Spatial Console owns display and camera controls in canvas. */}
+        {viewType === '3D' && activeSpatialEngine === 'legacy' && (
           <Toolbar
             displayMode={displayMode}
             projectionMode={projectionMode}
@@ -316,6 +521,7 @@ export function DevelopmentWorkspace({
             isRotating={isRotating}
             showDimensions={showDimensions}
             showZoningCap={showZoningCap}
+            hideCameraControls={false}
             onChangeDisplayMode={handleDisplayModeChange}
             onChangeProjectionMode={setProjectionMode}
             onSetCameraPreset={setCameraPreset}
@@ -327,27 +533,70 @@ export function DevelopmentWorkspace({
         )}
 
         {/* Viewport Area */}
-        <div className="relative w-full flex-1 overflow-hidden bg-[#0a0d14]">
+        <div className="relative w-full flex-1 overflow-hidden bg-[var(--bg-primary)]">
           {viewType === '3D' ? (
             <>
-              <ViewportCanvas
-                site={site}
-                scenario={activeScenario}
-                displayMode={displayMode}
-                projectionMode={projectionMode}
-                cameraPreset={cameraPreset}
-                activeTool={activeTool}
-                selectedMassId={selectedMassId}
-                isRotating={isRotating}
-                showDimensions={showDimensions}
-                showZoningCap={showZoningCap}
-                onSelectMass={setSelectedMassId}
-                onUpdateMassGeometry={handleUpdateMass}
-                onSetCameraPreset={setCameraPreset}
-              />
+              {activeSpatialEngine === 'spatial-console' && spatialConsoleSnapshotResult.snapshot ? (
+                <SpatialConsoleViewport
+                  snapshot={spatialConsoleSnapshotResult.snapshot}
+                  displayMode={displayMode}
+                  projectionMode={projectionMode}
+                  cameraPreset={cameraPreset}
+                  selectedMassId={selectedMassId}
+                  activeTool={activeTool}
+                  showZoningCap={showZoningCap}
+                  onSelectMass={setSelectedMassId}
+                  onChangeTool={setActiveTool}
+                  onSetCameraPreset={setCameraPreset}
+                  onChangeProjectionMode={setProjectionMode}
+                  onChangeDisplayMode={handleDisplayModeChange}
+                  onPreviewProposal={handlePreviewSpatialProposal}
+                  onCommitProposal={handleCommitSpatialProposal}
+                  onAddMass={handleAddSpatialMass}
+                  onDuplicateMass={handleDuplicateSpatialMass}
+                  onDeleteMass={handleDeleteSpatialMass}
+                  onInitializationError={handleSpatialConsoleInitializationError}
+                />
+              ) : (
+                <div
+                  className="absolute inset-0"
+                  data-spatial-engine="legacy"
+                  data-case-id={caseId}
+                  data-scenario-id={activeScenario.id}
+                  data-canonical-revision={activeScenario.canonicalRevision?.revisionId}
+                >
+                  <ViewportCanvas
+                    site={site}
+                    scenario={activeScenario}
+                    displayMode={displayMode}
+                    projectionMode={projectionMode}
+                    cameraPreset={cameraPreset}
+                    activeTool={activeTool}
+                    selectedMassId={selectedMassId}
+                    isRotating={isRotating}
+                    showDimensions={showDimensions}
+                    showZoningCap={showZoningCap}
+                    onSelectMass={setSelectedMassId}
+                    onUpdateMassGeometry={handleUpdateMass}
+                    onSetCameraPreset={setCameraPreset}
+                  />
+                </div>
+              )}
+
+              {effectiveSpatialDiagnostic
+                && (activeSpatialEngine === 'legacy' || spatialConsoleSnapshotResult.error)
+                && (
+                <div
+                  role="status"
+          className="absolute top-3 left-3 z-30 max-w-md border border-[var(--status-warning)] bg-[var(--status-warning-surface)] px-2.5 py-1.5 text-[10px] font-mono text-[var(--status-warning)]"
+                  title={effectiveSpatialDiagnostic}
+                >
+                  Spatial Console unavailable · Legacy renderer active
+                </div>
+              )}
 
               {/* Pascal Floating Action Menu directly over selected mass */}
-              {selectedMass && (
+              {activeSpatialEngine === 'legacy' && selectedMass && (
                 <PascalFloatingActionMenu
                   scenario={activeScenario}
                   selectedMass={selectedMass}
@@ -361,17 +610,19 @@ export function DevelopmentWorkspace({
               )}
 
               {/* Pascal Floating Level Selector on bottom-left */}
-              <PascalFloatingLevelSelector
-                scenario={activeScenario}
-                selectedMass={selectedMass}
-                activeLevel={activeLevel}
-                onSelectLevel={setActiveLevel}
-                onAddFloor={handleAddFloor}
-                onRemoveFloor={handleRemoveFloor}
-              />
+              {activeSpatialEngine === 'legacy' && (
+                <PascalFloatingLevelSelector
+                  scenario={activeScenario}
+                  selectedMass={selectedMass}
+                  activeLevel={activeLevel}
+                  onSelectLevel={setActiveLevel}
+                  onAddFloor={handleAddFloor}
+                  onRemoveFloor={handleRemoveFloor}
+                />
+              )}
 
               {/* Exact Numeric Mass Properties Panel on right */}
-              {selectedMass && (
+              {activeSpatialEngine === 'legacy' && selectedMass && (
                 <MassPropertiesPanel
                   scenario={activeScenario}
                   selectedMass={selectedMass}
@@ -385,15 +636,15 @@ export function DevelopmentWorkspace({
             </>
           ) : (
             /* 2D Cadastral SVG View with Normalized Non-Colliding Legend */
-            <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-[#0a0d14]">
+            <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-[var(--bg-primary)]">
               <svg viewBox="-90 -115 180 230" className="w-full flex-1 max-w-2xl drop-shadow-2xl">
                 <rect x="-85" y="76.59" width="170" height="20" fill="#10141e" stroke="#2a3348" strokeWidth="0.8" />
                 <text x="0" y="88" fill="#94a3b8" fontSize="4.5" textAnchor="middle" letterSpacing="1" fontWeight="bold">
                   {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} (FRONTAGE: ${bounds.width}M)` : `PRIMARY STREET (FRONTAGE: ${bounds.width}M)`}
                 </text>
 
-                <rect x="-55" y="-105" width="6.5" height="40" fill="#1e293b" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="1 1" />
-                <text x="-51.75" y="-95" fill="#38bdf8" fontSize="2.5" textAnchor="middle">6.5m Access</text>
+                <rect x="-55" y="-105" width="6.5" height="40" fill="var(--bg-tertiary)" stroke="var(--status-evidence)" strokeWidth="0.8" strokeDasharray="1 1" />
+                <text x="-51.75" y="-95" fill="var(--status-evidence)" fontSize="2.5" textAnchor="middle">6.5m Access</text>
 
                 <rect
                   x={bounds.minX}
@@ -402,7 +653,7 @@ export function DevelopmentWorkspace({
                   height={bounds.length}
                   fill="#161f30"
                   fillOpacity="0.8"
-                  stroke="#38bdf8"
+                  stroke="var(--status-evidence)"
                   strokeWidth="1.2"
                 />
 
@@ -413,7 +664,7 @@ export function DevelopmentWorkspace({
                   height={bounds.buildableLength}
                   fill="#0f172a"
                   fillOpacity="0.6"
-                  stroke="#10b981"
+                  stroke="var(--status-verified)"
                   strokeWidth="0.8"
                   strokeDasharray="2 2"
                 />
@@ -439,7 +690,7 @@ export function DevelopmentWorkspace({
                         y={posY}
                         width={w}
                         height={l}
-                        fill={m.type === 'PODIUM' ? '#38bdf8' : isViolation ? '#f43f5e' : '#e2b170'}
+                        fill={m.type === 'PODIUM' ? 'var(--status-evidence)' : isViolation ? 'var(--status-error)' : 'var(--spatial-selection)'}
                         fillOpacity="0.85"
                         stroke="#ffffff"
                         strokeWidth="0.8"
@@ -462,7 +713,7 @@ export function DevelopmentWorkspace({
               </svg>
 
               {/* Exact Requested Indexed Mass Legend ([1] Podium, [2] East Wing, [3] West Wing) */}
-              <div className="flex flex-wrap items-center justify-center gap-3 mt-3 bg-[#121622] px-4 py-2 rounded-lg border border-[#232938] text-[11px] font-mono shadow-md">
+              <div className="flex flex-wrap items-center justify-center gap-3 mt-3 bg-[var(--bg-secondary)] px-4 py-2 rounded-[var(--radius-card)] border border-[var(--border-subtle)] text-[11px] font-mono">
                 {activeScenario.masses.map((m, idx) => {
                   const normalizedLabel = getNormalizedMassName(m, idx);
                   return (
@@ -474,11 +725,11 @@ export function DevelopmentWorkspace({
                       }}
                       className="flex items-center gap-2 cursor-pointer hover:text-white transition-colors"
                     >
-                      <span className={`w-4 h-4 rounded flex items-center justify-center font-bold text-white text-[10px] ${m.type === 'PODIUM' ? 'bg-[#2563eb]' : 'bg-[#d97706]'}`}>
+                      <span className={`w-4 h-4 rounded-[var(--radius-control)] flex items-center justify-center font-bold text-[#101316] text-[10px] ${m.type === 'PODIUM' ? 'bg-[var(--status-evidence)]' : 'bg-[var(--spatial-selection)]'}`}>
                         {idx + 1}
                       </span>
-                      <span className="text-slate-200 font-semibold">[{idx + 1}] {normalizedLabel}:</span>
-                      <span className="text-slate-400">{m.dimensions.width}m × {m.dimensions.length.toFixed(1)}m · {m.floors} Fl ({m.gfa.toLocaleString()} m²)</span>
+                      <span className="text-[var(--text-primary)] font-semibold">[{idx + 1}] {normalizedLabel}:</span>
+                      <span className="text-[var(--text-secondary)]">{m.dimensions.width}m × {m.dimensions.length.toFixed(1)}m · {m.floors} Fl ({m.gfa.toLocaleString()} m²)</span>
                     </div>
                   );
                 })}
@@ -487,31 +738,31 @@ export function DevelopmentWorkspace({
           )}
         </div>
 
-        {/* Bottom Architectural Inspection Legend & Scale Bar */}
-        <div className="p-2.5 bg-[#101420] border-t border-[#232938] flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300 z-10">
+        {/* Legacy and 2D retain their established fixed legend; Spatial Console uses its collapsible in-canvas legend and scale. */}
+        {(activeSpatialEngine === 'legacy' || viewType === '2D') && <div className="p-2.5 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--text-secondary)] z-10">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[var(--status-evidence)]" />
               <span>Site ({bounds.width}m × {bounds.length}m = {bounds.grossSiteArea.toLocaleString()} m²)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#10b981]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[var(--status-verified)]" />
               <span>Buildable Envelope ({bounds.netBuildableArea.toLocaleString()} m²)</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#e2b170]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[var(--spatial-selection)]" />
               <span>Massing ({activeScenario.name.split(':')[0]})</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
+          <div className="flex items-center gap-3 font-mono text-[11px] text-[var(--text-muted)]">
             <div className="flex items-center gap-1.5">
               <div className="w-10 h-1 bg-slate-400 border border-slate-200" />
               <span>50m</span>
             </div>
             <span>SitePilot 3D Engine</span>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Diagnostics Modal */}

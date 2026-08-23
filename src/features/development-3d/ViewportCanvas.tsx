@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { 
   ViewportDisplayMode, 
@@ -25,7 +25,7 @@ interface ViewportCanvasProps {
   showDimensions?: boolean;
   showZoningCap: boolean;
   onSelectMass: (massId: string | null) => void;
-  onUpdateMassGeometry?: (massId: string, updates: Partial<BuildingMass>) => void;
+  onUpdateMassGeometry?: (massId: string, updates: Partial<BuildingMass>) => boolean;
   onHoverMass?: (massId: string | null) => void;
   onSetCameraPreset: (preset: CameraPreset) => void;
 }
@@ -57,7 +57,10 @@ export function ViewportCanvas({
   const handleMeshesRef = useRef<Map<HandleType, THREE.Object3D>>(new Map());
 
   const setbacks = scenario.assumptionsUsed.setbacks;
-  const bounds = getCanonicalParcelBounds(site.grossSiteArea, setbacks, site.frontageLength || 110);
+  const bounds = useMemo(
+    () => getCanonicalParcelBounds(site.grossSiteArea, setbacks, site.frontageLength || 110),
+    [site.frontageLength, site.grossSiteArea, setbacks]
+  );
   const zoningHeightCap = 32.0;
 
   const towerMaxHeight = scenario.metrics.totalHeightMeters;
@@ -487,6 +490,31 @@ export function ViewportCanvas({
     let draggingHandleType: HandleType | null = null;
     let dragStartPointer = { x: 0, y: 0 };
     let dragStartDimensions = { width: 0, length: 0, height: 0, floors: 0 };
+    let pendingMassUpdate: Partial<BuildingMass> | null = null;
+
+    const previewMassUpdate = (updates: Partial<BuildingMass>) => {
+      if (!selectedMass) return;
+      pendingMassUpdate = updates;
+      const mesh = massMeshes.get(selectedMass.id);
+      if (!mesh) return;
+      const dimensions = { ...selectedMass.dimensions, ...(updates.dimensions || {}) };
+      mesh.scale.set(
+        dimensions.width / selectedMass.dimensions.width,
+        dimensions.height / selectedMass.dimensions.height,
+        dimensions.length / selectedMass.dimensions.length
+      );
+      mesh.position.y = (selectedMass.position.y || 0) + dimensions.height / 2;
+      renderer.render(scene, camera);
+    };
+
+    const resetMassPreview = () => {
+      if (!selectedMass) return;
+      const mesh = massMeshes.get(selectedMass.id);
+      if (!mesh) return;
+      mesh.scale.set(1, 1, 1);
+      mesh.position.y = (selectedMass.position.y || 0) + selectedMass.dimensions.height / 2;
+      renderer.render(scene, camera);
+    };
 
     const getPointerPos = (event: MouseEvent) => {
       const rect = renderer.domElement.getBoundingClientRect();
@@ -526,6 +554,7 @@ export function ViewportCanvas({
         if (obj && obj.userData?.isHandle) {
           isDraggingHandle = true;
           draggingHandleType = obj.userData.handleType;
+          pendingMassUpdate = null;
           dragStartPointer = { x: p.clientX, y: p.clientY };
           dragStartDimensions = {
             width: selectedMass.dimensions.width,
@@ -575,7 +604,7 @@ export function ViewportCanvas({
         const footprint = Math.round(newW * selectedMass.dimensions.length * 10) / 10;
         const gfa = Math.round(footprint * selectedMass.floors * 10) / 10;
 
-        onUpdateMassGeometry(selectedMass.id, {
+        previewMassUpdate({
           footprintArea: footprint,
           gfa,
           dimensions: { ...selectedMass.dimensions, width: newW }
@@ -589,7 +618,7 @@ export function ViewportCanvas({
         const footprint = Math.round(newW * selectedMass.dimensions.length * 10) / 10;
         const gfa = Math.round(footprint * selectedMass.floors * 10) / 10;
 
-        onUpdateMassGeometry(selectedMass.id, {
+        previewMassUpdate({
           footprintArea: footprint,
           gfa,
           dimensions: { ...selectedMass.dimensions, width: newW }
@@ -603,7 +632,7 @@ export function ViewportCanvas({
         const footprint = Math.round(selectedMass.dimensions.width * newL * 10) / 10;
         const gfa = Math.round(footprint * selectedMass.floors * 10) / 10;
 
-        onUpdateMassGeometry(selectedMass.id, {
+        previewMassUpdate({
           footprintArea: footprint,
           gfa,
           dimensions: { ...selectedMass.dimensions, length: newL }
@@ -617,7 +646,7 @@ export function ViewportCanvas({
         const footprint = Math.round(selectedMass.dimensions.width * newL * 10) / 10;
         const gfa = Math.round(footprint * selectedMass.floors * 10) / 10;
 
-        onUpdateMassGeometry(selectedMass.id, {
+        previewMassUpdate({
           footprintArea: footprint,
           gfa,
           dimensions: { ...selectedMass.dimensions, length: newL }
@@ -634,7 +663,7 @@ export function ViewportCanvas({
         const footprint = selectedMass.footprintArea || (selectedMass.dimensions.width * selectedMass.dimensions.length);
         const gfa = Math.round(footprint * newFloors * 10) / 10;
 
-        onUpdateMassGeometry(selectedMass.id, {
+        previewMassUpdate({
           floors: newFloors,
           height: computedH,
           gfa,
@@ -647,15 +676,38 @@ export function ViewportCanvas({
 
     const handlePointerUp = () => {
       if (isDraggingHandle) {
+        const update = pendingMassUpdate;
         isDraggingHandle = false;
         draggingHandleType = null;
+        pendingMassUpdate = null;
         setActiveDrag(null);
+        if (update && selectedMass && onUpdateMassGeometry) {
+          const accepted = onUpdateMassGeometry(selectedMass.id, update);
+          if (!accepted) resetMassPreview();
+        } else {
+          resetMassPreview();
+        }
       }
+    };
+
+    const handlePointerCancel = () => {
+      if (!isDraggingHandle) return;
+      isDraggingHandle = false;
+      draggingHandleType = null;
+      pendingMassUpdate = null;
+      setActiveDrag(null);
+      resetMassPreview();
+    };
+
+    const handleDragKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handlePointerCancel();
     };
 
     renderer.domElement.addEventListener('pointerdown', handlePointerDown);
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+    window.addEventListener('keydown', handleDragKeyDown);
 
     // Animation Loop
     let animationFrameId: number;
@@ -707,6 +759,8 @@ export function ViewportCanvas({
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+      window.removeEventListener('keydown', handleDragKeyDown);
       renderer.dispose();
       if (container) container.innerHTML = '';
     };
