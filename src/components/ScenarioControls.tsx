@@ -103,7 +103,7 @@ interface ScenarioControlsProps {
   scenarios: DevelopmentScenario[];
   activeScenarioId: string;
   onSelectScenario: (id: string) => void;
-  onUpdateScenarioParam: (scenarioId: string, param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback', value: number) => void;
+  onUpdateScenarioParam: (scenarioId: string, param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback' | 'rearSetback', value: number) => void;
   onFitMassingToEnvelope: (scenarioId: string) => void;
   onResetScenario: (scenarioId: string) => void;
   onOpenCompareModal?: () => void;
@@ -147,6 +147,7 @@ export function ScenarioControls({
   const metrics = activeScenario.metrics;
   const currentSetback = activeScenario.assumptionsUsed.setbacks.front;
   const currentSideSetback = activeScenario.assumptionsUsed.setbacks.sideLeft;
+  const currentRearSetback = activeScenario.assumptionsUsed.setbacks.rear;
   const podiumMasses = activeScenario.masses.filter((mass) => mass.type === 'PODIUM');
   const towerMasses = activeScenario.masses.filter((mass) => mass.type === 'TOWER');
   const podiumFloors = podiumMasses.length ? Math.max(...podiumMasses.map((mass) => mass.floors)) : null;
@@ -161,9 +162,8 @@ export function ScenarioControls({
   const towerPermittedFloors = towerMasses.length && heightLimit
     ? Math.max(1, Math.min(...towerMasses.map((mass) => Math.floor((heightLimit - mass.position.y) / mass.floorToFloorHeight))))
     : floorLimit.floorCount;
-  const tallestTowerHeight = towerMasses.reduce((height, mass) => Math.max(height, mass.height), 0);
   const podiumPermittedFloors = podiumMasses.length && heightLimit
-    ? Math.max(1, Math.min(...podiumMasses.map((mass) => Math.floor((heightLimit - tallestTowerHeight) / mass.floorToFloorHeight))))
+    ? Math.max(1, Math.min(...podiumMasses.map((mass) => Math.floor(heightLimit / mass.floorToFloorHeight))))
     : floorLimit.floorCount;
   // The interaction range is derived from the active study instead of imposing a
   // statutory maximum. It deliberately extends beyond the permitted value so the
@@ -495,6 +495,7 @@ export function ScenarioControls({
               <button
                 key={s.id}
                 onClick={() => onSelectScenario(s.id)}
+                title={s.name}
                 aria-pressed={isSelected}
                 className={`py-2 px-1.5 rounded-[var(--radius-control)] border text-[11px] font-semibold transition-colors text-center truncate cursor-pointer ${
                   isSelected
@@ -545,6 +546,18 @@ export function ScenarioControls({
             }`}>
               {dynamicDescription}
             </p>
+
+            {activeScenario.proposal && (
+              <details className="mt-2 rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-inspector)] px-2.5 py-1.5 text-[10px] text-[var(--text-secondary)]">
+                <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">Study brief</summary>
+                <div className="mt-1.5 space-y-1.5 leading-relaxed">
+                  <p>{activeScenario.proposal.rationale}</p>
+                  <p><strong className="text-[var(--text-primary)]">Existing asset:</strong> {activeScenario.proposal.existingAssetDecision.toLowerCase().replace('_', ' ')} — {activeScenario.proposal.existingAssetScope}</p>
+                  <p><strong className="text-[var(--text-primary)]">Public realm:</strong> {activeScenario.proposal.publicRealmIntent}</p>
+                  <p><strong className="text-[var(--text-primary)]">Phasing:</strong> {activeScenario.proposal.phasingConcept}</p>
+                </div>
+              </details>
+            )}
           </div>
 
           {/* Reset Button (Restores Active Scenario to Baseline Concept) */}
@@ -644,7 +657,7 @@ export function ScenarioControls({
               ) : (
                 <>
                   <CommittedRangeInput min={1} max={towerSliderMax} value={towerFloors} ariaLabel="Tower storeys" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'towerFloors', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
-                  <p className={`text-[9px] font-mono ${towerPermittedFloors !== null && towerFloors > towerPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{towerPermittedFloors === null ? 'Planning range unavailable: supply height, or FAR and KDB.' : `${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'Height-derived tower range above its base' : 'Study range'}: 1–${towerPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' · not a legal maximum' : ''}`}</p>
+                  <p className={`text-[9px] font-mono ${towerPermittedFloors !== null && towerFloors > towerPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{towerPermittedFloors === null ? 'Editable range unavailable: supply height, or FAR and KDB.' : `Editable study range: 1–${towerSliderMax} Fl · supplied planning limit: ${towerPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' (study estimate, not a legal maximum)' : ''}`}</p>
                 </>
               )}
             </div>
@@ -657,7 +670,7 @@ export function ScenarioControls({
               ) : (
                 <>
                   <CommittedRangeInput min={1} max={podiumSliderMax} value={podiumFloors} ariaLabel="Podium storeys" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'podiumFloors', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
-                  <p className={`text-[9px] font-mono ${podiumPermittedFloors !== null && podiumFloors > podiumPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{podiumPermittedFloors === null ? 'Planning range unavailable: supply height, or FAR and KDB.' : `${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'Height-derived podium range' : 'Study range'}: 1–${podiumPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' · not a legal maximum' : ''}`}</p>
+                  <p className={`text-[9px] font-mono ${podiumPermittedFloors !== null && podiumFloors > podiumPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{podiumPermittedFloors === null ? 'Editable range unavailable: supply height, or FAR and KDB.' : `Editable study range: 1–${podiumSliderMax} Fl · supplied planning limit: ${podiumPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' (study estimate, not a legal maximum)' : ''}`}</p>
                 </>
               )}
             </div>
@@ -688,6 +701,12 @@ export function ScenarioControls({
               <div className="flex items-center justify-between text-xs mb-1"><span className="text-[var(--text-secondary)]">Side setback</span><span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">{currentSideSetback} m each side</span></div>
               <CommittedRangeInput min={0} max={sideSetbackMax} value={currentSideSetback} ariaLabel="Symmetric side setback in metres" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'sideSetback', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--spatial-selection)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
               <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5"><span>0 m</span><span>Default for new opportunities: 4 m</span><span>{sideSetbackMax} m</span></div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1"><span className="text-[var(--text-secondary)]">Rear setback</span><span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">{currentRearSetback} m</span></div>
+              <CommittedRangeInput min={0} max={Math.max(currentRearSetback, Math.floor(Math.max(0, parcelBounds.length - activeScenario.assumptionsUsed.setbacks.front)))} value={currentRearSetback} ariaLabel="Rear setback in metres" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'rearSetback', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--spatial-selection)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
+              <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5"><span>0 m</span><span>Parcel-derived range</span></div>
             </div>
 
             {/* Encroachment Status Line */}

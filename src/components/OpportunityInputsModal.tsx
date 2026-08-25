@@ -19,6 +19,8 @@ export interface OpportunityInputUpdate {
   minKDHPct?: number;
   frontSetbackMeters: number;
   sideSetbackMeters: number;
+  rearSetbackMeters: number;
+  landscapedPermeableAreaM2?: number;
 }
 
 interface OpportunityInputsModalProps {
@@ -54,8 +56,10 @@ export function OpportunityInputsModal({
   const [maxFAR, setMaxFAR] = useState(() => String(project.zoningLimits?.maxFAR ?? ''));
   const [maxCoverage, setMaxCoverage] = useState(() => String(project.zoningLimits?.maxCoveragePct ?? ''));
   const [minKDH, setMinKDH] = useState(() => String(project.zoningLimits?.minKDHPct ?? ''));
+  const [landscapedArea, setLandscapedArea] = useState(() => String(project.site.landscapedPermeableAreaM2 ?? ''));
   const [frontSetback, setFrontSetback] = useState(() => String(project.zoningLimits?.setbacks.front ?? project.site.setbacks.front));
   const [sideSetback, setSideSetback] = useState(() => String(project.zoningLimits?.setbacks.sideLeft ?? project.site.setbacks.sideLeft ?? 4));
+  const [rearSetback, setRearSetback] = useState(() => String(project.zoningLimits?.setbacks.rear ?? project.site.setbacks.rear ?? 6));
   const [error, setError] = useState<string | null>(null);
 
   const parcel = useMemo(() => resolveRectangularParcel({
@@ -86,9 +90,11 @@ export function OpportunityInputsModal({
     }
     const frontSetbackMeters = numericOrUndefined(frontSetback);
     const sideSetbackMeters = numericOrUndefined(sideSetback);
+    const rearSetbackMeters = numericOrUndefined(rearSetback);
     if (frontSetbackMeters === undefined || frontSetbackMeters < 0
-      || sideSetbackMeters === undefined || sideSetbackMeters < 0) {
-      setError('Front and symmetric side setbacks must be non-negative numbers. Front may be 0 m.');
+      || sideSetbackMeters === undefined || sideSetbackMeters < 0
+      || rearSetbackMeters === undefined || rearSetbackMeters < 0) {
+      setError('Front, side and rear setbacks must be non-negative numbers. Front may be 0 m.');
       return;
     }
     onSave({
@@ -100,6 +106,8 @@ export function OpportunityInputsModal({
       minKDHPct: numericOrUndefined(minKDH),
       frontSetbackMeters,
       sideSetbackMeters,
+      rearSetbackMeters,
+      landscapedPermeableAreaM2: numericOrUndefined(landscapedArea),
     });
     onClose();
   };
@@ -147,10 +155,12 @@ export function OpportunityInputsModal({
               <label className="space-y-1"><span className="text-[var(--text-secondary)]">FAR / KLB</span><input aria-label="Maximum FAR KLB" type="number" min="0.01" step="0.01" value={maxFAR} onChange={(event) => setMaxFAR(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /></label>
               <label className="space-y-1"><span className="text-[var(--text-secondary)]">Coverage / KDB (%)</span><input aria-label="Maximum coverage KDB percent" type="number" min="0.01" max="100" step="0.1" value={maxCoverage} onChange={(event) => setMaxCoverage(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /></label>
               <label className="space-y-1"><span className="text-[var(--text-secondary)]">Open space / KDH (%)</span><input aria-label="Minimum KDH percent" type="number" min="0.01" max="100" step="0.1" value={minKDH} onChange={(event) => setMinKDH(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /></label>
+              <label className="space-y-1"><span className="text-[var(--text-secondary)]">Landscaped / permeable area (m²)</span><input aria-label="Landscaped permeable area in square metres" type="number" min="0" step="0.01" value={landscapedArea} onChange={(event) => setLandscapedArea(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /><span className="block text-[9px] text-[var(--text-muted)]">Enter only when this area is explicitly supported; unbuilt area alone does not demonstrate KDH.</span></label>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <label className="space-y-1"><span className="text-[var(--text-secondary)]">Front setback (m)</span><input aria-label="Front setback in metres" type="number" min="0" step="0.5" value={frontSetback} onChange={(event) => setFrontSetback(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /><span className="block text-[9px] leading-relaxed text-[var(--text-muted)]">Building setback from the street-facing boundary; 0 m is valid. This study input is not represented as a registered legal easement.</span></label>
               <label className="space-y-1"><span className="text-[var(--text-secondary)]">Side setback (m)</span><input aria-label="Symmetric side setback in metres" type="number" min="0" step="0.5" value={sideSetback} onChange={(event) => setSideSetback(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /><span className="block text-[9px] leading-relaxed text-[var(--text-muted)]">Applied equally to left and right sides. New opportunities default to 4 m.</span></label>
+              <label className="space-y-1"><span className="text-[var(--text-secondary)]">Rear setback (m)</span><input aria-label="Rear setback in metres" type="number" min="0" step="0.5" value={rearSetback} onChange={(event) => setRearSetback(event.target.value)} className="intake-control w-full px-3 py-2 font-mono" /><span className="block text-[9px] leading-relaxed text-[var(--text-muted)]">Study setback from the rear parcel boundary; not surveyed cadastral geometry.</span></label>
             </div>
           </section>
         </div>

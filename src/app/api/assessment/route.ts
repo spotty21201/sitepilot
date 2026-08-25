@@ -307,14 +307,14 @@ export async function POST(request: NextRequest) {
       body.existingAsset?.gfa ? `- Existing Structure: ${body.existingAsset.gfa.toLocaleString()} m² (${body.existingAsset.floors || 4} floors, status: ${body.existingAsset.currentStatus || 'Operational'})` : '',
       body.expansionHeadroomGFA !== undefined ? `- Permissible Expansion Headroom: ${body.expansionHeadroomGFA.toLocaleString()} m²` : '',
       `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct === undefined ? 'Not provided' : `${statMaxCoveragePct}%`})`,
-      `- Unbuilt Open Space (KDH Basis): ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%, min required: ${statMinKDHPct === undefined ? 'Not provided' : `${statMinKDHPct}%`})`,
+      `- Unbuilt site area: ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%). KDH: ${metrics.kdhDemonstrated ? `${metrics.landscapedPermeableAreaM2?.toLocaleString()} m² explicit landscaped/permeable area` : 'not yet demonstrated'}. Minimum supplied requirement: ${statMinKDHPct === undefined ? 'Not provided' : `${statMinKDHPct}%`}`,
       body.valuation?.askingPriceAmount ? `- Commercial Terms: Asking Rp ${(body.valuation.askingPriceAmount / 1e9).toFixed(1)}B (~Rp ${(body.valuation.pricePerM2 ? (body.valuation.pricePerM2 / 1e6).toFixed(1) : (body.valuation.askingPriceAmount / grossSiteArea / 1e6).toFixed(1))}M/m² land)` : '',
       body.valuation?.njopAmount ? `- Tax Benchmark (NJOP): Rp ${(body.valuation.njopAmount / 1e9).toFixed(1)}B` : '',
       `- Setbacks: Front ${canonicalSetbacks.front}m, Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
       `- Setback Encroachments: ${encroachments.length > 0 ? encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}`,
       `- 3D Mass Overlaps: ${overlaps.hasOverlap ? `ACTIVE COLLISION (${overlaps.overlapVolumeM3} m³ overlap)` : 'Zero Collisions'}`,
       `- Out of Bounds Footprint: ${(metrics.outOfBoundsAreaM2 || 0) > 0.5 ? `${metrics.outOfBoundsAreaM2} m² beyond parcel` : 'None'}`,
-      `- Authoritative Compliance Verdict: ${complianceReport.status} (${complianceReport.assessmentStatus})`,
+      `- Study planning check: ${complianceReport.status} (${complianceReport.assessmentStatus}); statutory compliance is not verified unless confirmed planning evidence is present`,
       `- Primary Summary: ${complianceReport.summaryText}`
     ].filter(Boolean).join('\n');
 

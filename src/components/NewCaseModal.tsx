@@ -7,11 +7,12 @@ import {
   deriveStreetName,
   resolveRectangularParcel,
 } from '@/lib/opportunity/canonical-opportunity';
+import type { SchemePriorities } from '@/lib/schemes/proposal-contract';
 
 interface NewCaseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateCase: (params: CreateCaseParams) => void;
+  onCreateCase: (params: CreateCaseParams, priorities?: SchemePriorities) => void;
 }
 
 type IntakeTab = 'SITE' | 'EXISTING' | 'ZONING' | 'VALUATION';
@@ -65,6 +66,17 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const [valuationBasisNotes, setValuationBasisNotes] = useState<string>('');
 
   const [error, setError] = useState<string | null>(null);
+  const [showPriorityConfirmation, setShowPriorityConfirmation] = useState(false);
+  const [priorities, setPriorities] = useState<SchemePriorities>({
+    existingBuildingRetention: 'adapt',
+    developmentYield: 'balanced',
+    publicRealm: 'strong',
+    programMix: 'Active retail podium, offices, residences, hotel, shaded public realm and transit-oriented development',
+    phasing: 'phased',
+    planningRiskTolerance: 'medium',
+    investmentHorizon: 'medium',
+    allowNonCompliantStretch: false,
+  });
 
   const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -72,6 +84,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const handleClose = React.useCallback(() => {
     setActiveTab('SITE');
     setError(null);
+    setShowPriorityConfirmation(false);
     onClose();
   }, [onClose]);
 
@@ -147,6 +160,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       return;
     }
 
+    if (!showPriorityConfirmation) {
+      setShowPriorityConfirmation(true);
+      return;
+    }
+
     const parsedFrontage = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
     const parsedDepth = lotDepth.trim() ? parseFloat(lotDepth) : undefined;
     const resolvedParcel = resolveRectangularParcel({
@@ -203,7 +221,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       njopAmount: finalNJOP && !isNaN(finalNJOP) ? finalNJOP : undefined,
       valuationBasisNotes: valuationBasisNotes.trim() || undefined,
       provenanceType: 'USER_ENTERED_ASSUMPTION'
-    });
+    }, priorities);
 
     handleClose();
   };
@@ -298,6 +316,31 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <div className="p-3 bg-[var(--status-error-surface)] border border-[var(--status-error)] text-[var(--status-error)] rounded-[var(--radius-card)] text-xs font-medium" role="alert">
               {error}
             </div>
+          )}
+
+          {showPriorityConfirmation && (
+            <section className="surface-inspector border border-[var(--spatial-selection)] p-3 space-y-3" aria-label="Confirm development priorities">
+              <div>
+                <div className="flex items-center gap-2 text-[var(--status-evidence)] font-semibold">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Confirm priorities before generating three development studies
+                </div>
+                <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+                  SitePilot will use these priorities to request three contrasting studies, then independently check their geometry and planning inputs.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Existing-building approach</span><select className="intake-control w-full px-2 py-1.5" value={priorities.existingBuildingRetention} onChange={(e) => setPriorities((prev) => ({ ...prev, existingBuildingRetention: e.target.value as SchemePriorities['existingBuildingRetention'] }))}><option value="retain">Retain</option><option value="adapt">Adapt</option><option value="partial">Partial retention</option><option value="replace">Replace</option></select></label>
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Development yield</span><select className="intake-control w-full px-2 py-1.5" value={priorities.developmentYield} onChange={(e) => setPriorities((prev) => ({ ...prev, developmentYield: e.target.value as SchemePriorities['developmentYield'] }))}><option value="conservative">Conservative</option><option value="balanced">Balanced</option><option value="maximum">Maximum</option></select></label>
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Public realm</span><select className="intake-control w-full px-2 py-1.5" value={priorities.publicRealm} onChange={(e) => setPriorities((prev) => ({ ...prev, publicRealm: e.target.value as SchemePriorities['publicRealm'] }))}><option value="standard">Standard</option><option value="strong">Strong</option><option value="generous">Generous</option></select></label>
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Phasing</span><select className="intake-control w-full px-2 py-1.5" value={priorities.phasing} onChange={(e) => setPriorities((prev) => ({ ...prev, phasing: e.target.value as SchemePriorities['phasing'] }))}><option value="phased">Phased</option><option value="single_phase">Single phase</option></select></label>
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Planning-risk tolerance</span><select className="intake-control w-full px-2 py-1.5" value={priorities.planningRiskTolerance} onChange={(e) => setPriorities((prev) => ({ ...prev, planningRiskTolerance: e.target.value as SchemePriorities['planningRiskTolerance'] }))}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+                <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Investment horizon</span><select className="intake-control w-full px-2 py-1.5" value={priorities.investmentHorizon} onChange={(e) => setPriorities((prev) => ({ ...prev, investmentHorizon: e.target.value as SchemePriorities['investmentHorizon'] }))}><option value="short">Short</option><option value="medium">Medium</option><option value="long">Long</option></select></label>
+              </div>
+              <label className="block text-[11px] text-[var(--text-secondary)]"><span className="flex items-center gap-2"><input type="checkbox" checked={priorities.allowNonCompliantStretch} onChange={(e) => setPriorities((prev) => ({ ...prev, allowNonCompliantStretch: e.target.checked }))} /> Allow one clearly labelled non-compliant stretch study</span></label>
+              <label className="block space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Program mix priority</span><textarea rows={2} className="intake-control intake-control--textarea w-full p-2" value={priorities.programMix} onChange={(e) => setPriorities((prev) => ({ ...prev, programMix: e.target.value }))} /></label>
+              <p className="text-[10px] text-[var(--status-assumed)]">The model may propose concepts; SitePilot calculates all geometry, figures and planning checks independently.</p>
+            </section>
           )}
 
           {/* TAB 1: SITE & BASIC IDENTITY */}
@@ -496,7 +539,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     onChange={(e) => setExistingAssetStatus(e.target.value)}
                     className="intake-control w-full px-3 py-2"
                   >
-                    <option value="Operational">Operational (Cash-flowing)</option>
+                    <option value="Operational">Operational</option>
                     <option value="Vacant">Vacant / Ready for Conversion</option>
                     <option value="Underutilized">Partially Utilized / Brownfield</option>
                     <option value="Greenfield">Greenfield (Vacant Land)</option>
@@ -781,9 +824,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                 className="button-primary px-4 py-2 text-xs font-semibold shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Create Opportunity & 3 Schemes</span>
+                <span>{showPriorityConfirmation ? 'Confirm priorities & generate 3 schemes' : 'Create Opportunity & Generate 3 Schemes'}</span>
               </button>
             </div>
+            <p className="col-span-full text-right text-[9px] text-[var(--text-muted)]">The review will identify the provider and model used. If no model is available, proposals are labelled study templates—not model-generated.</p>
           </div>
         </form>
       </div>

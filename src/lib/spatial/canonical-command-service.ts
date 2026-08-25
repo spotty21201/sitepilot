@@ -28,6 +28,7 @@ export type CanonicalSpatialCommandType =
   | 'SET_SETBACKS'
   | 'FIT_TO_ENVELOPE'
   | 'RESET_SCENARIO'
+  | 'ACCEPT_SCHEME_PROPOSAL'
   | 'DUPLICATE_SCENARIO';
 
 interface CommandBase {
@@ -55,6 +56,7 @@ export type CanonicalSpatialCommand =
   | (CommandBase & { type: 'SET_SETBACKS'; payload: { setbacks: Setbacks } })
   | (CommandBase & { type: 'FIT_TO_ENVELOPE'; payload: Record<string, never> })
   | (CommandBase & { type: 'RESET_SCENARIO'; payload: Record<string, never> })
+  | (CommandBase & { type: 'ACCEPT_SCHEME_PROPOSAL'; payload: { proposalId: string } })
   | (CommandBase & {
       type: 'DUPLICATE_SCENARIO';
       payload: { newScenarioId: string; name: string };
@@ -334,6 +336,8 @@ function validateCommandPayload(command: CanonicalSpatialCommand): string | null
       return validateSetbacks(command.payload.setbacks) ? null : 'Setbacks must be non-negative finite values.';
     case 'DUPLICATE_SCENARIO':
       return command.payload.newScenarioId && command.payload.name.trim() ? null : 'Scenario identity is required.';
+    case 'ACCEPT_SCHEME_PROPOSAL':
+      return command.payload.proposalId.trim() ? null : 'A proposal ID is required.';
     default:
       return null;
   }
@@ -365,7 +369,8 @@ function deriveScenario(
     project.site.grossSiteArea,
     masses,
     setbacks,
-    project.site.frontageLength
+    project.site.frontageLength,
+    project.site.landscapedPermeableAreaM2
   );
   const pairwiseOverlap = calculateMassPairwiseIntersections(masses);
   const floorLimit = deriveScenarioFloorLimit({
@@ -392,6 +397,7 @@ function deriveScenario(
         : undefined,
       zoningName: project.zoningLimits?.zoneName,
       frontageLength: project.site.frontageLength,
+      kdhAreaM2: project.site.landscapedPermeableAreaM2,
     }
   );
   const baselineMasses = scenario.originalMasses || scenario.masses;
@@ -472,11 +478,53 @@ export function executeCanonicalSpatialCommand(
     return { accepted: true, project: nextProject, scenario: duplicated, committedCommand };
   }
 
+  if (command.type === 'ACCEPT_SCHEME_PROPOSAL') {
+    const proposal = scenario.proposal;
+    if (!proposal || proposal.id !== command.payload.proposalId) {
+      return reject(project, 'INVALID_PAYLOAD', 'The proposal is not attached to the requested scenario.');
+    }
+    const acceptedScenario = {
+      ...scenario,
+      isPreferred: true,
+      updatedAt: command.issuedAt,
+    };
+    acceptedScenario.canonicalRevision = createRevision(
+      acceptedScenario,
+      currentRevision.sequence + 1,
+      command.id,
+      currentRevision.revisionId,
+      command.issuedAt,
+    );
+    const scenarios = project.scenarios.map((candidate, index) => index === scenarioIndex
+      ? acceptedScenario
+      : { ...candidate, isPreferred: false });
+    const nextProject = {
+      ...project,
+      scenarios,
+      schemeGeneration: project.schemeGeneration
+        ? {
+            ...project.schemeGeneration,
+            acceptedProposalId: proposal.id,
+            status: 'READY' as const,
+            taskmasterState: project.schemeGeneration.taskmasterRunId ? 'COMPLETED' : project.schemeGeneration.taskmasterState,
+          }
+        : project.schemeGeneration,
+      updatedAt: command.issuedAt,
+    };
+    const committedCommand: CommittedSpatialCommand = {
+      ...command,
+      resultingRevisionId: acceptedScenario.canonicalRevision.revisionId,
+      resultingRevisionHash: acceptedScenario.canonicalRevision.revisionHash,
+      resultingRevisionSequence: acceptedScenario.canonicalRevision.sequence,
+    };
+    return { accepted: true, project: nextProject, scenario: acceptedScenario, committedCommand };
+  }
+
   let masses = clone(scenario.masses);
   let setbacks = { ...scenario.assumptionsUsed.setbacks };
   let flags: { fitted?: boolean; reset?: boolean } | undefined;
   const massIndex = masses.findIndex((mass) => mass.id === command.targetId);
-  const requiresMass = !['SET_MASS_TYPE_FLOORS', 'SET_SCENARIO_FLOORS', 'SET_SETBACKS', 'FIT_TO_ENVELOPE', 'RESET_SCENARIO'].includes(command.type);
+  const requiresMass = !['SET_MASS_TYPE_FLOORS', 'SET_SCENARIO_FLOORS', 'SET_SETBACKS', 'FIT_TO_ENVELOPE', 'RESET_SCENARIO', 'ACCEPT_SCHEME_PROPOSAL'].includes(command.type);
   if (requiresMass && command.type !== 'ADD_MASS' && command.type !== 'DUPLICATE_MASS' && massIndex < 0) {
     return reject(project, 'TARGET_NOT_FOUND', 'Command target mass does not exist in this scenario.');
   }

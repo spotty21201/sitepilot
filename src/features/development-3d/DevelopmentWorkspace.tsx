@@ -726,13 +726,15 @@ export function DevelopmentWorkspace({
                   );
                 })}
 
-                <g aria-label={`Study setback lines: front ${setbacks.front} metres, sides ${setbacks.sideLeft} metres`} pointerEvents="none">
+                <g aria-label={`Study setback lines: front ${setbacks.front} metres, sides ${setbacks.sideLeft} metres, rear ${setbacks.rear} metres`} pointerEvents="none">
                   <line x1={bounds.minX} y1={bounds.buildableMaxY} x2={bounds.maxX} y2={bounds.buildableMaxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
                   <line x1={bounds.buildableMinX} y1={bounds.minY} x2={bounds.buildableMinX} y2={bounds.maxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
                   <line x1={bounds.buildableMaxX} y1={bounds.minY} x2={bounds.buildableMaxX} y2={bounds.maxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
+                  <line x1={bounds.minX} y1={bounds.buildableMinY} x2={bounds.maxX} y2={bounds.buildableMinY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
                   <text x="0" y={bounds.buildableMaxY - 2} fill="#efc4d1" fontSize="2.6" textAnchor="middle">FRONT SETBACK {setbacks.front} M</text>
                   <text x={bounds.buildableMinX + 2} y="0" fill="#efc4d1" fontSize="2.5" textAnchor="middle" transform={`rotate(-90 ${bounds.buildableMinX + 2} 0)`}>SIDE {setbacks.sideLeft} M</text>
                   <text x={bounds.buildableMaxX - 2} y="0" fill="#efc4d1" fontSize="2.5" textAnchor="middle" transform={`rotate(90 ${bounds.buildableMaxX - 2} 0)`}>SIDE {setbacks.sideRight} M</text>
+                  <text x="0" y={bounds.buildableMinY + 3} fill="#efc4d1" fontSize="2.6" textAnchor="middle">REAR SETBACK {setbacks.rear} M</text>
                 </g>
               </svg>
 
@@ -779,7 +781,7 @@ export function DevelopmentWorkspace({
             </div>
             <div className="flex items-center gap-1.5">
               <span className="w-5 border-t border-dashed border-[#d9a7b7]" />
-              <span>Study setbacks · front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m</span>
+              <span>Study setbacks · front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m · rear {setbacks.rear} m</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-sm bg-[#252a31]" />

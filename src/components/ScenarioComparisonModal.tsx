@@ -71,7 +71,7 @@ export function ScenarioComparisonModal({
                 </span>
               </h3>
               <p className="text-[11px] text-[var(--text-secondary)]">
-                Side-by-side evaluation of yield, height, statutory compliance, and investment economics.
+              Side-by-side evaluation of development figures, supplied planning limits, verification status, and investment economics.
               </p>
             </div>
           </div>
@@ -218,15 +218,21 @@ export function ScenarioComparisonModal({
               {/* Row 5: Open Space & KDH */}
               <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">
-                  <span>Open Space (KDH Basis)</span>
+                  <span>Unbuilt site area</span>
                   <span className="text-[10px] text-[var(--text-muted)] block">({statMinKDH === undefined ? 'Requirement not provided' : `Supplied minimum: ≥${statMinKDH}%`})</span>
                 </div>
                 {scenarios.map((scen) => (
                   <div key={scen.id} className="font-mono tabular-nums text-[var(--text-secondary)] text-right sm:text-left">
                     <span className="font-bold text-[var(--status-verified)]">{scen.metrics.openSpacePercentage}%</span>
                     <span className="text-[10px] text-[var(--text-muted)] block">({scen.metrics.openSpaceArea.toLocaleString()} m² unbuilt)</span>
+                    <span className="text-[10px] text-[var(--status-warning)] block">{scen.metrics.kdhDemonstrated ? 'KDH area entered' : 'KDH not yet demonstrated'}</span>
                   </div>
                 ))}
+              </div>
+
+              <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]"><span>Setbacks</span><span className="text-[10px] text-[var(--text-muted)] block">Front · sides · rear</span></div>
+                {scenarios.map((scen) => <div key={scen.id} className="font-mono text-right sm:text-left">{scen.assumptionsUsed.setbacks.front} m · {scen.assumptionsUsed.setbacks.sideLeft} m · {scen.assumptionsUsed.setbacks.rear} m</div>)}
               </div>
 
               {/* Row 6: Land Cost per GFA */}
@@ -253,7 +259,7 @@ export function ScenarioComparisonModal({
               {/* Row 7: Compliance Status */}
               <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">
-                  <span>Compliance Verdict</span>
+                  <span>Planning check</span>
                 </div>
                 {scenarios.map((scen) => {
                   const isCompliant = scen.complianceReport?.isCompliant ?? (scen.status === 'VALID');
@@ -265,7 +271,7 @@ export function ScenarioComparisonModal({
                           : 'status-badge--error'
                       }`}>
                         {isCompliant ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-                        <span>{isCompliant ? 'COMPLIANT' : 'CONSTRAINED'}</span>
+                        <span>{isCompliant ? (project.site.hasZoningEvidence ? 'WITHIN SUPPLIED LIMITS' : 'STUDY LIMITS ONLY') : 'OUTSIDE SUPPLIED LIMITS'}</span>
                       </span>
                     </div>
                   );

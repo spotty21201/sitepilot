@@ -358,7 +358,7 @@ export const GOLDEN_PROJECT: Project = {
       id: 'scen-001',
       projectId: 'proj-menteng-001',
       name: 'Scenario A: Low-Rise Heritage Villas',
-      description: 'Exclusive 4-storey luxury residences with expansive landscaped gardens and central courtyard. Low yield, zero planning friction.',
+      description: 'Low-rise 4-storey residential study with expansive landscaped gardens and a central courtyard.',
       isPreferred: false,
       status: 'VALID',
       masses: [
@@ -425,8 +425,8 @@ export const GOLDEN_PROJECT: Project = {
         setbacks: { front: 10, rear: 6, sideLeft: 5, sideRight: 5 },
         unverifiedAssumptionsCount: 0
       },
-      risks: ['Higher cost per buildable m²', 'Lower overall revenue potential'],
-      opportunities: ['Zero planning friction', 'Rapid approval timeline', 'High sales velocity in Menteng'],
+      risks: ['Lower development capacity than the denser options', 'Construction and operating assumptions require separate review'],
+      opportunities: ['Within supplied study limits', 'Clear residential frontage and landscape strategy', 'Shorter delivery sequence is a study assumption, not a confirmed programme'],
       createdAt: '2026-08-14T12:00:00Z',
       updatedAt: '2026-08-16T14:30:00Z'
     },
@@ -434,7 +434,7 @@ export const GOLDEN_PROJECT: Project = {
       id: 'scen-002',
       projectId: 'proj-menteng-001',
       name: 'Scenario B: Mid-Rise Mixed-Use (Preferred)',
-      description: '8-storey premium residences atop 2-storey boutique retail & dining podium. Fully complies with Subzone R.9 height and FAR limits.',
+      description: '8-storey residential study atop a 2-storey boutique retail and dining podium. Within supplied study limits; statutory status is not verified.',
       isPreferred: true,
       status: 'VALID',
       masses: [
@@ -589,7 +589,7 @@ export const GOLDEN_PROJECT: Project = {
     topOpportunities: [
       'Prime 1.68 ha rectangular parcel in prestigious Menteng submarket with high prestige value.',
       'Confirmed Subzone R.9 allows up to 8 floors and 3.20 FAR for mixed-use residential (Source: RDTR Table 4.1, Verified Fact).',
-      'Optimal development yield achieved under Scenario B (40,400 m² GFA, 2.40 FAR) with zero zoning variance required.'
+      'Scenario B provides the highest information-supported working yield among the current options (40,400 m² GFA, 2.40 FAR); statutory status still requires verification.'
     ],
     criticalRisks: [
       'Cadastral discrepancy: True area is 16,850 m² vs 18,200 m² advertised by broker (8.1% price inflation per m² / Rp 34B total variance).',

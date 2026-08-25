@@ -69,6 +69,8 @@ export interface SiteGeometry {
   dimensionProvenance?: ParcelDimensionProvenance;
   projectName?: string;
   hasZoningEvidence?: boolean;
+  landscapedPermeableAreaM2?: number;
+  publicRealmAreaM2?: number;
   coordinateSystem: 'WGS84' | 'EPSG:3857';
   boundingBox?: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
 }
@@ -105,6 +107,8 @@ export interface BuildingMass {
   program: 'RESIDENTIAL' | 'COMMERCIAL' | 'RETAIL' | 'MIXED_USE' | 'HOTEL' | 'PARKING';
   position: { x: number; y: number; z: number }; // local relative coords for 3D
   dimensions: { width: number; length: number; height: number };
+  /** Existing-asset study mass may retain its entered GFA while the illustrative footprint is fitted. */
+  preserveGfa?: boolean;
 }
 
 // ==========================================
@@ -216,6 +220,54 @@ export interface DevelopmentMetrics {
   estimatedParkingSpaces?: number;
   outOfBoundsAreaM2?: number;
   parcelContainedFootprintM2?: number;
+  /** Explicit landscaped/permeable area used to demonstrate KDH. */
+  landscapedPermeableAreaM2?: number;
+  kdhDemonstrated?: boolean;
+}
+
+export type ExistingAssetStrategy = 'RETAIN' | 'PARTIALLY_RETAIN' | 'ADAPT' | 'REPLACE';
+
+export interface SchemeProposal {
+  id: string;
+  name: string;
+  thesis: string;
+  existingAssetDecision: ExistingAssetStrategy;
+  existingAssetScope: string;
+  proposedMassRoles: string[];
+  podiumStoreys?: number;
+  towerStoreys?: number;
+  floorToFloorAssumptions: { podium?: number; tower?: number };
+  programGFAByUse: Record<string, number>;
+  footprintIntent: string;
+  publicRealmIntent: string;
+  landscapedPermeableKDHIntent: string;
+  accessServicingConcept: string;
+  phasingConcept: string;
+  ownerPrioritiesAddressed: string[];
+  assumptionsIntroduced: string[];
+  rationale: string;
+  tradeOffs: string[];
+  allowNonCompliantStretch: boolean;
+}
+
+export interface SchemeGenerationMetadata {
+  status: 'PENDING' | 'READY' | 'FAILED' | 'NEEDS_REGENERATION';
+  provider: 'VERTEX_AI' | 'GEMINI_API' | 'LOCAL_DEVELOPMENT';
+  model: string;
+  modelCalled: boolean;
+  disclosure: string;
+  generatedAt?: string;
+  opportunityId: string;
+  sourceStudyVersion: string;
+  inputHash: string;
+  userPriorities: Record<string, string | boolean>;
+  assumptions: string[];
+  validation: { valid: boolean; errors: string[] };
+  proposals: SchemeProposal[];
+  acceptedProposalId?: string;
+  /** Server-side Taskmaster run that produced this review set, when available. */
+  taskmasterRunId?: string;
+  taskmasterState?: string;
 }
 
 export type ScenarioEditClassification = 
@@ -271,6 +323,7 @@ export interface DevelopmentScenario {
     assessmentStatus?: string;
     primaryWarning?: string;
     violations: string[];
+    kdhDemonstrated?: boolean;
   };
   pairwiseOverlap?: {
     hasOverlap: boolean;
@@ -282,6 +335,8 @@ export interface DevelopmentScenario {
   opportunities: string[];
   createdAt: string;
   updatedAt: string;
+  existingAssetStrategy?: ExistingAssetStrategy;
+  proposal?: SchemeProposal;
 }
 
 export type AreaProvenanceType = 
@@ -377,6 +432,10 @@ export interface Project {
   issues: ProjectIssue[];
   actions: InvestigationAction[];
   scenarios: DevelopmentScenario[];
+  /** Optional record of the latest model-assisted (or honest local-template) scheme study. */
+  schemeGeneration?: SchemeGenerationMetadata;
+  /** Browser-local pointer used to resume/poll a server-side Taskmaster run. */
+  taskmasterRunId?: string;
   
   executiveSummary: {
     topOpportunities: string[];

@@ -152,8 +152,8 @@ export function EvidenceLedger({
             <p className="mt-2 max-w-[250px] text-[11px] leading-relaxed text-[var(--text-secondary)]">See where each working figure came from and what still needs confirmation.</p>
           </div>
           <div className="shrink-0 text-right">
-            <span className="block font-metadata text-[18px] leading-none text-[var(--status-evidence)]">{findings.length.toString().padStart(2, '0')}</span>
-            <span className="mt-1 block font-metadata text-[8px] uppercase text-[var(--text-muted)]">items / {sources.length} sources</span>
+            <span className="block font-metadata text-[18px] leading-none text-[var(--status-evidence)]">{ledgerRows.length.toString().padStart(2, '0')}</span>
+            <span className="mt-1 block font-metadata text-[8px] uppercase text-[var(--text-muted)]">items / {new Set(ledgerRows.map((row) => row.sourceName)).size} sources</span>
           </div>
         </div>
 

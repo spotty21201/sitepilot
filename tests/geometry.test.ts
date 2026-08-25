@@ -166,7 +166,7 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
     );
     expect(baselineComp.isCompliant).toBe(true);
     expect(baselineComp.isGreen).toBe(true);
-    expect(baselineComp.statusPillLabel).toBe('Zoning: Compliant · Within Envelope');
+    expect(baselineComp.statusPillLabel).toBe('Verified planning compliance · Within supplied controls');
 
     // 2. F2F 4.0m resulting in 33.0m height -> NON-COMPLIANT
     const overheightMetrics = {

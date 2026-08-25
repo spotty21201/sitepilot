@@ -78,13 +78,13 @@ export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoo
 
         <section className="surface-inspector p-3" aria-label="Planning limits and options comparison">
           <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-semibold text-[var(--text-primary)]">Options A, B & C</h4><span className="type-metadata">{report.currentOption} selected</span></div>
-          <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace}</p>
+          <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace} · {project.site.landscapedPermeableAreaM2 === undefined ? 'KDH not yet demonstrated' : 'landscaped/permeable area entered'}</p>
           <div className="mt-2 space-y-1.5">
             {report.options.map((option) => (
-              <div key={option.scenarioId} className={`grid grid-cols-[54px_1fr_auto] items-center gap-2 rounded-[var(--radius-control)] border px-2 py-1.5 text-[10px] ${option.selected ? 'border-[var(--spatial-selection)] bg-[var(--spatial-selection-surface)]' : 'border-[var(--border-subtle)]'}`}>
-                <strong className="text-[var(--text-primary)]">{option.option}</strong>
-                <span className="font-mono text-[var(--text-secondary)]">{option.floors} Fl · {option.heightMeters}m · {option.gfaM2.toLocaleString()} m² · FAR {option.farKLB.toFixed(2)}x</span>
-                <span className={option.compliance.startsWith('Compliant') ? 'text-[var(--status-verified)]' : 'text-[var(--status-warning)]'}>{option.compliance}</span>
+              <div key={option.scenarioId} className={`grid grid-cols-[52px_minmax(0,1fr)_minmax(0,92px)] items-start gap-2 rounded-[var(--radius-control)] border px-2 py-1.5 text-[10px] ${option.selected ? 'border-[var(--spatial-selection)] bg-[var(--spatial-selection-surface)]' : 'border-[var(--border-subtle)]'}`}>
+                <strong className="text-[var(--text-primary)]" title={`${option.option}: ${option.scenarioName}`}>{option.option}</strong>
+                <span className="min-w-0 text-[var(--text-secondary)]"><span className="block font-mono whitespace-normal leading-tight">{option.floors} Fl · {option.heightMeters}m · {option.gfaM2.toLocaleString()} m² · FAR {option.farKLB.toFixed(2)}x</span><span className="block truncate text-[9px] text-[var(--text-muted)]" title={option.existingAssetStrategy ? `Existing asset strategy: ${option.existingAssetStrategy}` : 'No existing asset strategy'}>{option.existingAssetStrategy ? `Existing asset: ${option.existingAssetStrategy.toLowerCase().replace(/_/g, ' ')}` : 'No existing asset recorded'}</span></span>
+                <span className={`min-w-0 text-right text-[9px] leading-tight break-words ${option.compliance.startsWith('Within supplied') || option.compliance.startsWith('Verified planning') ? 'text-[var(--status-verified)]' : 'text-[var(--status-warning)]'}`} title={option.compliance}>{option.compliance}</span>
               </div>
             ))}
           </div>

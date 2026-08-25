@@ -400,14 +400,15 @@ export function createCase(params: CreateCaseParams): Project {
       floors: existingFloors,
       floorToFloorHeight: 3.5,
       height: existingFloors * 3.5,
-      gfa: Math.round(massAWidth * massALength * existingFloors),
+      gfa: existingGFA,
       program: 'HOTEL',
       position: { x: 0, y: 0, z: centerZ },
       dimensions: { 
         width: massAWidth, 
         length: massALength, 
         height: existingFloors * 3.5 
-      }
+      },
+      preserveGfa: true,
     }
   ] : [
     {
@@ -448,7 +449,7 @@ export function createCase(params: CreateCaseParams): Project {
     projectId: caseId,
     name: scenarioAName,
     description: existingGFA 
-      ? `Preserves existing ${existingGFA.toLocaleString()} m² operational asset (${isFloorsAssumed ? 'assumed 4 storeys' : `${existingFloors} storeys`}) with zero expansion capital expenditure.`
+      ? `Uses the recorded ${existingGFA.toLocaleString()} m² asset as a reference baseline (${isFloorsAssumed ? 'assumed 4 storeys' : `${existingFloors} storeys`}); future adaptation scope and cost are not assessed.`
       : 'Initial 4-storey commercial study envelope conforming to standard setbacks.',
     isPreferred: false,
     status: complianceA.status as DevelopmentScenario['status'],
@@ -466,7 +467,8 @@ export function createCase(params: CreateCaseParams): Project {
       unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
     risks: [`Preserves baseline without using the ${densityBasisLabel} for potential expansion headroom.`],
-    opportunities: ['Immediate operational cashflow without construction disruption.'],
+    opportunities: ['Retains the recorded existing asset as a reference baseline; revenue and operating performance were not supplied.'],
+    existingAssetStrategy: existingGFA ? 'RETAIN' : undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -474,52 +476,60 @@ export function createCase(params: CreateCaseParams): Project {
   // ----------------------------------------------------
   // SCENARIO B: Phased Expansion / Target Scheme (Preferred)
   // ----------------------------------------------------
-  const targetExpansionGFA = existingGFA && expansionHeadroomGFA 
-    ? Math.round(existingGFA + expansionHeadroomGFA * 0.65)
-    : Math.round(maxGFA * 0.70);
-
   const widthWing = Math.min(Math.round(bounds.buildableWidth * 0.45 * 10) / 10, 15);
   const lengthWing = Math.min(Math.round(bounds.buildableLength * 0.85 * 10) / 10, 35);
   const footprintPerWing = Math.round(widthWing * lengthWing);
+  const existingFootprint = existingGFA && existingFloors > 0 ? existingGFA / existingFloors : footprintPerWing;
+  const existingWidth = existingGFA
+    ? Math.min(bounds.buildableWidth * 0.72, Math.max(12, Math.round(Math.sqrt(existingFootprint * 0.45) * 10) / 10))
+    : widthWing;
+  const existingLength = existingGFA
+    ? Math.min(bounds.buildableLength * 0.90, Math.max(12, Math.round((existingFootprint / existingWidth) * 10) / 10))
+    : lengthWing;
+  const additionWidth = existingGFA
+    ? Math.min(widthWing, Math.max(8, bounds.buildableWidth - existingWidth - 2))
+    : widthWing;
+  const additionLength = existingGFA ? Math.min(lengthWing, bounds.buildableLength * 0.72) : lengthWing;
 
   const floorsB1 = existingFloors;
   const floorsB2 = maxFloors;
 
-  const posX_B1 = -Math.round((widthWing / 2 + 1.0) * 10) / 10;
-  const posX_B2 = Math.round((widthWing / 2 + 1.0) * 10) / 10;
+  const posX_B1 = -Math.round((existingWidth / 2 + 1.0) * 10) / 10;
+  const posX_B2 = Math.round((existingWidth / 2 + additionWidth / 2 + 1.0) * 10) / 10;
 
   const massesB: BuildingMass[] = existingGFA ? [
     {
       id: `mass-${caseId}-b1`,
       name: 'Existing Asset Wing',
       type: 'PODIUM',
-      footprintArea: footprintPerWing,
+      footprintArea: Math.round(existingWidth * existingLength),
       floors: floorsB1,
       floorToFloorHeight: 3.5,
       height: floorsB1 * 3.5,
-      gfa: Math.round(footprintPerWing * floorsB1),
+      gfa: existingGFA,
       program: 'HOTEL',
       position: { x: posX_B1, y: 0, z: centerZ },
       dimensions: { 
-        width: widthWing, 
-        length: lengthWing, 
+        width: existingWidth,
+        length: existingLength,
         height: floorsB1 * 3.5 
-      }
+      },
+      preserveGfa: true,
     },
     {
       id: `mass-${caseId}-b2`,
       name: 'New Lifestyle Tower Addition',
       type: 'TOWER',
-      footprintArea: footprintPerWing,
+      footprintArea: Math.round(additionWidth * additionLength),
       floors: floorsB2,
       floorToFloorHeight: 3.5,
       height: floorsB2 * 3.5,
-      gfa: Math.round(footprintPerWing * floorsB2),
+      gfa: Math.round(additionWidth * additionLength * floorsB2),
       program: 'MIXED_USE',
       position: { x: posX_B2, y: 0, z: centerZ },
       dimensions: { 
-        width: widthWing, 
-        length: lengthWing, 
+        width: additionWidth,
+        length: additionLength,
         height: floorsB2 * 3.5 
       }
     }
@@ -556,7 +566,7 @@ export function createCase(params: CreateCaseParams): Project {
   const metricsB = calculateDevelopmentMetrics(grossSiteArea, fittedMassesB, defaultSetbacks, standardFrontage);
   const overlapB = calculateMassPairwiseIntersections(fittedMassesB);
   const scenarioBName = existingGFA 
-    ? `Scenario B: Phased Expansion (${metricsB.totalGFA.toLocaleString()} m² GFA · Target: ${targetExpansionGFA.toLocaleString()} m²)` 
+    ? 'Scenario B: Phased Expansion'
     : 'Scenario B: Phased Mixed-Use Development';
 
   const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesB, metricsB, overlapB, {
@@ -575,7 +585,7 @@ export function createCase(params: CreateCaseParams): Project {
     projectId: caseId,
     name: scenarioBName,
     description: existingGFA
-      ? `Phased scheme adding +${Math.max(0, metricsB.totalGFA - existingGFA).toLocaleString()} m² of high-yield lifestyle space across ${floorsB2} storeys while retaining existing operations.`
+      ? `Phased scheme adds ${Math.max(0, metricsB.totalGFA - existingGFA).toLocaleString()} m² of study capacity beside the recorded ${existingGFA.toLocaleString()} m² asset. Existing-asset retention is partial and does not imply revenue or operational continuity.`
       : 'Balanced phased density scheme with active ground-floor retail and commercial suites.',
     isPreferred: true,
     status: complianceB.status as DevelopmentScenario['status'],
@@ -593,7 +603,8 @@ export function createCase(params: CreateCaseParams): Project {
       unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
     risks: ['Phased integration requires structural and egress interface coordination.'],
-    opportunities: ['Strongest risk-adjusted financial yield and operational continuity.'],
+    opportunities: ['Balanced mixed-use study with explicit partial retention; financial performance and continuity require separate evidence.'],
+    existingAssetStrategy: existingGFA ? 'PARTIALLY_RETAIN' : undefined,
     createdAt: now,
     updatedAt: now
   };
@@ -668,9 +679,10 @@ export function createCase(params: CreateCaseParams): Project {
       unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
     risks: ['Demands total demolition and high construction capital expenditure.'],
+    existingAssetStrategy: existingGFA ? 'REPLACE' : undefined,
     opportunities: [verifiedPlanningBasis
-      ? 'Tests potential asset value against the supplied verified municipal density control.'
-      : 'Tests potential asset value under a clearly marked working density assumption.'],
+      ? 'Tests development capacity against the supplied confirmed density control; value, cost, and feasibility require separate assessment.'
+      : 'Tests development capacity under a clearly marked working density assumption; value, cost, and feasibility require separate assessment.'],
     createdAt: now,
     updatedAt: now
   };
@@ -697,7 +709,7 @@ export function createCase(params: CreateCaseParams): Project {
       projectId: caseId,
       sourceId: 'src-intake-01',
       sourceName: 'Opportunity Intake (User Stated)',
-      statement: `User-stated existing building on parcel comprises ${existingGFA.toLocaleString()} m² GFA (${params.existingFloors ? `${params.existingFloors} confirmed storeys` : 'storeys unconfirmed / assumed 4'}, ${params.existingAssetDescription || 'Structure'}, status: ${params.existingAssetStatus || 'Operational'}).`,
+      statement: `User-stated existing building on parcel comprises ${existingGFA.toLocaleString()} m² GFA (${params.existingFloors ? `${params.existingFloors} storeys—provided by the user, not yet confirmed` : 'storeys not provided; study assumption only'}, ${params.existingAssetDescription || 'Structure'}, status: ${params.existingAssetStatus || 'not provided'}).`,
       category: 'MARKET_COMMERCIAL',
       classification: 'CLAIM',
       confidence: 'LOW',
@@ -729,7 +741,7 @@ export function createCase(params: CreateCaseParams): Project {
       projectId: caseId,
       sourceId: 'src-intake-01',
       sourceName: 'Planning Guideline Assumption',
-      statement: `Open space assumption based on standard ${minKDHPct}% Koefisien Daerah Hijau (KDH Green Space).`,
+      statement: `A ${minKDHPct}% KDH planning requirement was provided, but landscaped/permeable area has not been entered; KDH is not yet demonstrated.`,
       category: 'ENVIRONMENTAL_TOPOGRAPHY',
       classification: 'ASSUMPTION',
       confidence: 'LOW',
@@ -906,7 +918,7 @@ export function createCase(params: CreateCaseParams): Project {
       topOpportunities: [
         `Opportunity captured: ${params.name.trim()} (${grossSiteArea.toLocaleString()} m² site area).`,
         existingGFA 
-          ? `Existing ${existingGFA.toLocaleString()} m² asset provides immediate cashflow while evaluating ${expansionHeadroomGFA?.toLocaleString()} m² expansion headroom.`
+          ? `Existing ${existingGFA.toLocaleString()} m² asset recorded as a study reference; revenue and operational performance were not supplied.`
           : `Parametric study initialized exploring 3 development schemes up to ${maxGFA.toLocaleString()} m² statutory capacity.`
       ],
       criticalRisks: [

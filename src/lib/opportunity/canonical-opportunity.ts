@@ -250,6 +250,7 @@ export function synchronizeProjectDerivedState(project: Project): Project {
       scenario.masses,
       scenario.assumptionsUsed.setbacks,
       site.frontageLength,
+      site.landscapedPermeableAreaM2,
     );
     const pairwiseOverlap = calculateMassPairwiseIntersections(scenario.masses);
     const floorLimit = getScenarioFloorLimit({ ...project, site }, scenario);
@@ -271,6 +272,7 @@ export function synchronizeProjectDerivedState(project: Project): Project {
           : undefined,
         zoningName: project.zoningLimits?.zoneName,
         frontageLength: site.frontageLength,
+        kdhAreaM2: site.landscapedPermeableAreaM2,
       },
     );
     return {

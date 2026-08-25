@@ -252,7 +252,7 @@ export function SpatialConsoleViewport({
 
       <div className={styles.streetLabel} aria-label={`Twenty metre study road and setback context for ${snapshot.site.streetName}`}>
         <span>20 m study road</span>
-        <strong>Front {snapshot.site.setbacks.front} m · sides {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m · Context not yet verified</strong>
+        <strong>Front {snapshot.site.setbacks.front} m · sides {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m · rear {snapshot.site.setbacks.rear} m · Context not yet verified</strong>
       </div>
 
       {showZoningCap && (
@@ -441,7 +441,7 @@ export function SpatialConsoleViewport({
             <span><i className={styles.siteKey} />Site boundary</span>
             <span><i className={styles.envelopeKey} />{snapshot.site.zoningHeightLimitMeters === null ? 'Buildable footprint; height not provided' : `Study envelope to ${snapshot.site.zoningHeightLimitMeters} m`}</span>
             <span><i className={styles.massingKey} />Active scenario massing</span>
-            <span><i className={styles.setbackKey} />Study setback lines ({snapshot.site.setbacks.front} m front; {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m sides)</span>
+            <span><i className={styles.setbackKey} />Study setback lines ({snapshot.site.setbacks.front} m front; {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m sides; {snapshot.site.setbacks.rear} m rear)</span>
             <span><i className={styles.roadKey} />20 m user/address-derived study road</span>
             <small>Study context only · not verified cadastral or municipal geometry.</small>
           </div>

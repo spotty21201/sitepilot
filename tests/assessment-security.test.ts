@@ -343,7 +343,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
 
     expect(data.status).toBe('COMPLIANT');
     expect(data.decision).toContain('31.0m');
-    expect(data.decision).toContain('Compliant');
+    expect(data.decision).toContain('Verified planning compliance');
     expect(data.identifiedRisks[0]).toContain('Street access');
   });
 

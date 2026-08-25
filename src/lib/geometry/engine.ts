@@ -270,7 +270,8 @@ export function calculateDevelopmentMetrics(
   grossSiteArea: number,
   masses: BuildingMass[],
   setbacks: Setbacks,
-  frontageWidth: number = 110
+  frontageWidth: number = 110,
+  landscapedPermeableAreaM2?: number,
 ): DevelopmentMetrics {
   const bounds = getCanonicalParcelBounds(grossSiteArea, setbacks, frontageWidth);
   const netBuildable = bounds.netBuildableArea;
@@ -320,6 +321,8 @@ export function calculateDevelopmentMetrics(
     totalFloors: maxFloors,
     totalHeightMeters: Math.round(maxHeight * 10) / 10,
     estimatedParkingSpaces: estimatedParking
+    ,landscapedPermeableAreaM2: landscapedPermeableAreaM2,
+    kdhDemonstrated: landscapedPermeableAreaM2 !== undefined,
   };
 }
 
@@ -615,7 +618,7 @@ export function fitMassesToBuildableEnvelope(
     }
 
     const newFootprint = Math.round(newWidth * newLength * 100) / 100;
-    const newGfa = Math.round(newFootprint * mass.floors * 100) / 100;
+    const newGfa = mass.preserveGfa ? mass.gfa : Math.round(newFootprint * mass.floors * 100) / 100;
 
     return {
       ...mass,
@@ -719,6 +722,7 @@ export interface CanonicalComplianceReport {
   identifiedRisks: string[];
   primaryWarning?: string;
   violations: string[];
+  kdhDemonstrated: boolean;
   metrics: {
     heightOverrunMeters: number;
     farOverrun: number;
@@ -738,6 +742,7 @@ export interface ScenarioComplianceOptions {
   maxCoveragePct?: number;
   minKDHPct?: number;
   frontageLength?: number;
+  kdhAreaM2?: number;
 }
 
 /**
@@ -777,6 +782,7 @@ export function evaluateScenarioCompliance(
   const coverageOverrunPercent = Math.max(0, Math.round((metrics.siteCoveragePercentage - STATUTORY_MAX_KDB_PERCENT) * 10) / 10);
   const outOfBoundsAreaM2 = metrics.outOfBoundsAreaM2 || 0;
   const collisionVolumeM3 = pairwiseOverlap?.overlapVolumeM3 || 0;
+  const kdhDemonstrated = options.kdhAreaM2 !== undefined;
 
   // 1. Height checks (only if explicit or zoning evidence exists)
   if (hasExplicitHeight && (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS)) {
@@ -817,8 +823,8 @@ export function evaluateScenarioCompliance(
   let assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' = 'COMPLIANT';
   
   let statusPillLabel = hasZoningEvidence
-    ? 'Zoning: Compliant · Within Envelope'
-    : 'Provisional Study · Within Envelope';
+    ? 'Verified planning compliance · Within supplied controls'
+    : 'Provisional Study · Within Envelope · statutory compliance not verified';
 
   const verifiedLimitSummary = [
     hasExplicitHeight ? `height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m)` : null,
@@ -827,8 +833,8 @@ export function evaluateScenarioCompliance(
     'setback envelopes',
   ].filter(Boolean).join(', ');
   let decisionText = hasZoningEvidence
-    ? `Compliant against the supplied ${zoningName || 'applicable zoning'} controls: ${verifiedLimitSummary}.`
-    : `Provisional Study: Envelope conforms to working geometric parameters (Height: ${metrics.totalHeightMeters.toFixed(1)}m, FAR: ${metrics.farKLB.toFixed(2)}x). Statutory municipal zoning compliance is UNKNOWN because official planning evidence (RDTR / KRK) is absent.`;
+    ? `Verified planning compliance against the supplied confirmed ${zoningName || 'planning'} controls: ${verifiedLimitSummary}.`
+    : `Provisional Study: Within supplied study limits for the current geometric inputs (height ${metrics.totalHeightMeters.toFixed(1)}m, FAR ${metrics.farKLB.toFixed(2)}x). Statutory municipal zoning compliance is UNKNOWN and not verified because official planning evidence (RDTR / KRK) is absent.`;
 
   let recommendedAction = hasZoningEvidence
     ? (scenarioName 
@@ -837,8 +843,12 @@ export function evaluateScenarioCompliance(
     : 'Obtain official municipal planning certificate (RDTR / KRK) to establish binding statutory FAR, height cap, and setback requirements.';
 
   let summaryText = hasZoningEvidence
-    ? `Fully complies with ${zoningName || 'applicable zoning'} limits.`
-    : 'Geometric envelope contained. Statutory zoning compliance is unverified (no RDTR/KRK on file).';
+    ? `Within supplied planning controls; statutory verification remains subject to the confirmed source set.`
+    : 'Within supplied study limits. Statutory compliance is not verified (no RDTR/KRK on file).';
+  if (options.minKDHPct !== undefined && !kdhDemonstrated) {
+    summaryText += ' KDH not yet demonstrated from explicit landscaped/permeable area.';
+    decisionText += ' KDH cannot be assessed from unbuilt area alone.';
+  }
 
   if (!isCompliant) {
     summaryText = warnings[0];
@@ -943,6 +953,7 @@ export function evaluateScenarioCompliance(
     identifiedRisks,
     primaryWarning: warnings[0],
     violations: warnings,
+    kdhDemonstrated,
     metrics: {
       heightOverrunMeters: heightOverrunM,
       farOverrun,

@@ -844,7 +844,7 @@ export function ViewportCanvas({
 
       <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex max-w-xs items-baseline gap-2 rounded border border-[#c9a96a] bg-[#121622]/95 px-3 py-1.5 text-[10px] text-slate-400 backdrop-blur-md" data-road-width="20">
         <span>20 m study road</span>
-        <strong className="truncate font-mono text-[#e2c17f]">Front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m</strong>
+        <strong className="truncate font-mono text-[#e2c17f]">Front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m · rear {setbacks.rear} m</strong>
       </div>
 
       {/* Floating In-World Measurement Pill during direct manipulation */}

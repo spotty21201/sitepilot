@@ -19,8 +19,11 @@ export interface OptionReportRow {
   coverageKDBPct: number;
   openSpaceM2: number;
   openSpacePct: number;
+  kdhDemonstrated: boolean;
   frontSetbackMeters: number;
   sideSetbackMeters: number;
+  rearSetbackMeters: number;
+  existingAssetStrategy?: string;
   floorLimitBasis: string;
   warnings: string[];
   constraints: Array<{
@@ -182,9 +185,9 @@ function scenarioOptionName(scenario: DevelopmentScenario, index: number): strin
 function complianceText(scenario: DevelopmentScenario): string {
   if (!scenario.complianceReport) return 'Not evaluated';
   if (scenario.complianceReport.isCompliant) {
-    return scenario.complianceReport.statusPillLabel.includes('Provisional')
-      ? 'Within study envelope; statutory status not yet confirmed'
-      : 'Compliant with supplied confirmed controls';
+    return scenario.complianceReport.statusPillLabel.includes('Verified planning compliance')
+      ? 'Verified planning compliance against supplied confirmed controls'
+      : 'Within supplied study limits; statutory compliance not verified';
   }
   return scenario.complianceReport.statusPillLabel.replace(/_/g, ' ');
 }
@@ -222,11 +225,11 @@ export function buildProjectReport(
           ? `+${(scenario.metrics.siteCoveragePercentage - limits.maxCoveragePct).toFixed(1)} pp` : '—',
       },
       {
-        label: 'Open space / KDH', actual: `${scenario.metrics.openSpacePercentage.toFixed(1)}%`,
+        label: 'KDH demonstration', actual: scenario.metrics.kdhDemonstrated ? `${scenario.metrics.landscapedPermeableAreaM2?.toFixed(1)} m² (${((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100).toFixed(1)}%)` : 'Not yet demonstrated',
         limit: limits?.minKDHPct ? `${limits.minKDHPct.toFixed(1)}% min` : 'Not supplied',
-        result: limits?.minKDHPct ? (scenario.metrics.openSpacePercentage + 0.1 >= limits.minKDHPct ? 'PASS' : 'FAIL') : 'UNVERIFIED',
-        exceedance: limits?.minKDHPct && scenario.metrics.openSpacePercentage < limits.minKDHPct
-          ? `${(limits.minKDHPct - scenario.metrics.openSpacePercentage).toFixed(1)} pp short` : '—',
+        result: limits?.minKDHPct && scenario.metrics.kdhDemonstrated ? (((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100) + 0.1 >= limits.minKDHPct ? 'PASS' : 'FAIL') : 'UNVERIFIED',
+        exceedance: limits?.minKDHPct && scenario.metrics.kdhDemonstrated && ((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100) < limits.minKDHPct
+          ? `${(limits.minKDHPct - ((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100)).toFixed(1)} pp short` : '—',
       },
     ];
     return {
@@ -249,8 +252,11 @@ export function buildProjectReport(
       coverageKDBPct: scenario.metrics.siteCoveragePercentage,
       openSpaceM2: scenario.metrics.openSpaceArea,
       openSpacePct: scenario.metrics.openSpacePercentage,
+      kdhDemonstrated: Boolean(scenario.metrics.kdhDemonstrated),
       frontSetbackMeters: scenario.assumptionsUsed.setbacks.front,
       sideSetbackMeters: scenario.assumptionsUsed.setbacks.sideLeft,
+      rearSetbackMeters: scenario.assumptionsUsed.setbacks.rear,
+      existingAssetStrategy: scenario.existingAssetStrategy,
       floorLimitBasis: floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
         ? `height-derived whole-floor limit from supplied maximum: ${floorLimit.formula}`
         : `${floorLimit.kind.replace(/_/g, ' ').toLowerCase()}: ${floorLimit.formula}`,
@@ -278,7 +284,7 @@ export function buildProjectReport(
   const hasVerifiedPlanning = Boolean(project.site.hasZoningEvidence);
   const canRecommend = Boolean(selected)
     && hasVerifiedPlanning
-    && selected.compliance.startsWith('Compliant')
+    && (selected.compliance.startsWith('Within supplied') || selected.compliance.startsWith('Verified planning'))
     && (project.recommendation === 'PROCEED' || project.recommendation === 'CONDITIONAL_PROCEED');
   const missingInputs: string[] = [];
   if (!project.zoningLimits?.maxHeightMeters) missingInputs.push('Maximum building height');
@@ -356,9 +362,9 @@ const CSV_HEADERS = [
   'Opportunity', 'Address', 'Option', 'Selected', 'Site Area (m2)', 'Site Area Source',
   'Street Frontage (m)', 'Frontage Source', 'Lot Depth (m)', 'Depth Source', 'Street Name',
   'Acquisition Price', 'Maximum Height', 'Maximum FAR / KLB', 'Maximum Coverage / KDB',
-  'Minimum Open Space / KDH', 'Podium Storeys', 'Tower Storeys', 'Governing Floor Count', 'Floor-to-Floor Height (m)', 'Building Height (m)',
-  'Footprint (m2)', 'GFA (m2)', 'FAR / KLB', 'Coverage / KDB (%)', 'Open Space (m2)',
-  'Open Space / KDH (%)', 'Front Setback (m)', 'Symmetric Side Setback (m)',
+  'Minimum KDH Requirement', 'Podium Storeys', 'Tower Storeys', 'Governing Floor Count', 'Floor-to-Floor Height (m)', 'Building Height (m)',
+  'Footprint (m2)', 'GFA (m2)', 'FAR / KLB', 'Coverage / KDB (%)', 'Unbuilt Site Area (m2)',
+  'Unbuilt Site Area (%)', 'KDH Demonstrated', 'Front Setback (m)', 'Symmetric Side Setback (m)', 'Rear Setback (m)', 'Existing Asset Strategy',
   'Planning Check', 'Floor Limit Method', 'Assumptions', 'Warnings', 'Information Still Needed',
   'Sources & Assumptions', 'Generated On', 'Study Version',
 ] as const;
@@ -377,11 +383,12 @@ export function serializeProjectReportCsv(report: ProjectReport): string {
     report.planning.minOpenSpace, option.podiumFloors ?? 'Not applicable', option.towerFloors ?? 'Not applicable',
     option.floors, option.floorToFloorMeters, option.heightMeters,
     option.footprintM2, option.gfaM2, option.farKLB, option.coverageKDBPct, option.openSpaceM2,
-    option.openSpacePct, option.frontSetbackMeters, option.sideSetbackMeters,
+    option.openSpacePct, option.kdhDemonstrated ? 'Yes' : 'Not yet demonstrated', option.frontSetbackMeters, option.sideSetbackMeters, option.rearSetbackMeters, option.existingAssetStrategy || 'Not applicable',
     option.compliance, option.floorLimitBasis, [
       ...report.assumptions,
       `Front building setback: ${option.frontSetbackMeters} m`,
       `Symmetric side building setbacks: ${option.sideSetbackMeters} m left and right`,
+      `Rear building setback: ${option.rearSetbackMeters} m`,
     ].join(' | '),
     [...report.warnings, ...option.warnings].join(' | ') || 'None recorded',
     report.missingInputs.join(' | ') || 'None recorded', report.evidenceReferences.join(' | ') || 'No sources recorded',
@@ -530,8 +537,10 @@ function drawTable(
 }
 
 function drawSectionTitle(page: PdfPage, title: string, subtitle?: string): void {
-  page.text(title, 30, 38, 20, 'F2', NAVY);
-  if (subtitle) page.text(subtitle, 30, 57, 8, 'F1', MUTED);
+  const titleSize = title.length > 54 ? 15 : 20;
+  const titleLines = wrapPdfText(title, PDF_WIDTH - 60, titleSize, 'F2').slice(0, 2);
+  titleLines.forEach((line, index) => page.text(line, 30, 38 + index * (titleSize + 1), titleSize, 'F2', NAVY));
+  if (subtitle) page.text(subtitle, 30, titleLines.length > 1 ? 70 : 57, 8, 'F1', MUTED);
   page.line(30, 70, PDF_WIDTH - 30, 70, GOLD, 1.2);
 }
 
@@ -551,7 +560,7 @@ function drawSimulation(
   drawingOptions: SimulationDrawingOptions = {},
 ): void {
   page.rect(x, top, width, height, [0.94, 0.95, 0.95], LINE);
-  const captionHeight = 25;
+  const captionHeight = 30;
   const sceneHeight = height - captionHeight;
   const siteWidth = report.site.frontageMeters ?? Math.sqrt(report.site.areaM2);
   const siteDepth = report.site.depthMeters ?? report.site.areaM2 / siteWidth;
@@ -570,14 +579,17 @@ function drawSimulation(
   page.polygon([projectPoint(minX - 8, maxZ), projectPoint(maxX + 8, maxZ), projectPoint(maxX + 8, roadFar), projectPoint(minX - 8, roadFar)], [0.25, 0.28, 0.31], [0.34, 0.37, 0.4]);
   page.polygon([projectPoint(minX, minZ), projectPoint(maxX, minZ), projectPoint(maxX, maxZ), projectPoint(minX, maxZ)], [0.84, 0.87, 0.88], [0.22, 0.32, 0.4], 0.8);
   const frontZ = maxZ - option.frontSetbackMeters;
+  const rearZ = minZ + option.rearSetbackMeters;
   const leftX = minX + option.sideSetbackMeters;
   const rightX = maxX - option.sideSetbackMeters;
   const [frontA, frontB] = [projectPoint(minX, frontZ), projectPoint(maxX, frontZ)];
   const [leftA, leftB] = [projectPoint(leftX, minZ), projectPoint(leftX, maxZ)];
   const [rightA, rightB] = [projectPoint(rightX, minZ), projectPoint(rightX, maxZ)];
+  const [rearA, rearB] = [projectPoint(minX, rearZ), projectPoint(maxX, rearZ)];
   page.line(frontA[0], frontA[1], frontB[0], frontB[1], [0.72, 0.38, 0.49], 0.8, '3 2');
   page.line(leftA[0], leftA[1], leftB[0], leftB[1], [0.72, 0.38, 0.49], 0.8, '3 2');
   page.line(rightA[0], rightA[1], rightB[0], rightB[1], [0.72, 0.38, 0.49], 0.8, '3 2');
+  page.line(rearA[0], rearA[1], rearB[0], rearB[1], [0.72, 0.38, 0.49], 0.8, '3 2');
   [...option.simulation.masses].sort((a, b) => a.z - b.z).forEach((mass) => {
     const x1 = mass.x - mass.width / 2; const x2 = mass.x + mass.width / 2;
     const z1 = mass.z - mass.length / 2; const z2 = mass.z + mass.length / 2;
@@ -604,8 +616,8 @@ function drawSimulation(
   const roadLabelPoint = projectPoint(0, maxZ + 10);
   page.text(roadLabel, roadLabelPoint[0], roadLabelPoint[1] + 2, 7.2, 'F2', [1, 1, 1], 'center');
   page.rect(x, top + sceneHeight, width, captionHeight, [0.965, 0.97, 0.97], LINE);
-  page.text(`STUDY CONTEXT · 20 m study road · front ${option.frontSetbackMeters} m · sides ${option.sideSetbackMeters} m`, x + 7, top + sceneHeight + 10, 5.8, 'F3', MUTED);
-  page.text('Rectangular study geometry · not verified cadastral data', x + 7, top + sceneHeight + 20, 5.8, 'F1', MUTED);
+  page.paragraph(`STUDY CONTEXT · 20 m study road · front ${option.frontSetbackMeters} m · sides ${option.sideSetbackMeters} m · rear ${option.rearSetbackMeters} m`, x + 7, top + sceneHeight + 8, width - 14, 5.8, 'F3', MUTED, 6.5, 2);
+  page.text('Rectangular study geometry · not verified cadastral data', x + 7, top + sceneHeight + 23, 5.8, 'F1', MUTED);
 }
 
 interface ComparisonPageLayout {
@@ -661,9 +673,11 @@ function comparisonMetricRows(): ComparisonMetricRow[] {
     { label: 'GFA', value: (option) => `${option.gfaM2.toLocaleString()} m²`, height: 18, numeric: true },
     { label: 'FAR / KLB', value: (option) => `${option.farKLB.toFixed(2)}x`, height: 18, numeric: true },
     { label: 'Coverage / KDB', value: (option) => `${option.coverageKDBPct.toFixed(1)}%`, height: 18, numeric: true },
-    { label: 'Open space / KDH', value: (option) => `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`, height: 18, numeric: true },
+    { label: 'Unbuilt site area', value: (option) => `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`, height: 18, numeric: true },
+    { label: 'KDH demonstration', value: (option) => option.kdhDemonstrated ? 'Explicit area entered' : 'Not yet demonstrated', height: 18 },
     { label: 'Front setback', value: (option) => `${option.frontSetbackMeters} m`, height: 18, numeric: true },
     { label: 'Side setback', value: (option) => `${option.sideSetbackMeters} m each side`, height: 18, numeric: true },
+    { label: 'Rear setback', value: (option) => `${option.rearSetbackMeters} m`, height: 18, numeric: true },
     { label: 'Planning check', value: concisePlanningCheck, height: 28, status: true },
     { label: 'Key warning', value: conciseOptionWarning, height: 34, status: true },
   ];
@@ -760,7 +774,7 @@ export function generateProjectReportPdf(report: ProjectReport): Uint8Array {
   drawTable(summary, 30, 278, [
     { header: 'Planning status', width: 166 }, { header: 'Height', width: 55, align: 'right' },
     { header: 'FAR / KLB', width: 55, align: 'right' }, { header: 'Coverage / KDB', width: 62, align: 'right' },
-    { header: 'Open space / KDH', width: 62, align: 'right' },
+    { header: 'KDH requirement', width: 62, align: 'right' },
   ], [[report.planning.status, report.planning.maxHeight, report.planning.maxFAR, report.planning.maxCoverage, report.planning.minOpenSpace]], { fontSize: 7.2, rowMinHeight: 40 });
   summary.text('Decision statement', 30, 381, 11, 'F2', NAVY);
   summary.rect(30, 392, 370, 63, [0.97, 0.94, 0.86], [0.78, 0.66, 0.43]);
@@ -819,9 +833,10 @@ export function generateProjectReportPdf(report: ProjectReport): Uint8Array {
       ['Tower storeys', option.towerFloors === null ? 'Not applicable' : `${option.towerFloors} floors`],
       ['Governing height', `${option.heightMeters.toFixed(1)} m`], ['Footprint', `${option.footprintM2.toLocaleString()} m²`],
       ['Gross floor area', `${option.gfaM2.toLocaleString()} m²`], ['FAR / KLB', `${option.farKLB.toFixed(2)}x`],
-      ['Coverage / KDB', `${option.coverageKDBPct.toFixed(1)}%`], ['Open space / KDH', `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`],
-      ['Front / symmetric sides', `${option.frontSetbackMeters} m / ${option.sideSetbackMeters} m`],
-    ], { fontSize: 7.5, rowMinHeight: 25 });
+      ['Coverage / KDB', `${option.coverageKDBPct.toFixed(1)}%`], ['Unbuilt site area', `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`],
+      ['KDH demonstration', option.kdhDemonstrated ? 'Explicit area entered' : 'Not yet demonstrated'],
+      ['Front / sides / rear setbacks', `${option.frontSetbackMeters} m / ${option.sideSetbackMeters} m / ${option.rearSetbackMeters} m`],
+    ], { fontSize: 7.2, rowMinHeight: 21 });
     detail.text('Planning-limit comparison', 30, 414, 10.5, 'F2', NAVY);
     drawTable(detail, 30, 426, [
       { header: 'Control', width: 130 }, { header: 'Actual', width: 82, align: 'right' }, { header: 'Supplied limit', width: 108, align: 'right' },
@@ -936,6 +951,12 @@ export function buildEvidenceLedgerRows(project: Project): EvidenceLedgerRow[] {
       verification: project.site.hasZoningEvidence ? 'supplied control; planning information on file' : 'provided study assumption',
       dependencies: 'Buildable width; containment; plans; planning checks; downloads', status: project.site.hasZoningEvidence ? 'current' : 'assumption',
       formula: 'same user-entered side setback applied symmetrically to left and right boundaries',
+    },
+    {
+      id: 'planning-rear-setback', sourceName: 'Opportunity and planning inputs', evidenceType: 'user-entered', fact: 'Rear building setback',
+      value: project.scenarios.map((scenario, index) => `Option ${String.fromCharCode(65 + index)} ${scenario.assumptionsUsed.setbacks.rear} m`).join(' · '), sourceDate: project.updatedAt,
+      verification: project.site.hasZoningEvidence ? 'supplied control; planning information on file' : 'provided study assumption',
+      dependencies: 'Buildable envelope; containment; plans; planning checks; downloads', status: project.site.hasZoningEvidence ? 'current' : 'assumption',
     },
   ] : [];
   const findingRows = project.findings.map((finding): EvidenceLedgerRow => ({

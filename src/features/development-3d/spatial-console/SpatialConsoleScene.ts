@@ -479,6 +479,7 @@ export class SpatialConsoleScene {
 
     const rearEdgeZ = Math.min(...planningZs);
     const frontSetbackZ = streetEdgeZ - snapshot.site.setbacks.front;
+    const rearSetbackZ = rearEdgeZ + snapshot.site.setbacks.rear;
     const leftSetbackX = streetMinX + snapshot.site.setbacks.sideLeft;
     const rightSetbackX = streetMaxX - snapshot.site.setbacks.sideRight;
     const setbackMaterial = () => new THREE.LineDashedMaterial({
@@ -511,7 +512,16 @@ export class SpatialConsoleScene {
     );
     rightLine.computeLineDistances();
     rightLine.name = `right-setback-${snapshot.site.setbacks.sideRight}m`;
-    this.parcelGroup.add(frontLine, leftLine, rightLine);
+    const rearLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(streetMinX, 0.13, rearSetbackZ),
+        new THREE.Vector3(streetMaxX, 0.13, rearSetbackZ),
+      ]),
+      setbackMaterial(),
+    );
+    rearLine.computeLineDistances();
+    rearLine.name = `rear-setback-${snapshot.site.setbacks.rear}m`;
+    this.parcelGroup.add(frontLine, leftLine, rightLine, rearLine);
 
     const buildableShape = shapeFromRing(snapshot.site.buildableBoundary);
     const buildableGeometry = new THREE.ShapeGeometry(buildableShape);
