@@ -54,6 +54,7 @@ export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempo
     goal: goal.trim() || validated.objective,
     input: validated,
     state: 'QUEUED',
+    revision: 0,
     progress: 0,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -64,6 +65,7 @@ export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempo
     modelCalled: disclosure.modelCalled,
     modelCallCount: 0,
     disclosure: disclosure.disclosure,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
 }
 
@@ -86,8 +88,7 @@ async function appendActivity(
   activity: TaskmasterToolActivity,
 ): Promise<TaskmasterRunRecord> {
   const next = { ...run, activities: [...run.activities, activity], updatedAt: now() };
-  await repository.save(next);
-  return next;
+  return repository.save(next);
 }
 
 export async function executeTaskmasterRun(
@@ -100,29 +101,33 @@ export async function executeTaskmasterRun(
   activeExecutions.add(runId);
   const executionStartedAt = Date.now();
   const maxDurationMs = Number(process.env.TASKMASTER_MAX_DURATION_MS || 30000);
+  const leaseOwner = `${process.env.K_REVISION || 'local'}:${deliveryId}`;
   const maxModelCalls = Number(process.env.TASKMASTER_MAX_MODEL_CALLS || 2);
   let modelCalls = 0;
   try {
     let run = await repository.get(runId);
     if (!run) return undefined;
+    const leased = await repository.acquireLease(runId, leaseOwner, maxDurationMs + 5000);
+    if (!leased) return toPublicTaskmasterRun(run);
+    run = leased;
     auditTaskmaster(run, 'delivery_started');
     if (['COMPLETED', 'FAILED_FINAL', 'BLOCKED_STALE', 'REJECTED', 'CANCELLED', 'AWAITING_APPROVAL'].includes(run.state)) {
       return toPublicTaskmasterRun(run);
     }
     if (run.lastTaskDeliveryId === deliveryId && run.state === 'EXECUTING_TOOLS') return toPublicTaskmasterRun(run);
     run = { ...run, lastTaskDeliveryId: deliveryId };
-    await repository.save(run);
+    run = await repository.save(run);
 
     try {
       if (run.state === 'FAILED_RETRYABLE') {
         run = transition(run, 'QUEUED', 'Retrying from persisted checkpoint');
         run = { ...run, retryCount: run.retryCount + 1, error: undefined };
-        await repository.save(run);
+        run = await repository.save(run);
       }
       if (run.state === 'QUEUED') {
         run = transition(run, 'PLANNING', 'Preparing site and planning inputs');
         run = { ...run, progress: progressFor(run.state) };
-        await repository.save(run);
+        run = await repository.save(run);
       }
 
       const context: TaskmasterToolContext = { input: run.input, proposals: [], simulations: [] };
@@ -144,7 +149,7 @@ export async function executeTaskmasterRun(
           plan = buildDeterministicTaskmasterPlan(run.goal);
         }
         run = { ...run, plan, modelCallCount: modelCalls, currentStep: 'Executing bounded read-only tools', provider: taskmasterModelDisclosure().provider, model: taskmasterModelDisclosure().model, modelCalled: modelCalls > 0, disclosure: taskmasterModelDisclosure().disclosure };
-        await repository.save(run);
+        run = await repository.save(run);
       }
 
       if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true' && getAiConfig().provider !== 'LOCAL_DEVELOPMENT') {
@@ -153,12 +158,12 @@ export async function executeTaskmasterRun(
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
         run = { ...run, modelCallCount: modelCalls };
-        await repository.save(run);
+        run = await repository.save(run);
       }
 
       run = transition(run, 'EXECUTING_TOOLS', 'Executing bounded read-only tools');
       run = { ...run, progress: progressFor(run.state, 0, plan.steps.length) };
-      await repository.save(run);
+      run = await repository.save(run);
 
       const maxToolCalls = Number(process.env.TASKMASTER_MAX_TOOL_CALLS || 16);
       if (plan.steps.length > maxToolCalls) throw new Error(`Taskmaster plan exceeds the ${maxToolCalls}-tool limit.`);
@@ -182,7 +187,7 @@ export async function executeTaskmasterRun(
         }
         run = await appendActivity(repository, run, activity);
         run = { ...run, currentStep: step.purpose, progress: progressFor(run.state, index + 1, plan.steps.length) };
-        await repository.save(run);
+        run = await repository.save(run);
       }
 
       // Plans are model-controlled, but the final proposal set is always
@@ -216,7 +221,7 @@ export async function executeTaskmasterRun(
       run = { ...run, generation, simulations: context.simulations };
       run = transition(run, 'AWAITING_APPROVAL', 'Ready for human review');
       run = { ...run, progress: progressFor(run.state) };
-      await repository.save(run);
+      run = await repository.save(run);
       auditTaskmaster(run, 'awaiting_approval');
       return toPublicTaskmasterRun(run);
     } catch (error) {
@@ -226,12 +231,13 @@ export async function executeTaskmasterRun(
       if (allowedTaskmasterTransitions[run.state].includes(nextState)) {
         run = transition(run, nextState, 'Taskmaster execution failed');
         run = { ...run, error: message, progress: 0 };
-        await repository.save(run);
+        run = await repository.save(run);
         auditTaskmaster(run, 'execution_failed');
       }
       return toPublicTaskmasterRun(run);
     }
   } finally {
+    await repository.releaseLease(runId, leaseOwner).catch(() => undefined);
     activeExecutions.delete(runId);
   }
 }
@@ -255,8 +261,7 @@ export async function approveTaskmasterRun(
   if (!run.generation?.proposals.some((proposal) => proposal.id === proposalId)) throw new Error('The requested proposal is not part of this run.');
   const approval: TaskmasterApproval = { proposalId, approvedAt: now(), approvedBy, expectedStudyVersion, decision: 'APPROVED' };
   const applying = transition({ ...run, approval }, 'APPLYING', 'Applying accepted study through the user command boundary');
-  await repository.save(applying);
-  return applying;
+  return repository.save(applying);
 }
 
 export async function completeApprovedTaskmasterRun(
@@ -275,7 +280,7 @@ export async function completeApprovedTaskmasterRun(
   }
   let next = transition(run, 'VERIFYING', 'Recalculating accepted study');
   next = { ...next, progress: progressFor(next.state) };
-  await repository.save(next);
+  next = await repository.save(next);
   next = transition(next, 'COMPLETED', 'Taskmaster workflow complete');
   next = {
     ...next,
@@ -292,7 +297,7 @@ export async function completeApprovedTaskmasterRun(
       warnings: run.simulations?.flatMap((simulation) => simulation.warnings) || [],
     },
   };
-  await repository.save(next);
+  next = await repository.save(next);
   return next;
 }
 
@@ -305,8 +310,7 @@ export async function rejectTaskmasterRun(
   if (!run) throw new Error('Taskmaster run was not found.');
   if (run.state !== 'AWAITING_APPROVAL') throw new Error(`Run is ${run.state}; rejection is not available.`);
   const next = transition(run, 'REJECTED', 'Proposals rejected by user');
-  await repository.save({ ...next, progress: 100 });
-  return next;
+  return repository.save({ ...next, progress: 100 });
 }
 
 export async function cancelTaskmasterRun(
@@ -318,6 +322,5 @@ export async function cancelTaskmasterRun(
   if (!run) throw new Error('Taskmaster run was not found.');
   if (!allowedTaskmasterTransitions[run.state].includes('CANCELLED')) throw new Error(`Run is ${run.state}; cancellation is not available.`);
   const next = transition(run, 'CANCELLED', 'Cancelled by user');
-  await repository.save({ ...next, progress: 100 });
-  return next;
+  return repository.save({ ...next, progress: 100 });
 }

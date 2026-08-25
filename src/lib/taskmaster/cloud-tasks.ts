@@ -21,12 +21,14 @@ async function enqueueCloudTask(runId: string, correlationId?: string): Promise<
   const location = process.env.GOOGLE_CLOUD_LOCATION || 'asia-southeast2';
   const queue = process.env.TASKMASTER_CLOUD_TASKS_QUEUE!;
   const parent = client.queuePath(project, location, queue);
-  const payload = Buffer.from(JSON.stringify({ runId, correlationId })).toString('base64');
+  const deliveryId = `delivery-${runId}`;
+  const payload = Buffer.from(JSON.stringify({ runId, deliveryId, correlationId })).toString('base64');
   const task: Record<string, unknown> = {
+    name: client.taskPath(project, location, queue, `taskmaster-${runId}`),
     httpRequest: {
       httpMethod: 'POST',
       url: process.env.TASKMASTER_WORKER_URL!,
-      headers: { 'content-type': 'application/json', 'x-sitepilot-taskmaster': 'cloud-task' },
+      headers: { 'content-type': 'application/json' },
       body: payload,
     },
   };

@@ -151,6 +151,8 @@ export interface TaskmasterRunRecord {
   goal: string;
   input: TaskmasterInput;
   state: TaskmasterRunState;
+  /** Monotonic Firestore transaction revision used for optimistic concurrency. */
+  revision: number;
   currentStep?: string;
   progress: number;
   createdAt: string;
@@ -170,6 +172,9 @@ export interface TaskmasterRunRecord {
   disclosure: string;
   taskName?: string;
   lastTaskDeliveryId?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  expiresAt?: string;
 }
 
 export type PublicTaskmasterRun = Pick<TaskmasterRunRecord,

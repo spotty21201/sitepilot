@@ -52,7 +52,8 @@ Set these only in an owner-approved non-production environment:
 - `TASKMASTER_ALLOW_LIVE_MODEL=true`
 - `TASKMASTER_ALLOW_MODEL_REPAIR=false` (enable only for one bounded repair call)
 - `TASKMASTER_FIRESTORE_ENABLED=true`
-- `TASKMASTER_FIRESTORE_COLLECTION=sitepilot_taskmaster_runs`
+- `TASKMASTER_FIRESTORE_COLLECTION=taskmasterRuns`
+- `TASKMASTER_FIRESTORE_IDEMPOTENCY_COLLECTION=taskmasterIdempotency`
 - `TASKMASTER_CLOUD_TASKS_QUEUE=<queue-name>`
 - `TASKMASTER_WORKER_URL=<authenticated-worker-url>`
 - `TASKMASTER_TASK_AUDIENCE=<worker-audience>`
@@ -64,7 +65,7 @@ Set these only in an owner-approved non-production environment:
 - `TASKMASTER_MAX_DURATION_MS=30000`
 - `TASKMASTER_MAX_OUTPUT_TOKENS=4096`
 
-Each run document stores the run ID, correlation ID, opportunity ID, source study version, input hash, goal, validated plan, state transitions, concise tool activities, proposal set, deterministic simulations, approval decision, completion report, and provider/model metadata. Cloud Run emits correlation-only JSON events without private opportunity documents, unrestricted prompts, or secrets. Hidden chain-of-thought is never persisted.
+Firestore stores `taskmasterRuns/{runId}`, `events/{eventId}`, `proposals/{proposalId}`, and `taskmasterIdempotency/{keyHash}`. Run writes use optimistic transactions, a monotonic revision, a lease owner/expiry, and deterministic idempotency documents. Each run document stores the run ID, correlation ID, opportunity ID, source study version, input hash, goal, validated plan, state transitions, concise tool activities, proposal set, deterministic simulations, approval decision, completion report, and provider/model metadata. Cloud Run emits correlation-only JSON events without private opportunity documents, unrestricted prompts, or secrets. Hidden chain-of-thought is never persisted.
 
 ## IAM plan
 
@@ -79,9 +80,9 @@ Do not expose the worker as publicly writable. Validate Cloud Tasks OIDC audienc
 
 ## Deployment sequence
 
-1. Create or verify the Firestore database and `sitepilot_taskmaster_runs` collection in a non-production project.
-2. Create the Cloud Tasks queue with a bounded retry policy and rate limit.
-3. Deploy the worker revision with the service identity and the environment variables above.
+1. Create or verify the Firestore Native database in the owner-approved location and use the `taskmasterRuns` / `taskmasterIdempotency` collections.
+2. Create the `sitepilot-taskmaster` queue with a bounded retry policy and rate limit.
+3. Deploy the private worker revision with the dedicated runtime identity and OIDC task identity.
 4. Deploy the application revision with the enqueue/status/approval routes enabled.
 5. Run one synthetic Central Jakarta case; capture run ID, source study version, provider/model metadata, task name, Cloud Run revision, and redacted logs.
 6. Verify a duplicate task delivery, a retryable failure, a stale approval, a human rejection, and a successful approval/completion.
@@ -106,4 +107,4 @@ No step should use a confidential opportunity or an unbounded prompt.
 
 ## Authorization gate
 
-Before any hosted test, the owner must separately authorize cloud resource changes, IAM/service-account changes, enabling live Gemini inference, and the non-production deployment. Until then, the local fallback is the only verified generation path.
+The non-production Firestore database, queue, dedicated service accounts and worker deployment are now authorized and may be created only in the project/region recorded above. Live Gemini inference remains separately unauthorized. Vercel remains outside this boundary.
