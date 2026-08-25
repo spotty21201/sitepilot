@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryTaskmasterRunRepository } from '@/lib/taskmaster/repository';
 import { withProviderBudget, ProviderBudgetExceeded } from '@/lib/taskmaster/provider-budget';
 
