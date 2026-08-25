@@ -6,6 +6,8 @@ import { ScenarioControls } from '@/components/ScenarioControls';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { DevelopmentWorkspace } from '@/features/development-3d/DevelopmentWorkspace';
 import { SpatialCanvas } from '@/components/SpatialCanvas';
+import { EvidenceLedger } from '@/components/EvidenceLedger';
+import { OpportunityInputsModal } from '@/components/OpportunityInputsModal';
 
 // Mock Three.js and WebGL constructor
 vi.mock('three', async () => {
@@ -96,12 +98,13 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
 
   it('renders 2D Site Plan legend with exact normalized labels [1] Podium, [2] East Wing, [3] West Wing', () => {
     const scenarioB = GOLDEN_PROJECT.scenarios[1];
+    const project = { ...GOLDEN_PROJECT, zoningLimits: { ...GOLDEN_PROJECT.zoningLimits!, maxHeightMeters: 60 } };
     const { getByText } = render(
       <DevelopmentWorkspace
         caseId={GOLDEN_PROJECT.id}
         site={GOLDEN_PROJECT.site}
         activeScenario={scenarioB}
-        project={GOLDEN_PROJECT}
+        project={project}
         onProposeCommand={vi.fn(() => true)}
         onCommitSpatialCommand={vi.fn(() => ({
           accepted: false as const,
@@ -165,14 +168,68 @@ describe('Decision Room UI & Spatial Controls Verification', () => {
         onResetScenario={vi.fn()}
       />
     );
-    const range = screen.getByLabelText('Building Height in Storeys');
+    const range = screen.getByLabelText('Tower storeys');
     fireEvent.pointerDown(range);
     fireEvent.change(range, { target: { value: '9' } });
     fireEvent.change(range, { target: { value: '10' } });
     expect(onUpdateScenarioParam).not.toHaveBeenCalled();
     fireEvent.pointerUp(range, { target: { value: '10' } });
     expect(onUpdateScenarioParam).toHaveBeenCalledTimes(1);
-    expect(onUpdateScenarioParam).toHaveBeenCalledWith(scenarioB.id, 'floors', 10);
+    expect(onUpdateScenarioParam).toHaveBeenCalledWith(scenarioB.id, 'towerFloors', 10);
+  });
+
+  it('orders and names the four scenario controls exactly without changing their accessible inputs', () => {
+    const scenarioB = GOLDEN_PROJECT.scenarios[1];
+    render(
+      <ScenarioControls
+        site={GOLDEN_PROJECT.site}
+        project={GOLDEN_PROJECT}
+        scenarios={GOLDEN_PROJECT.scenarios}
+        activeScenarioId={scenarioB.id}
+        onSelectScenario={vi.fn()}
+        onUpdateScenarioParam={vi.fn()}
+        onFitMassingToEnvelope={vi.fn()}
+        onResetScenario={vi.fn()}
+      />
+    );
+    const labels = ['Tower storeys', 'Podium storeys', 'Front setback', 'Side setback'];
+    const elements = labels.map((label) => screen.getByText(label, { selector: 'span' }));
+    elements.slice(0, -1).forEach((element, index) => {
+      expect(element.compareDocumentPosition(elements[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+    expect(screen.getByLabelText('Tower storeys')).toBeDefined();
+    expect(screen.getByLabelText('Podium storeys')).toBeDefined();
+    expect(screen.getByLabelText('Front setback in metres')).toBeDefined();
+    expect(screen.getByLabelText('Symmetric side setback in metres')).toBeDefined();
+    expect(screen.queryByText(/study easement/i)).toBeNull();
+  });
+
+  it('uses professional source language across the principal planning panels', () => {
+    const { unmount } = render(
+      <EvidenceLedger
+        sources={GOLDEN_PROJECT.sources}
+        findings={GOLDEN_PROJECT.findings}
+        contradictions={GOLDEN_PROJECT.contradictions}
+        project={GOLDEN_PROJECT}
+      />
+    );
+    expect(screen.getByText('Sources & Assumptions')).toBeDefined();
+    expect(screen.getByText('How each figure was derived')).toBeDefined();
+    expect(screen.queryByText('Evidence Ledger')).toBeNull();
+    expect(screen.queryByText(/Canonical values/i)).toBeNull();
+    unmount();
+
+    render(
+      <OpportunityInputsModal
+        project={GOLDEN_PROJECT}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Site geometry:')).toBeDefined();
+    expect(screen.getByText('Front setback (m)')).toBeDefined();
+    expect(screen.getByText('Side setback (m)')).toBeDefined();
+    expect(screen.queryByText(/canonical rectangular/i)).toBeNull();
   });
 
   it('manages XML modal lifecycle, focus trap, Escape dismissal, and focus restoration', () => {
