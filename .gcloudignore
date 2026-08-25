@@ -1,0 +1,17 @@
+.git
+.next
+.vercel
+artifacts
+prototypes
+src/app/lab
+scripts/acceptance-spatial-console.mjs
+scripts/verify-corrections.mjs
+scripts/verify-spatial-lab-trial.ts
+scripts/visual-dom-crawl.cjs
+scripts/visual-metrics.py
+test_image
+*.map
+*.tsbuildinfo
+*.log
+.env*
+node_modules
