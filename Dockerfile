@@ -10,6 +10,14 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+# Keep the complete production dependency tree available to the server-only
+# Taskmaster worker. The worker dynamically loads the official ADK and GenAI
+# modules, so Next standalone tracing cannot reliably discover their
+# transitive dependencies. Prune development tooling before copying it into
+# the runtime image.
+FROM deps AS runtime-deps
+RUN npm prune --omit=dev
+
 # 2. Builder Stage
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -39,45 +47,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# The Taskmaster worker loads the official ADK's narrow ESM modules from the
-# runtime filesystem. Next standalone tracing cannot discover that dynamic
-# import's transitive packages, so copy the ADK dependency boundary explicitly
-# without copying development tools or credentials into the image.
-COPY --from=deps /app/node_modules/@a2a-js ./node_modules/@a2a-js
-COPY --from=deps /app/node_modules/@colors ./node_modules/@colors
-COPY --from=deps /app/node_modules/@dabh ./node_modules/@dabh
-COPY --from=deps /app/node_modules/@types/triple-beam ./node_modules/@types/triple-beam
-COPY --from=deps /app/node_modules/@google/adk ./node_modules/@google/adk
-COPY --from=deps /app/node_modules/@google-cloud/vertexai ./node_modules/@google-cloud/vertexai
-COPY --from=deps /app/node_modules/@google/genai ./node_modules/@google/genai
-COPY --from=deps /app/node_modules/@mikro-orm ./node_modules/@mikro-orm
-COPY --from=deps /app/node_modules/@opentelemetry ./node_modules/@opentelemetry
-COPY --from=deps /app/node_modules/adm-zip ./node_modules/adm-zip
-COPY --from=deps /app/node_modules/async ./node_modules/async
-COPY --from=deps /app/node_modules/fecha ./node_modules/fecha
-COPY --from=deps /app/node_modules/google-auth-library ./node_modules/google-auth-library
-COPY --from=deps /app/node_modules/js-yaml ./node_modules/js-yaml
-COPY --from=deps /app/node_modules/jsonpath-plus ./node_modules/jsonpath-plus
-COPY --from=deps /app/node_modules/is-stream ./node_modules/is-stream
-COPY --from=deps /app/node_modules/logform ./node_modules/logform
-COPY --from=deps /app/node_modules/lodash-es ./node_modules/lodash-es
-COPY --from=deps /app/node_modules/p-retry ./node_modules/p-retry
-COPY --from=deps /app/node_modules/protobufjs ./node_modules/protobufjs
-COPY --from=deps /app/node_modules/ms ./node_modules/ms
-COPY --from=deps /app/node_modules/one-time ./node_modules/one-time
-COPY --from=deps /app/node_modules/readable-stream ./node_modules/readable-stream
-COPY --from=deps /app/node_modules/ws ./node_modules/ws
-COPY --from=deps /app/node_modules/@protobufjs ./node_modules/@protobufjs
-COPY --from=deps /app/node_modules/@types/retry ./node_modules/@types/retry
-COPY --from=deps /app/node_modules/long ./node_modules/long
-COPY --from=deps /app/node_modules/retry ./node_modules/retry
-COPY --from=deps /app/node_modules/safe-stable-stringify ./node_modules/safe-stable-stringify
-COPY --from=deps /app/node_modules/stack-trace ./node_modules/stack-trace
-COPY --from=deps /app/node_modules/triple-beam ./node_modules/triple-beam
-COPY --from=deps /app/node_modules/winston ./node_modules/winston
-COPY --from=deps /app/node_modules/winston-transport ./node_modules/winston-transport
-COPY --from=deps /app/node_modules/zod ./node_modules/zod
-COPY --from=deps /app/node_modules/zod-to-json-schema ./node_modules/zod-to-json-schema
+# The Taskmaster worker loads the official ADK and GenAI modules from the
+# runtime filesystem. Copy only production dependencies; no development tools
+# or credentials enter the image.
+COPY --from=runtime-deps /app/node_modules ./node_modules
 
 USER nextjs
 
