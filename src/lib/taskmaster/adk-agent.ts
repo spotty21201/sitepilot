@@ -3,9 +3,6 @@ import { taskmasterPlanSchema, type TaskmasterInput, type TaskmasterPlan } from 
 import { executeTaskmasterTool, type TaskmasterToolContext } from './tools';
 import type { Schema } from '@google/genai';
 import path from 'node:path';
-import { createRequire } from 'node:module';
-
-const requirePackage = createRequire(import.meta.url);
 
 /**
  * Load only the ADK modules needed by Taskmaster.
@@ -18,7 +15,10 @@ const requirePackage = createRequire(import.meta.url);
  * ESM entry points so browser code and optional peers never enter the bundle.
  */
 async function loadAdkModule<T>(relativePath: string): Promise<T> {
-  const packageRoot = path.dirname(requirePackage.resolve('@google/adk/package.json'));
+  // Resolve from the runtime filesystem. Next's standalone bundler can turn
+  // package `require.resolve` calls into numeric module IDs, which are not
+  // valid filesystem paths when the worker loads ADK dynamically.
+  const packageRoot = path.join(process.cwd(), 'node_modules', '@google', 'adk');
   const moduleUrl = `file://${path.join(packageRoot, 'dist', 'esm', relativePath).split(path.sep).join('/')}`;
   return import(/* webpackIgnore: true */ moduleUrl) as Promise<T>;
 }
