@@ -1,0 +1,323 @@
+import { randomUUID } from 'node:crypto';
+import { generateSchemeProposals, validateSchemeProposals, type SchemeGenerationResult } from '@/lib/schemes/proposal-contract';
+import { getAiConfig } from '@/lib/ai/config';
+import {
+  allowedTaskmasterTransitions,
+  assertTaskmasterTransition,
+  taskmasterInputSchema,
+  taskmasterPlanSchema,
+  type PublicTaskmasterRun,
+  type TaskmasterApproval,
+  type TaskmasterInput,
+  type TaskmasterRunRecord,
+  type TaskmasterRunState,
+  type TaskmasterToolActivity,
+  toPublicTaskmasterRun,
+} from './schemas';
+import { getTaskmasterRunRepository, type TaskmasterRunRepository } from './repository';
+import { buildDeterministicTaskmasterPlan, runAdkPlan, taskmasterModelDisclosure } from './adk-agent';
+import { executeTaskmasterTool, type TaskmasterToolContext } from './tools';
+
+const activeExecutions = new Set<string>();
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function transition(run: TaskmasterRunRecord, state: TaskmasterRunState, currentStep?: string): TaskmasterRunRecord {
+  assertTaskmasterTransition(run.state, state);
+  return { ...run, state, currentStep, updatedAt: now() };
+}
+
+function progressFor(state: TaskmasterRunState, stepIndex = 0, stepCount = 1): number {
+  if (state === 'QUEUED') return 0;
+  if (state === 'PLANNING') return 12;
+  if (state === 'EXECUTING_TOOLS') return Math.min(68, 18 + Math.round((stepIndex / Math.max(1, stepCount)) * 50));
+  if (state === 'VALIDATING') return 76;
+  if (state === 'AWAITING_APPROVAL') return 86;
+  if (state === 'APPLYING') return 91;
+  if (state === 'VERIFYING') return 96;
+  return ['COMPLETED', 'REJECTED', 'CANCELLED'].includes(state) ? 100 : 0;
+}
+
+export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempotencyKey: string = randomUUID()): TaskmasterRunRecord {
+  const validated = taskmasterInputSchema.parse(input);
+  const disclosure = taskmasterModelDisclosure();
+  const timestamp = now();
+  return {
+    runId: `tm-${randomUUID()}`,
+    correlationId: `corr-${randomUUID()}`,
+    idempotencyKey,
+    opportunityId: validated.opportunityId,
+    sourceStudyVersion: validated.studyVersion,
+    inputHash: validated.inputHash,
+    goal: goal.trim() || validated.objective,
+    input: validated,
+    state: 'QUEUED',
+    progress: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    retryCount: 0,
+    activities: [],
+    provider: disclosure.provider,
+    model: disclosure.model,
+    modelCalled: disclosure.modelCalled,
+    modelCallCount: 0,
+    disclosure: disclosure.disclosure,
+  };
+}
+
+function auditTaskmaster(run: TaskmasterRunRecord, event: string): void {
+  console.info(JSON.stringify({
+    service: 'sitepilot-taskmaster',
+    event,
+    runId: run.runId,
+    correlationId: run.correlationId,
+    state: run.state,
+    provider: run.provider,
+    model: run.model,
+    modelCalled: run.modelCalled,
+  }));
+}
+
+async function appendActivity(
+  repository: TaskmasterRunRepository,
+  run: TaskmasterRunRecord,
+  activity: TaskmasterToolActivity,
+): Promise<TaskmasterRunRecord> {
+  const next = { ...run, activities: [...run.activities, activity], updatedAt: now() };
+  await repository.save(next);
+  return next;
+}
+
+export async function executeTaskmasterRun(
+  runId: string,
+  repository?: TaskmasterRunRepository,
+  deliveryId: string = randomUUID(),
+): Promise<PublicTaskmasterRun | undefined> {
+  repository ||= await getTaskmasterRunRepository();
+  if (activeExecutions.has(runId)) return undefined;
+  activeExecutions.add(runId);
+  const executionStartedAt = Date.now();
+  const maxDurationMs = Number(process.env.TASKMASTER_MAX_DURATION_MS || 30000);
+  const maxModelCalls = Number(process.env.TASKMASTER_MAX_MODEL_CALLS || 2);
+  let modelCalls = 0;
+  try {
+    let run = await repository.get(runId);
+    if (!run) return undefined;
+    auditTaskmaster(run, 'delivery_started');
+    if (['COMPLETED', 'FAILED_FINAL', 'BLOCKED_STALE', 'REJECTED', 'CANCELLED', 'AWAITING_APPROVAL'].includes(run.state)) {
+      return toPublicTaskmasterRun(run);
+    }
+    if (run.lastTaskDeliveryId === deliveryId && run.state === 'EXECUTING_TOOLS') return toPublicTaskmasterRun(run);
+    run = { ...run, lastTaskDeliveryId: deliveryId };
+    await repository.save(run);
+
+    try {
+      if (run.state === 'FAILED_RETRYABLE') {
+        run = transition(run, 'QUEUED', 'Retrying from persisted checkpoint');
+        run = { ...run, retryCount: run.retryCount + 1, error: undefined };
+        await repository.save(run);
+      }
+      if (run.state === 'QUEUED') {
+        run = transition(run, 'PLANNING', 'Preparing site and planning inputs');
+        run = { ...run, progress: progressFor(run.state) };
+        await repository.save(run);
+      }
+
+      const context: TaskmasterToolContext = { input: run.input, proposals: [], simulations: [] };
+      let plan = run.plan;
+      let modelGeneration: SchemeGenerationResult | undefined;
+      if (!plan) {
+        try {
+          if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') {
+            if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
+            plan = await runAdkPlan(run.input, context);
+            modelCalls += 1;
+          } else {
+            plan = buildDeterministicTaskmasterPlan(run.goal);
+          }
+          taskmasterPlanSchema.parse(plan);
+        } catch (error) {
+          // A model planning error is retryable, but local development remains honest and usable.
+          if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') throw error;
+          plan = buildDeterministicTaskmasterPlan(run.goal);
+        }
+        run = { ...run, plan, modelCallCount: modelCalls, currentStep: 'Executing bounded read-only tools', provider: taskmasterModelDisclosure().provider, model: taskmasterModelDisclosure().model, modelCalled: modelCalls > 0, disclosure: taskmasterModelDisclosure().disclosure };
+        await repository.save(run);
+      }
+
+      if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true' && getAiConfig().provider !== 'LOCAL_DEVELOPMENT') {
+        if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
+        modelGeneration = await generateSchemeProposals(run.input);
+        modelCalls += 1;
+        if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
+        run = { ...run, modelCallCount: modelCalls };
+        await repository.save(run);
+      }
+
+      run = transition(run, 'EXECUTING_TOOLS', 'Executing bounded read-only tools');
+      run = { ...run, progress: progressFor(run.state, 0, plan.steps.length) };
+      await repository.save(run);
+
+      const maxToolCalls = Number(process.env.TASKMASTER_MAX_TOOL_CALLS || 16);
+      if (plan.steps.length > maxToolCalls) throw new Error(`Taskmaster plan exceeds the ${maxToolCalls}-tool limit.`);
+      for (let index = 0; index < plan.steps.length; index += 1) {
+        if (Date.now() - executionStartedAt > maxDurationMs) throw new Error(`Taskmaster exceeded the ${maxDurationMs}ms execution limit.`);
+        const step = plan.steps[index];
+        const startedAt = now();
+        const toolInput = { ...step.input };
+        if (step.tool === 'simulate_development_scheme' && typeof toolInput.proposalId === 'string' && ['A', 'B', 'C'].includes(toolInput.proposalId)) {
+          const proposal = context.proposals['ABC'.indexOf(toolInput.proposalId)];
+          if (proposal) toolInput.proposalId = proposal.id;
+        }
+        let activity: TaskmasterToolActivity;
+        try {
+          const result = executeTaskmasterTool(step.tool, context, toolInput);
+          activity = { id: `${run.runId}-${step.id}`, name: result.tool, input: toolInput, result: result.result, startedAt, completedAt: now(), ok: true };
+        } catch (error) {
+          activity = { id: `${run.runId}-${step.id}`, name: step.tool, input: toolInput, result: null, startedAt, completedAt: now(), ok: false, error: error instanceof Error ? error.message : 'Tool failed.' };
+          run = await appendActivity(repository, run, activity);
+          throw error;
+        }
+        run = await appendActivity(repository, run, activity);
+        run = { ...run, currentStep: step.purpose, progress: progressFor(run.state, index + 1, plan.steps.length) };
+        await repository.save(run);
+      }
+
+      // Plans are model-controlled, but the final proposal set is always
+      // independently validated and falls back only to explicit templates.
+      if (context.proposals.length !== 3) {
+        const prepare = executeTaskmasterTool('prepare_scheme_proposals', context).result as { proposals: unknown };
+        context.proposals = (prepare.proposals as typeof context.proposals);
+      }
+      const validation = validateSchemeProposals(context.proposals, run.input);
+      if (!validation.valid) throw new Error(validation.errors.join(' '));
+      if (context.simulations.length !== 3) {
+        for (const proposal of context.proposals) executeTaskmasterTool('simulate_development_scheme', context, { proposalId: proposal.id });
+      }
+
+      run = transition(run, 'VALIDATING', 'Checking geometry and planning limits');
+      const disclosure = taskmasterModelDisclosure();
+      const generation: SchemeGenerationResult = {
+        provider: (modelGeneration?.provider || disclosure.provider) as SchemeGenerationResult['provider'],
+        model: modelGeneration?.model || disclosure.model,
+        modelCalled: modelGeneration ? modelGeneration.modelCalled : disclosure.modelCalled,
+        disclosure: modelGeneration?.disclosure || disclosure.disclosure,
+        generatedAt: now(),
+        opportunityId: run.input.opportunityId,
+        sourceStudyVersion: run.input.studyVersion,
+        inputHash: run.input.inputHash,
+        userPriorities: run.input.priorities,
+        assumptions: validation.proposals.flatMap((proposal) => proposal.assumptionsIntroduced),
+        proposals: validation.proposals,
+        validation: { valid: true, errors: [] },
+      };
+      run = { ...run, generation, simulations: context.simulations };
+      run = transition(run, 'AWAITING_APPROVAL', 'Ready for human review');
+      run = { ...run, progress: progressFor(run.state) };
+      await repository.save(run);
+      auditTaskmaster(run, 'awaiting_approval');
+      return toPublicTaskmasterRun(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Taskmaster execution failed.';
+      const retryable = run.retryCount < Number(process.env.TASKMASTER_MAX_RETRIES || 2);
+      const nextState: TaskmasterRunState = retryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL';
+      if (allowedTaskmasterTransitions[run.state].includes(nextState)) {
+        run = transition(run, nextState, 'Taskmaster execution failed');
+        run = { ...run, error: message, progress: 0 };
+        await repository.save(run);
+        auditTaskmaster(run, 'execution_failed');
+      }
+      return toPublicTaskmasterRun(run);
+    }
+  } finally {
+    activeExecutions.delete(runId);
+  }
+}
+
+export async function approveTaskmasterRun(
+  runId: string,
+  proposalId: string,
+  expectedStudyVersion: string,
+  approvedBy = 'local-user',
+  repository?: TaskmasterRunRepository,
+): Promise<TaskmasterRunRecord> {
+  repository ||= await getTaskmasterRunRepository();
+  const run = await repository.get(runId);
+  if (!run) throw new Error('Taskmaster run was not found.');
+  if (run.state !== 'AWAITING_APPROVAL') throw new Error(`Run is ${run.state}; approval is not available.`);
+  if (run.sourceStudyVersion !== expectedStudyVersion) {
+    const blocked = transition(run, 'BLOCKED_STALE', 'Source study changed before approval');
+    await repository.save(blocked);
+    throw new Error('The source study is stale. Regenerate before accepting this proposal.');
+  }
+  if (!run.generation?.proposals.some((proposal) => proposal.id === proposalId)) throw new Error('The requested proposal is not part of this run.');
+  const approval: TaskmasterApproval = { proposalId, approvedAt: now(), approvedBy, expectedStudyVersion, decision: 'APPROVED' };
+  const applying = transition({ ...run, approval }, 'APPLYING', 'Applying accepted study through the user command boundary');
+  await repository.save(applying);
+  return applying;
+}
+
+export async function completeApprovedTaskmasterRun(
+  runId: string,
+  acceptedStudyVersion: string,
+  repository?: TaskmasterRunRepository,
+): Promise<TaskmasterRunRecord> {
+  repository ||= await getTaskmasterRunRepository();
+  const run = await repository.get(runId);
+  if (!run) throw new Error('Taskmaster run was not found.');
+  if (run.state !== 'APPLYING' || !run.approval || run.approval.decision !== 'APPROVED') throw new Error('The run is not awaiting application completion.');
+  if (acceptedStudyVersion !== run.sourceStudyVersion) {
+    const blocked = transition(run, 'BLOCKED_STALE', 'Accepted study version did not match the run source');
+    await repository.save(blocked);
+    throw new Error('Accepted study version is stale.');
+  }
+  let next = transition(run, 'VERIFYING', 'Recalculating accepted study');
+  next = { ...next, progress: progressFor(next.state) };
+  await repository.save(next);
+  next = transition(next, 'COMPLETED', 'Taskmaster workflow complete');
+  next = {
+    ...next,
+    progress: 100,
+    completionReport: {
+      summary: 'Three proposals were independently simulated and one was accepted through the existing user approval boundary.',
+      acceptedProposalId: run.approval.proposalId,
+      acceptedStudyVersion,
+      generatedAt: now(),
+      provider: run.provider,
+      model: run.model,
+      modelCalled: run.modelCalled,
+      toolCount: run.activities.length,
+      warnings: run.simulations?.flatMap((simulation) => simulation.warnings) || [],
+    },
+  };
+  await repository.save(next);
+  return next;
+}
+
+export async function rejectTaskmasterRun(
+  runId: string,
+  repository?: TaskmasterRunRepository,
+): Promise<TaskmasterRunRecord> {
+  repository ||= await getTaskmasterRunRepository();
+  const run = await repository.get(runId);
+  if (!run) throw new Error('Taskmaster run was not found.');
+  if (run.state !== 'AWAITING_APPROVAL') throw new Error(`Run is ${run.state}; rejection is not available.`);
+  const next = transition(run, 'REJECTED', 'Proposals rejected by user');
+  await repository.save({ ...next, progress: 100 });
+  return next;
+}
+
+export async function cancelTaskmasterRun(
+  runId: string,
+  repository?: TaskmasterRunRepository,
+): Promise<TaskmasterRunRecord> {
+  repository ||= await getTaskmasterRunRepository();
+  const run = await repository.get(runId);
+  if (!run) throw new Error('Taskmaster run was not found.');
+  if (!allowedTaskmasterTransitions[run.state].includes('CANCELLED')) throw new Error(`Run is ${run.state}; cancellation is not available.`);
+  const next = transition(run, 'CANCELLED', 'Cancelled by user');
+  await repository.save({ ...next, progress: 100 });
+  return next;
+}

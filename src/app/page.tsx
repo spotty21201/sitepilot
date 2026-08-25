@@ -9,6 +9,7 @@ import { ScenarioControls } from '@/components/ScenarioControls';
 import { DecisionRoomSummary } from '@/components/DecisionRoomSummary';
 import { NewCaseModal } from '@/components/NewCaseModal';
 import { ScenarioComparisonModal } from '@/components/ScenarioComparisonModal';
+import { SchemeGenerationReview } from '@/components/SchemeGenerationReview';
 import { OpportunityInputsModal, type OpportunityInputUpdate } from '@/components/OpportunityInputsModal';
 import { 
   getCase, 
@@ -24,6 +25,9 @@ import {
 import { detectScenarioEditClassification } from '@/lib/geometry/engine';
 import { ArrowLeft, Compass, ShieldCheck } from 'lucide-react';
 import { Project, DevelopmentScenario, CaseSummary } from '@/types';
+import type { SchemePriorities } from '@/lib/schemes/proposal-contract';
+import { proposalGenerationInputFromProject } from '@/lib/schemes/proposal-contract';
+import type { PublicTaskmasterRun } from '@/lib/taskmaster/schemas';
 import {
   CanonicalSpatialCommand,
   CanonicalCommandResult,
@@ -35,6 +39,15 @@ import { deriveStreetName, synchronizeProjectDerivedState } from '@/lib/opportun
 
 function initializeProjectScenarios(rawProject: Project): Project {
   return ensureCanonicalProjectRevisions(synchronizeProjectDerivedState(rawProject));
+}
+
+function markUnacceptedSchemesStale(rawProject: Project): Project {
+  const generation = rawProject.schemeGeneration;
+  if (!generation || generation.status !== 'READY') return rawProject;
+  const hasUnacceptedProposal = generation.proposals.some((proposal) => proposal.id !== generation.acceptedProposalId);
+  return hasUnacceptedProposal
+    ? { ...rawProject, schemeGeneration: { ...generation, status: 'NEEDS_REGENERATION' } }
+    : rawProject;
 }
 
 function getInitialCases(): CaseSummary[] {
@@ -68,9 +81,13 @@ export default function SitePilotDecisionRoom() {
   const [isOpportunityInputsOpen, setIsOpportunityInputsOpen] = useState(false);
   const [isSpatialLabOpen, setIsSpatialLabOpen] = useState(false);
   const [isSpatialLabOpening, setIsSpatialLabOpening] = useState(false);
+  const [schemeGenerationProgress, setSchemeGenerationProgress] = useState<string | null>(null);
+  const [taskmasterRunState, setTaskmasterRunState] = useState<string | null>(null);
+  const [isSchemeReviewOpen, setIsSchemeReviewOpen] = useState(false);
   const [casesList, setCasesList] = useState<CaseSummary[]>(getInitialCases);
   const projectRef = useRef(project);
   const spatialLabOpenTimerRef = useRef<number | null>(null);
+  const taskmasterPollTimerRef = useRef<number | null>(null);
   const commandServiceRef = useRef(new CanonicalSpatialCommandService(saveCase));
   const [historyAvailability, setHistoryAvailability] = useState({
     caseId: project.id,
@@ -109,6 +126,60 @@ export default function SitePilotDecisionRoom() {
     setCasesList(listCases());
   }, [refreshHistoryAvailability, replaceProject]);
 
+  // A browser refresh can recover an in-flight run from the persisted run ID.
+  useEffect(() => {
+    const runId = project.taskmasterRunId;
+    if (!runId || project.schemeGeneration) return;
+    let cancelled = false;
+    void fetch(`/api/taskmaster/runs/${runId}`, { headers: { Accept: 'application/json' } })
+      .then((response) => response.json() as Promise<{ ok: boolean; run?: PublicTaskmasterRun }>)
+      .then((status) => {
+        if (cancelled || !status.ok || !status.run) return;
+        setTaskmasterRunState(status.run.state);
+        const recoveredLabels: Record<string, string> = {
+          QUEUED: 'Queued for Taskmaster',
+          PLANNING: 'Preparing site and planning inputs',
+          EXECUTING_TOOLS: 'Checking the study with bounded planning tools',
+          VALIDATING: 'Validating three study proposals',
+          FAILED_RETRYABLE: 'A temporary generation failure can be retried',
+          FAILED_FINAL: 'Generation failed; review the diagnostic details',
+          BLOCKED_STALE: 'The source study changed; regenerate before review',
+          CANCELLED: 'Taskmaster run cancelled',
+          REJECTED: 'Study proposals rejected; no accepted study was changed',
+        };
+        setSchemeGenerationProgress(recoveredLabels[status.run.state] || null);
+        if (status.run.state === 'AWAITING_APPROVAL' && status.run.generation) {
+          const generation = {
+            status: 'READY' as const,
+            taskmasterRunId: status.run.runId,
+            taskmasterState: status.run.state,
+            provider: status.run.generation.provider,
+            model: status.run.generation.model,
+            modelCalled: status.run.generation.modelCalled,
+            disclosure: status.run.generation.disclosure,
+            generatedAt: status.run.generation.generatedAt,
+            opportunityId: status.run.generation.opportunityId,
+            sourceStudyVersion: status.run.generation.sourceStudyVersion,
+            inputHash: status.run.generation.inputHash,
+            userPriorities: status.run.generation.userPriorities,
+            assumptions: status.run.generation.assumptions,
+            validation: status.run.generation.validation,
+            proposals: status.run.generation.proposals,
+          };
+          const updated = initializeProjectScenarios({
+            ...project,
+            schemeGeneration: generation,
+            scenarios: project.scenarios.map((scenario, index) => ({ ...scenario, proposal: status.run?.generation?.proposals[index], existingAssetStrategy: status.run?.generation?.proposals[index]?.existingAssetDecision || scenario.existingAssetStrategy })),
+          });
+          replaceProject(updated);
+          setSchemeGenerationProgress(null);
+          setIsSchemeReviewOpen(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [project, replaceProject]);
+
   // Non-editor aggregate updates still invalidate spatial history for the affected case.
   const updateProjectState = useCallback((updater: (prev: Project) => Project) => {
     const updated = ensureCanonicalProjectRevisions({
@@ -136,7 +207,7 @@ export default function SitePilotDecisionRoom() {
   }, [refreshHistoryAvailability, replaceProject]);
 
   // New Case Creation Handler
-  const handleCreateCase = useCallback((params: CreateCaseParams) => {
+  const handleCreateCase = useCallback((params: CreateCaseParams, priorities?: SchemePriorities) => {
     const newProj = createCase(params);
     const initialized = initializeProjectScenarios(newProj);
     replaceProject(initialized, false);
@@ -146,7 +217,192 @@ export default function SitePilotDecisionRoom() {
       refreshHistoryAvailability(initialized.id, preferredScen.id);
     }
     setCasesList(listCases());
+    if (!priorities) return;
+    setSchemeGenerationProgress('Preparing site and planning inputs');
+    const input = proposalGenerationInputFromProject(initialized, priorities);
+    const goal = initialized.objective || 'Create and compare three development schemes for this opportunity using the supplied site dimensions, existing assets, planning limits and development intent.';
+    void fetch('/api/taskmaster/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, goal, idempotencyKey: `${initialized.id}:${input.studyVersion}:${input.inputHash}` }),
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`Taskmaster run request failed (${response.status})`);
+      const result = await response.json() as { run: PublicTaskmasterRun };
+      const runId = result.run.runId;
+      const current = projectRef.current;
+      if (current.id === initialized.id) replaceProject({ ...current, taskmasterRunId: runId });
+      setSchemeGenerationProgress('Preparing site and planning inputs');
+      if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
+      const applyRunStatus = (run: PublicTaskmasterRun) => {
+        const labels: Record<string, string> = {
+          QUEUED: 'Queued for Taskmaster',
+          PLANNING: 'Preparing a bounded study plan',
+          EXECUTING_TOOLS: 'Inspecting inputs and simulating studies',
+          VALIDATING: 'Checking geometry and planning limits',
+          AWAITING_APPROVAL: 'Three development studies ready for review',
+          FAILED_RETRYABLE: 'Study generation needs a safe retry',
+          FAILED_FINAL: 'Study generation could not be completed',
+          BLOCKED_STALE: 'Study inputs changed; regeneration is required',
+        };
+        setTaskmasterRunState(run.state);
+        setSchemeGenerationProgress(labels[run.state] || 'Taskmaster is working');
+        if (run.state === 'AWAITING_APPROVAL' && run.generation) {
+          const currentProject = projectRef.current;
+          if (currentProject.id !== initialized.id) return;
+          const generation = {
+            status: 'READY' as const,
+            taskmasterRunId: run.runId,
+            taskmasterState: run.state,
+            provider: run.generation.provider,
+            model: run.generation.model,
+            modelCalled: run.generation.modelCalled,
+            disclosure: run.generation.disclosure,
+            generatedAt: run.generation.generatedAt,
+            opportunityId: run.generation.opportunityId,
+            sourceStudyVersion: run.generation.sourceStudyVersion,
+            inputHash: run.generation.inputHash,
+            userPriorities: run.generation.userPriorities,
+            assumptions: run.generation.assumptions,
+            validation: run.generation.validation,
+            proposals: run.generation.proposals,
+          };
+          const proposalByIndex = run.generation.proposals;
+          const updated = initializeProjectScenarios({
+            ...currentProject,
+            taskmasterRunId: run.runId,
+            schemeGeneration: generation,
+            scenarios: currentProject.scenarios.map((scenario, index) => ({
+              ...scenario,
+              proposal: proposalByIndex[index],
+              existingAssetStrategy: proposalByIndex[index]?.existingAssetDecision || scenario.existingAssetStrategy,
+            })),
+          });
+          replaceProject(updated);
+          setSchemeGenerationProgress(null);
+          setTaskmasterRunState(run.state);
+          setIsSchemeReviewOpen(true);
+          if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
+        }
+        if (['FAILED_FINAL', 'BLOCKED_STALE', 'CANCELLED'].includes(run.state)) {
+          if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
+        }
+      };
+      const poll = () => {
+        void fetch(`/api/taskmaster/runs/${runId}`, { headers: { Accept: 'application/json' } })
+          .then((response) => response.json() as Promise<{ ok: boolean; run?: PublicTaskmasterRun; error?: string }>)
+          .then((status) => { if (status.ok && status.run) applyRunStatus(status.run); })
+          .catch(() => setSchemeGenerationProgress('Taskmaster status is temporarily unavailable; the run remains persisted for retry.'));
+      };
+      taskmasterPollTimerRef.current = window.setInterval(poll, 400);
+      poll();
+    }).catch((error) => {
+      setSchemeGenerationProgress(`Scheme generation unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
+      setTaskmasterRunState('FAILED_FINAL');
+    });
   }, [refreshHistoryAvailability, replaceProject]);
+
+  const executeSpatialCommand = useCallback((command: CanonicalSpatialCommand): CanonicalCommandResult => {
+    const result = commandServiceRef.current.execute(projectRef.current, command);
+    if (!result.accepted) {
+      console.warn(`[SitePilot Spatial Command] ${result.code}: ${result.reason}`);
+      return result;
+    }
+    replaceProject(markUnacceptedSchemesStale(result.project), false);
+    refreshHistoryAvailability(result.project.id, command.scenarioId);
+    return result;
+  }, [refreshHistoryAvailability, replaceProject]);
+
+  const makeScenarioCommandBase = useCallback((scenarioId: string, targetId: string, prefix: string) => {
+    const scenario = projectRef.current.scenarios.find((item) => item.id === scenarioId);
+    if (!scenario?.canonicalRevision) return null;
+    return {
+      id: createCanonicalCommandId(prefix),
+      caseId: projectRef.current.id,
+      scenarioId,
+      targetId,
+      expectedSourceRevisionId: scenario.canonicalRevision.revisionId,
+      issuedAt: new Date().toISOString(),
+      source: 'LEGACY_EDITOR' as const,
+    };
+  }, []);
+
+  const handleAcceptGeneratedProposal = useCallback(async (proposalId: string) => {
+    const current = projectRef.current;
+    if (!current.schemeGeneration) return;
+    const runId = current.schemeGeneration.taskmasterRunId || current.taskmasterRunId;
+    if (runId) {
+      const approvalResponse = await fetch(`/api/taskmaster/runs/${runId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'APPROVED', proposalId, expectedStudyVersion: current.schemeGeneration.sourceStudyVersion }),
+      });
+      if (!approvalResponse.ok) {
+        const detail = await approvalResponse.json().catch(() => ({})) as { error?: string };
+        setSchemeGenerationProgress(detail.error || 'The study could not be accepted because it is stale.');
+        return;
+      }
+    }
+    const acceptedScenario = current.scenarios.find((scenario) => scenario.proposal?.id === proposalId);
+    if (!acceptedScenario) return;
+    const base = makeScenarioCommandBase(acceptedScenario.id, acceptedScenario.id, 'accept-scheme');
+    if (!base) return;
+    const accepted = executeSpatialCommand({
+      ...base,
+      type: 'ACCEPT_SCHEME_PROPOSAL',
+      payload: { proposalId },
+      description: `Accept ${acceptedScenario.name} for editing`,
+      source: 'SYSTEM',
+    });
+    if (!accepted.accepted) {
+      setSchemeGenerationProgress(accepted.reason);
+      return;
+    }
+    if (runId) {
+      const completionResponse = await fetch(`/api/taskmaster/runs/${runId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'APPROVED', proposalId, expectedStudyVersion: current.schemeGeneration.sourceStudyVersion, acceptedStudyVersion: current.schemeGeneration.sourceStudyVersion, applied: true }),
+      });
+      if (!completionResponse.ok) {
+        setSchemeGenerationProgress('The accepted study was saved locally, but the run completion record could not be finalized.');
+      }
+    }
+    const updated = accepted.project;
+    setIsSchemeReviewOpen(false);
+    setActiveScenarioId(acceptedScenario.id);
+    refreshHistoryAvailability(updated.id, acceptedScenario.id);
+  }, [executeSpatialCommand, makeScenarioCommandBase, refreshHistoryAvailability]);
+
+  const handleRejectGeneratedProposals = useCallback(async () => {
+    const current = projectRef.current;
+    const runId = current.schemeGeneration?.taskmasterRunId || current.taskmasterRunId;
+    if (runId) {
+      await fetch(`/api/taskmaster/runs/${runId}/approval`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision: 'REJECTED' }),
+      });
+    }
+    setIsSchemeReviewOpen(false);
+  }, []);
+
+  const handleCancelTaskmaster = useCallback(async () => {
+    const runId = projectRef.current.schemeGeneration?.taskmasterRunId || projectRef.current.taskmasterRunId;
+    if (!runId) return;
+    await fetch(`/api/taskmaster/runs/${runId}/cancel`, { method: 'POST' });
+    setTaskmasterRunState('CANCELLED');
+    setSchemeGenerationProgress('Taskmaster run cancelled');
+    if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
+  }, []);
+
+  const handleRetryTaskmaster = useCallback(async () => {
+    const runId = projectRef.current.schemeGeneration?.taskmasterRunId || projectRef.current.taskmasterRunId;
+    if (!runId) return;
+    const response = await fetch(`/api/taskmaster/runs/${runId}/retry`, { method: 'POST' });
+    if (!response.ok) return;
+    setTaskmasterRunState('QUEUED');
+    setSchemeGenerationProgress('Queued for a safe retry');
+  }, []);
 
   // Reset Demo Case Handler
   const handleResetDemo = useCallback(() => {
@@ -206,11 +462,16 @@ export default function SitePilotDecisionRoom() {
   const handleOpportunityInputUpdate = useCallback((update: OpportunityInputUpdate) => {
     updateProjectState((previous) => {
       const street = deriveStreetName(previous.location.address, update.manualStreetName);
-      const planningChanged = previous.zoningLimits?.maxHeightMeters !== update.maxHeightMeters
+      const planningChanged = previous.site.grossSiteArea !== update.parcel.siteAreaM2
+        || previous.site.frontageLength !== update.parcel.frontageMeters
+        || previous.site.lotDepth !== update.parcel.depthMeters
+        || previous.zoningLimits?.maxHeightMeters !== update.maxHeightMeters
         || previous.zoningLimits?.maxFAR !== update.maxFAR
         || previous.zoningLimits?.maxCoveragePct !== update.maxCoveragePct
         || previous.zoningLimits?.minKDHPct !== update.minKDHPct
+        || previous.site.landscapedPermeableAreaM2 !== update.landscapedPermeableAreaM2
         || previous.zoningLimits?.setbacks.front !== update.frontSetbackMeters
+        || previous.zoningLimits?.setbacks.rear !== update.rearSetbackMeters
         || previous.zoningLimits?.setbacks.sideLeft !== update.sideSetbackMeters
         || previous.zoningLimits?.setbacks.sideRight !== update.sideSetbackMeters;
       const verifiedArea = previous.findings.find((finding) => finding.extractedValue?.key === 'gross_site_area'
@@ -225,6 +486,7 @@ export default function SitePilotDecisionRoom() {
       const sharedSetbacks = {
         ...previous.site.setbacks,
         front: update.frontSetbackMeters,
+        rear: update.rearSetbackMeters,
         sideLeft: update.sideSetbackMeters,
         sideRight: update.sideSetbackMeters,
       };
@@ -306,7 +568,11 @@ export default function SitePilotDecisionRoom() {
           streetNameSource: street.source,
           hasZoningEvidence: planningChanged ? false : previous.site.hasZoningEvidence,
           setbacks: sharedSetbacks,
+          landscapedPermeableAreaM2: update.landscapedPermeableAreaM2,
         },
+        schemeGeneration: previous.schemeGeneration && planningChanged
+          ? { ...previous.schemeGeneration, status: 'NEEDS_REGENERATION' as const }
+          : previous.schemeGeneration,
         zoningLimits: {
           zoneCode: previous.zoningLimits?.zoneCode,
           zoneName: previous.zoningLimits?.zoneName,
@@ -362,37 +628,13 @@ export default function SitePilotDecisionRoom() {
     if (spatialLabOpenTimerRef.current !== null) {
       window.clearTimeout(spatialLabOpenTimerRef.current);
     }
+    if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
   }, []);
-
-  const executeSpatialCommand = useCallback((command: CanonicalSpatialCommand): CanonicalCommandResult => {
-    const result = commandServiceRef.current.execute(projectRef.current, command);
-    if (!result.accepted) {
-      console.warn(`[SitePilot Spatial Command] ${result.code}: ${result.reason}`);
-      return result;
-    }
-    replaceProject(result.project, false);
-    refreshHistoryAvailability(result.project.id, command.scenarioId);
-    return result;
-  }, [refreshHistoryAvailability, replaceProject]);
 
   const handleSpatialCommand = useCallback(
     (command: CanonicalSpatialCommand): boolean => executeSpatialCommand(command).accepted,
     [executeSpatialCommand],
   );
-
-  const makeScenarioCommandBase = useCallback((scenarioId: string, targetId: string, prefix: string) => {
-    const scenario = projectRef.current.scenarios.find((item) => item.id === scenarioId);
-    if (!scenario?.canonicalRevision) return null;
-    return {
-      id: createCanonicalCommandId(prefix),
-      caseId: projectRef.current.id,
-      scenarioId,
-      targetId,
-      expectedSourceRevisionId: scenario.canonicalRevision.revisionId,
-      issuedAt: new Date().toISOString(),
-      source: 'LEGACY_EDITOR' as const,
-    };
-  }, []);
 
   const handleUndoSpatialCommand = useCallback((scenarioId: string) => {
     const current = projectRef.current;
@@ -403,7 +645,7 @@ export default function SitePilotDecisionRoom() {
       new Date().toISOString()
     );
     if (!result.accepted) return;
-    replaceProject(result.project, false);
+    replaceProject(markUnacceptedSchemesStale(result.project), false);
     refreshHistoryAvailability(result.project.id, scenarioId);
   }, [refreshHistoryAvailability, replaceProject]);
 
@@ -416,14 +658,14 @@ export default function SitePilotDecisionRoom() {
       new Date().toISOString()
     );
     if (!result.accepted) return;
-    replaceProject(result.project, false);
+    replaceProject(markUnacceptedSchemesStale(result.project), false);
     refreshHistoryAvailability(result.project.id, scenarioId);
   }, [refreshHistoryAvailability, replaceProject]);
 
   // Handle independent scenario parameters through canonical commands.
   const handleUpdateScenarioParam = (
     scenarioId: string, 
-    param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback',
+    param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback' | 'rearSetback',
     value: number
   ) => {
     const scenario = projectRef.current.scenarios.find((item) => item.id === scenarioId);
@@ -442,9 +684,11 @@ export default function SitePilotDecisionRoom() {
           payload: {
             setbacks: param === 'frontSetback'
               ? { ...scenario.assumptionsUsed.setbacks, front: value }
-              : { ...scenario.assumptionsUsed.setbacks, sideLeft: value, sideRight: value },
+              : param === 'sideSetback'
+                ? { ...scenario.assumptionsUsed.setbacks, sideLeft: value, sideRight: value }
+                : { ...scenario.assumptionsUsed.setbacks, rear: value },
           },
-          description: `Set ${scenario.name} ${param === 'frontSetback' ? 'front' : 'symmetric side'} setback to ${value}m`,
+          description: `Set ${scenario.name} ${param === 'frontSetback' ? 'front' : param === 'sideSetback' ? 'symmetric side' : 'rear'} setback to ${value}m`,
         };
     handleSpatialCommand(command);
   };
@@ -536,6 +780,31 @@ export default function SitePilotDecisionRoom() {
         onOpenSpatialLab={handleOpenSpatialLab}
         isSpatialLabOpening={isSpatialLabOpening}
       />
+
+      {schemeGenerationProgress && (
+        <div className="mx-3.5 mt-2 flex min-h-[38px] items-center justify-between gap-3 rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[10px] text-[var(--text-secondary)]" role="status">
+          <span className="truncate"><strong className="text-[var(--text-primary)]">Taskmaster</strong> · {schemeGenerationProgress}</span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {taskmasterRunState === 'FAILED_RETRYABLE' && <button type="button" className="button-secondary px-2 py-1 text-[10px]" onClick={() => void handleRetryTaskmaster()}>Retry</button>}
+            {['QUEUED', 'PLANNING', 'EXECUTING_TOOLS', 'VALIDATING'].includes(taskmasterRunState || '') && <button type="button" className="button-secondary px-2 py-1 text-[10px]" onClick={() => void handleCancelTaskmaster()}>Cancel</button>}
+          </span>
+        </div>
+      )}
+      {project.schemeGeneration && (
+        <SchemeGenerationReview
+          generation={project.schemeGeneration}
+          onAccept={handleAcceptGeneratedProposal}
+          onReject={handleRejectGeneratedProposals}
+          isOpen={isSchemeReviewOpen}
+          onOpen={() => setIsSchemeReviewOpen(true)}
+          onClose={() => setIsSchemeReviewOpen(false)}
+          scenarios={project.scenarios}
+          selectedScenario={activeScenario}
+          baselineSummary={project.existingAsset
+            ? `${project.existingAsset.gfa.toLocaleString()} m² recorded existing asset${project.existingAsset.floors ? ` · ${project.existingAsset.floors} storeys` : ''}; provided by the user and not yet confirmed.`
+            : 'No existing asset was supplied; the low-rise reference is a study baseline.'}
+        />
+      )}
 
       {/* Main Responsive 3-Column Decision Workspace */}
       {isSpatialLabOpen ? (
