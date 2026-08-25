@@ -1,22 +1,23 @@
 # SitePilot Taskmaster deployment plan
 
-This document describes the owner-authorization boundary for the bounded Taskmaster workflow. It is preparation only: this pass does not create Google Cloud resources, change IAM, deploy Cloud Run, or invoke paid Gemini inference.
+This document describes the bounded Taskmaster workflow and its non-production Google Cloud deployment. The hosted infrastructure below is limited to deterministic/mock execution; live Gemini inference remains separately unauthorized.
 
 ## Infrastructure gate — 25 August 2026
 
-The authenticated Sentani inspection identified `project-528f858c-325a-45aa-ac0` as the active project. Firestore and Cloud Tasks APIs were not enabled, so those two APIs were enabled as the only infrastructure change in this pass. No database, queue, service account, IAM binding, hosted variable, deployment, or model call was made.
+The authenticated Sentani inspection identified `project-528f858c-325a-45aa-ac0` as the active project. Firestore and Cloud Tasks APIs were enabled, then the owner-authorized non-production resources were created in `asia-southeast2`. No production service or Vercel environment was changed, and no model call was made.
 
 The read-only inventory found:
 
-- **Firestore:** no database is currently listed. `asia-southeast2` is a valid Firestore location, but creation remains blocked pending owner confirmation because the location is difficult to change later.
-- **Cloud Tasks:** no queue is currently listed in `asia-southeast2`.
+- **Firestore:** Native database `(default)` exists in `asia-southeast2`, with optimistic concurrency, delete protection enabled, PITR disabled and free tier enabled.
+- **Cloud Tasks:** queue `sitepilot-taskmaster` exists in `asia-southeast2`, with one dispatch/one concurrent task, three maximum attempts, five-second minimum backoff and 30-second maximum backoff.
 - **Cloud Run:** existing `sitepilot-vertex` remains at 100% traffic on `sitepilot-vertex-00002-4wd`, using `sitepilot-runner`, with image digest `sha256:8f0034901aba58e4b8db1b7944e8e7fd39acd751302c4d2c95df9298f5cce6fa`. Its current IAM policy is public (`allUsers` / `roles/run.invoker`) and it must not be changed by this slice. The proposed `sitepilot-taskmaster` service does not conflict by name.
 - **Artifact Registry:** existing `sitepilot` and `sitepilot-repo` Docker repositories are present in `asia-southeast2`.
-- **Cloud Build:** recent builds exist for the existing Vertex gateway; no Taskmaster image has been built.
+- **Cloud Build:** Taskmaster image build `91d148e8-c269-43ec-afa4-816171a3ca54` completed successfully. The immutable image digest is `sha256:cda7ecfb17461ea2c3b98b28a1c462cab9d6ab3eacbaedafce849bfda9000519`.
 - **Logging:** read access was confirmed for existing Cloud Run revision logs.
-- **IAM:** the project has an existing Owner user binding and broad legacy Run Admin/build bindings. No roles were broadened or removed. The least-privilege Taskmaster identities remain uncreated.
+- **IAM:** dedicated identities now exist: `sitepilot-taskmaster-runtime` and `sitepilot-taskmaster-invoker`. The runtime has Firestore user, logging writer and queue-level task-enqueuer permissions; it may act as the invoker identity. The invoker identity is intended only for Cloud Run invocation. Existing broad legacy bindings and the public `sitepilot-vertex` service were not changed.
+- **Taskmaster worker:** private Cloud Run service `sitepilot-taskmaster` is serving revision `sitepilot-taskmaster-00003-dp2` from image digest `sha256:cda7ecfb17461ea2c3b98b28a1c462cab9d6ab3eacbaedafce849bfda9000519`, with the dedicated runtime identity, one maximum instance, one concurrent request and scale-to-zero.
 
-Before applying the hosted slice, the owner must confirm `asia-southeast2` as the Firestore location. The first commands after that confirmation should be:
+The location gate was satisfied by the owner authorization because `asia-southeast2` is a supported location and no existing database or conflicting default resource was present. The inspection commands were:
 
 ```bash
 gcloud auth list
@@ -26,7 +27,13 @@ gcloud tasks queues list --location=asia-southeast2 --project=project-528f858c-3
 gcloud run services list --region=asia-southeast2 --project=project-528f858c-325a-45aa-ac0
 ```
 
-Do not create a Firestore database until its location is confirmed. If the owner confirms `asia-southeast2`, create the database and record its ID/mode before creating the queue or worker. This gate is not evidence of hosted Taskmaster execution.
+The database was created before the queue and worker. This inventory is not itself evidence of hosted Taskmaster execution; that requires the deterministic mock workflow below.
+
+## Hosted deterministic/mock evidence — 25 August 2026
+
+Using synthetic Central Jakarta data only, the private worker was exercised through a real Cloud Tasks delivery. Run `tm-hosted-smoke-20260825` (`corr-hosted-smoke-20260825`) reached `AWAITING_APPROVAL` with three persisted proposals, nine bounded tool activities and provider `LOCAL_DEVELOPMENT`; `modelCalled=false`. A second run, `tm-hosted-resume-20260825`, began from a persisted `FAILED_RETRYABLE` checkpoint and resumed to `AWAITING_APPROVAL` with `retryCount=1` and three proposals. Recreating the first deterministic task name returned `ALREADY_EXISTS`, and the run remained at revision 25 with three proposals. Direct unauthenticated worker access returned HTTP 403. Cloud Logging contained only structured run/correlation/provider/model fields for the observed deliveries; no secrets, prompts or opportunity documents were logged.
+
+This proves the Firestore/Cloud Tasks/private Cloud Run deterministic boundary only. It is not live Gemini or Vertex AI evidence.
 
 ## Local behavior
 
@@ -39,7 +46,7 @@ Do not create a Firestore database until its location is confirmed. If the owner
 ## Google services and APIs required for an authorized hosted test
 
 1. Vertex AI API (`aiplatform.googleapis.com`) for Gemini through Vertex AI.
-2. Firestore API (`firestore.googleapis.com`) for `sitepilot_taskmaster_runs`.
+2. Firestore API (`firestore.googleapis.com`) for `taskmasterRuns` and `taskmasterIdempotency`.
 3. Cloud Tasks API (`cloudtasks.googleapis.com`) for the Taskmaster queue.
 4. Cloud Run API (`run.googleapis.com`) for the authenticated worker.
 5. Cloud Build and Artifact Registry APIs for the existing build path.
@@ -73,19 +80,19 @@ Use separate least-privilege service identities:
 
 - Cloud Run worker: Vertex AI User, Firestore User, Cloud Logging Writer.
 - Task enqueueing service: Cloud Tasks Enqueuer on the selected queue.
-- Cloud Tasks service agent: Cloud Run Invoker on the worker target.
+- Cloud Tasks delivery uses the dedicated `sitepilot-taskmaster-invoker` service account with `roles/run.invoker` on the Taskmaster service. The Cloud Tasks service agent has only `roles/iam.serviceAccountUser` on that identity so it can mint the OIDC token. The runtime identity has queue-level enqueue permission and `roles/iam.serviceAccountUser` on the invoker identity.
 - Cloud Build identity: existing Artifact Registry writer and Cloud Run deployer roles only where already approved.
 
 Do not expose the worker as publicly writable. Validate Cloud Tasks OIDC audience and the server-side worker secret at the boundary; the `x-sitepilot-taskmaster: cloud-task` marker alone is not accepted in production.
 
 ## Deployment sequence
 
-1. Create or verify the Firestore Native database in the owner-approved location and use the `taskmasterRuns` / `taskmasterIdempotency` collections.
-2. Create the `sitepilot-taskmaster` queue with a bounded retry policy and rate limit.
-3. Deploy the private worker revision with the dedicated runtime identity and OIDC task identity.
-4. Deploy the application revision with the enqueue/status/approval routes enabled.
-5. Run one synthetic Central Jakarta case; capture run ID, source study version, provider/model metadata, task name, Cloud Run revision, and redacted logs.
-6. Verify a duplicate task delivery, a retryable failure, a stale approval, a human rejection, and a successful approval/completion.
+1. ~~Create or verify the Firestore Native database~~ — complete for `(default)` in `asia-southeast2`; use `taskmasterRuns` / `taskmasterIdempotency`.
+2. ~~Create the `sitepilot-taskmaster` queue~~ — complete with bounded retry policy and rate limit.
+3. ~~Deploy the private worker revision~~ — complete as `sitepilot-taskmaster-00003-dp2` with the dedicated runtime and OIDC task identity.
+4. Deploy the Vercel/server application revision with the enqueue/status/approval routes enabled; this remains outside the current hosted infrastructure pass.
+5. ~~Run one synthetic Central Jakarta case~~ — complete for deterministic/mock execution; capture run IDs, source study versions, provider/model metadata, task names, revision and redacted logs.
+6. Duplicate-name protection and persisted retry resume are verified. Stale approval, rejection and accepted-study application remain application-level checks to run before enabling a live model path.
 
 No step should use a confidential opportunity or an unbounded prompt.
 
@@ -107,4 +114,4 @@ No step should use a confidential opportunity or an unbounded prompt.
 
 ## Authorization gate
 
-The non-production Firestore database, queue, dedicated service accounts and worker deployment are now authorized and may be created only in the project/region recorded above. Live Gemini inference remains separately unauthorized. Vercel remains outside this boundary.
+The non-production Firestore database, queue, dedicated service identities and private Taskmaster worker were created only in the project/region recorded above. Live Gemini inference remains separately unauthorized. Vercel remains outside this boundary.
