@@ -1,0 +1,75 @@
+%% SitePilot technical architecture — source revision c73d5011d42d08199b3c85678c92b1fd6e8138b2 + current worktree
+%% Solid = implemented/local evidence; dashed = configured but not live-verified; dotted = proposed next work.
+
+flowchart LR
+  classDef user fill:#e8edf4,stroke:#52627a,color:#172033,stroke-width:1.5px
+  classDef browser fill:#132238,stroke:#7fa8ca,color:#f7fafc,stroke-width:1.5px
+  classDef service fill:#e8f0f6,stroke:#52738f,color:#172033,stroke-width:1.5px
+  classDef state fill:#f7f1df,stroke:#b08a34,color:#172033,stroke-width:1.5px
+  classDef output fill:#e8f3ec,stroke:#3d8d64,color:#172033,stroke-width:1.5px
+  classDef google fill:#fff2e5,stroke:#d27b2e,color:#172033,stroke-width:1.5px
+  classDef proposed fill:#f2f3f5,stroke:#7b8490,color:#4c5561,stroke-dasharray:3 3
+
+  subgraph U[Users]
+    U1[Urban designer]
+    U2[Planner / architect]
+    U3[Development manager / investor]
+  end
+  subgraph B[Browser application · Vercel testing build]
+    I[Opportunity intake]
+    R[Decision Room]
+    V[2D plan + 3D Spatial Console]
+    C[Development Scenarios]
+    E[Executive Brief + Sources & Assumptions]
+    G[Scheme generation review]
+  end
+  subgraph S[Deterministic study services]
+    N[Input normalization + Zod validation]
+    K[Canonical spatial commands + revisions]
+    M[Geometry, GFA, FAR/KLB, KDB, KDH, height, setbacks]
+    P[Planning checks + warnings]
+    X[CSV / PDF / DAE generation]
+  end
+  subgraph L[Browser-local state]
+    L1[Active opportunity]
+    L2[Options A / B / C]
+    L3[Accepted study + history]
+    L4[localStorage repository]
+  end
+  O1[PDF report]
+  O2[CSV comparison]
+  O3[Simulation images]
+  O4[Metre-scale Z_UP DAE]
+  U1 --> I; U2 --> I; U3 --> I
+  I --> N --> G --> R
+  R --> C --> V
+  R --> E
+  G --> L2
+  R --> K --> M --> P
+  K --> L3 --> L4
+  M --> V
+  P --> C
+  M --> X --> O1; X --> O2; X --> O3; X --> O4
+  L1 --> L2; L4 --> L1
+  class U1,U2,U3 user
+  class I,R,V,C,E,G browser
+  class N,K,M,P,X service
+  class L1,L2,L3,L4 state
+  class O1,O2,O3,O4 output
+
+  subgraph GCP[Optional Google Cloud path · configured, not live-verified]
+    CR[Cloud Run gateway]
+    VA[Vertex AI via @google/genai]
+    CB[Cloud Build + Artifact Registry]
+  end
+  G -. optional authenticated assessment .-> CR -.-> VA
+  CB -. deploys .-> CR
+  class CR,VA,CB google
+
+  subgraph Next[Recommended next]
+    DB[Firestore / Cloud Storage persistence]
+    MAP[Maps / Geocoding / Places context]
+    AG[Persisted Taskmaster run]
+  end
+  L4 -.-> DB; I -.-> MAP; G -.-> AG
+  class DB,MAP,AG proposed
