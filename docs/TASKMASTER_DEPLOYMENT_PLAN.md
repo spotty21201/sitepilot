@@ -1,6 +1,6 @@
 # SitePilot Taskmaster deployment plan
 
-This document describes the bounded Taskmaster workflow and its non-production Google Cloud deployment. The hosted infrastructure below is limited to deterministic/mock execution; live Gemini inference remains separately unauthorized.
+This document describes the bounded Taskmaster workflow and its non-production Google Cloud deployment. The hosted infrastructure is restricted to synthetic data. A single owner-authorized live Vertex AI run was performed on 25 August 2026; the worker was restored to deterministic/template fallback immediately afterwards.
 
 ## Infrastructure gate — 25 August 2026
 
@@ -35,6 +35,23 @@ Using synthetic Central Jakarta data only, the private worker was exercised thro
 
 This proves the Firestore/Cloud Tasks/private Cloud Run deterministic boundary only. It is not live Gemini or Vertex AI evidence.
 
+## Owner-authorized live Vertex AI evidence — 25 August 2026
+
+One post-packaging synthetic run used the existing runtime identity and no API key or service-account key:
+
+- **Project/region:** `project-528f858c-325a-45aa-ac0` / Cloud Run and Cloud Tasks `asia-southeast2`; Vertex location `global`.
+- **Run:** `tm-live-gemini-20260825-actual2`; correlation ID `corr-tm-live-gemini-20260825-actual2`.
+- **Task:** `taskmaster-tm-live-gemini-20260825-actual2` on queue `sitepilot-taskmaster`.
+- **Worker:** revision `sitepilot-taskmaster-00012-6zj`, image digest `sha256:bf50c1fd2d6cd515d2142d5333671fbe1adcf41e624c09deec3e9766fb1053b8`.
+- **Provider/model:** `VERTEX_AI` / `gemini-3.7-flash`; the run recorded `modelCalled=true` and `modelCallCount=2` (ADK planning phase plus structured proposal phase).
+- **Result:** Firestore recorded 19 events, six bounded tool activities and three persisted proposals, then stopped at `AWAITING_APPROVAL`. No proposal was applied to an accepted study.
+- **Deterministic authority:** SitePilot calculated all three simulations. The results were `OUTSIDE_SUPPLIED_LIMITS` where the model proposals exceeded supplied FAR/height or triggered collisions; KDH remained `not demonstrated` because no explicit landscaped/permeable input was supplied.
+- **Audit:** Cloud Logging contained correlation/run/state/provider/model metadata and ADK request markers, but no prompts, secrets or private documents. Firestore retained the structured proposals and simulations; hidden reasoning was not stored.
+
+The application-level counter is not a transport-level inference meter. Cloud Run logs contained seven ADK `Sending out request` events during this run, so the configured two logical model phases did **not** prove a hard two-request transport cap. Token usage and estimated cost were not returned or persisted by the current adapter and are therefore **unavailable**, not estimated. No repair, fallback or approval occurred.
+
+The live run exposed two follow-up engineering items: the ADK runtime currently emits a deprecation warning for `GOOGLE_GENAI_USE_VERTEXAI` (future runs should adopt the supported enterprise marker after source review), and the request budget needs enforcement at the provider boundary rather than only at the logical phase counter.
+
 ## Local behavior
 
 - `@google/adk@2.0.0` is pinned as the official TypeScript Agent Development Kit.
@@ -68,7 +85,7 @@ Set these only in an owner-approved non-production environment:
 - `TASKMASTER_WORKER_SECRET=<server-side-only-secret>`
 - `TASKMASTER_MAX_TOOL_CALLS=16`
 - `TASKMASTER_MAX_RETRIES=2`
-- `TASKMASTER_MAX_MODEL_CALLS=3` (ADK planning, structured proposals, and at most one repair)
+- `TASKMASTER_MAX_MODEL_CALLS=2` for the bounded first live test (the application counter covers logical ADK planning and structured proposal phases; transport-level enforcement remains a follow-up)
 - `TASKMASTER_MAX_DURATION_MS=30000`
 - `TASKMASTER_MAX_OUTPUT_TOKENS=4096`
 
@@ -91,7 +108,7 @@ Do not expose the worker as publicly writable. Validate Cloud Tasks OIDC audienc
 2. ~~Create the `sitepilot-taskmaster` queue~~ — complete with bounded retry policy and rate limit.
 3. ~~Deploy the private worker revision~~ — complete as `sitepilot-taskmaster-00004-qrv` with the dedicated runtime and OIDC task identity.
 4. Deploy the Vercel/server application revision with the enqueue/status/approval routes enabled; this remains outside the current hosted infrastructure pass.
-5. ~~Run one synthetic Central Jakarta case~~ — complete for deterministic/mock execution; capture run IDs, source study versions, provider/model metadata, task names, revision and redacted logs.
+5. ~~Run one synthetic Central Jakarta case~~ — deterministic/mock execution and one owner-authorized Vertex AI execution are complete. Capture run IDs, source study versions, provider/model metadata, task names, revision and redacted logs; do not treat the live run as approval or production integration.
 6. Duplicate-name protection and persisted retry resume are verified. Stale approval, rejection and accepted-study application remain application-level checks to run before enabling a live model path.
 
 No step should use a confidential opportunity or an unbounded prompt.
@@ -112,6 +129,10 @@ No step should use a confidential opportunity or an unbounded prompt.
 4. Restore the prior application revision or feature-flag the Taskmaster route off.
 5. Confirm browser-local accepted studies and exports remain unchanged.
 
+## Restoration after live test
+
+The worker was restored to fallback revision `sitepilot-taskmaster-00013-drs` using the same immutable image digest, with `TASKMASTER_ALLOW_LIVE_MODEL=false`, `TASKMASTER_ALLOW_MODEL_REPAIR=false`, `TASKMASTER_MAX_MODEL_CALLS=0`, `GOOGLE_CLOUD_LOCATION=asia-southeast2`, scale-to-zero and maximum one instance. The Cloud Tasks queue was restored to three maximum attempts, one dispatch per second and one concurrent dispatch. Direct unauthenticated worker access still returns HTTP 403. The synthetic live run remains in Firestore at `AWAITING_APPROVAL` for audit; no accepted study was changed.
+
 ## Authorization gate
 
-The non-production Firestore database, queue, dedicated service identities and private Taskmaster worker were created only in the project/region recorded above. Live Gemini inference remains separately unauthorized. Vercel remains outside this boundary.
+The non-production Firestore database, queue, dedicated service identities and private Taskmaster worker were used only in the project/region recorded above. Vercel, `main`, production aliases, IAM administration and billing configuration remain outside this boundary. A future live run requires explicit owner authorization, a transport-level request budget, token/cost telemetry, and review of the ADK environment marker.
