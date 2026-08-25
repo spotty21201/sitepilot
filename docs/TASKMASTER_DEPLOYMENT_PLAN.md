@@ -12,10 +12,10 @@ The read-only inventory found:
 - **Cloud Tasks:** queue `sitepilot-taskmaster` exists in `asia-southeast2`, with one dispatch/one concurrent task, three maximum attempts, five-second minimum backoff and 30-second maximum backoff.
 - **Cloud Run:** existing `sitepilot-vertex` remains at 100% traffic on `sitepilot-vertex-00002-4wd`, using `sitepilot-runner`, with image digest `sha256:8f0034901aba58e4b8db1b7944e8e7fd39acd751302c4d2c95df9298f5cce6fa`. Its current IAM policy is public (`allUsers` / `roles/run.invoker`) and it must not be changed by this slice. The proposed `sitepilot-taskmaster` service does not conflict by name.
 - **Artifact Registry:** existing `sitepilot` and `sitepilot-repo` Docker repositories are present in `asia-southeast2`.
-- **Cloud Build:** Taskmaster image build `91d148e8-c269-43ec-afa4-816171a3ca54` completed successfully. The immutable image digest is `sha256:cda7ecfb17461ea2c3b98b28a1c462cab9d6ab3eacbaedafce849bfda9000519`.
+- **Cloud Build:** Taskmaster image build `3bf4e08b-30d1-4634-b09a-55990b4b2fb9` completed successfully. The current immutable image digest is `sha256:13f99cd7d28955af75ee604dfcbabb32ffac7629858dbd53d44d8f026023dded`.
 - **Logging:** read access was confirmed for existing Cloud Run revision logs.
 - **IAM:** dedicated identities now exist: `sitepilot-taskmaster-runtime` and `sitepilot-taskmaster-invoker`. The runtime has Firestore user, logging writer and queue-level task-enqueuer permissions; it may act as the invoker identity. The invoker identity is intended only for Cloud Run invocation. Existing broad legacy bindings and the public `sitepilot-vertex` service were not changed.
-- **Taskmaster worker:** private Cloud Run service `sitepilot-taskmaster` is serving revision `sitepilot-taskmaster-00003-dp2` from image digest `sha256:cda7ecfb17461ea2c3b98b28a1c462cab9d6ab3eacbaedafce849bfda9000519`, with the dedicated runtime identity, one maximum instance, one concurrent request and scale-to-zero.
+- **Taskmaster worker:** private Cloud Run service `sitepilot-taskmaster` is serving revision `sitepilot-taskmaster-00004-qrv` from image digest `sha256:13f99cd7d28955af75ee604dfcbabb32ffac7629858dbd53d44d8f026023dded`, with the dedicated runtime identity, one maximum instance, one concurrent request and scale-to-zero.
 
 The location gate was satisfied by the owner authorization because `asia-southeast2` is a supported location and no existing database or conflicting default resource was present. The inspection commands were:
 
@@ -31,7 +31,7 @@ The database was created before the queue and worker. This inventory is not itse
 
 ## Hosted deterministic/mock evidence — 25 August 2026
 
-Using synthetic Central Jakarta data only, the private worker was exercised through a real Cloud Tasks delivery. Run `tm-hosted-smoke-20260825` (`corr-hosted-smoke-20260825`) reached `AWAITING_APPROVAL` with three persisted proposals, nine bounded tool activities and provider `LOCAL_DEVELOPMENT`; `modelCalled=false`. A second run, `tm-hosted-resume-20260825`, began from a persisted `FAILED_RETRYABLE` checkpoint and resumed to `AWAITING_APPROVAL` with `retryCount=1` and three proposals. Recreating the first deterministic task name returned `ALREADY_EXISTS`, and the run remained at revision 25 with three proposals. Direct unauthenticated worker access returned HTTP 403. Cloud Logging contained only structured run/correlation/provider/model fields for the observed deliveries; no secrets, prompts or opportunity documents were logged.
+Using synthetic Central Jakarta data only, the private worker was exercised through real Cloud Tasks deliveries. Run `tm-hosted-smoke-324aea9` (`corr-hosted-324aea9`) on revision `sitepilot-taskmaster-00004-qrv` reached `AWAITING_APPROVAL` with three Firestore proposals, nine bounded tool activities and provider `LOCAL_DEVELOPMENT`; `modelCalled=false`. Earlier runs `tm-hosted-smoke-20260825` and `tm-hosted-resume-20260825` established duplicate-name protection and resume from a persisted `FAILED_RETRYABLE` checkpoint. Recreating the first deterministic task name returned `ALREADY_EXISTS`, and its run remained at revision 25 with three proposals. Direct unauthenticated worker access returned HTTP 403. Cloud Logging contained only structured run/correlation/provider/model fields for the observed deliveries; no secrets, prompts or opportunity documents were logged.
 
 This proves the Firestore/Cloud Tasks/private Cloud Run deterministic boundary only. It is not live Gemini or Vertex AI evidence.
 
@@ -89,7 +89,7 @@ Do not expose the worker as publicly writable. Validate Cloud Tasks OIDC audienc
 
 1. ~~Create or verify the Firestore Native database~~ — complete for `(default)` in `asia-southeast2`; use `taskmasterRuns` / `taskmasterIdempotency`.
 2. ~~Create the `sitepilot-taskmaster` queue~~ — complete with bounded retry policy and rate limit.
-3. ~~Deploy the private worker revision~~ — complete as `sitepilot-taskmaster-00003-dp2` with the dedicated runtime and OIDC task identity.
+3. ~~Deploy the private worker revision~~ — complete as `sitepilot-taskmaster-00004-qrv` with the dedicated runtime and OIDC task identity.
 4. Deploy the Vercel/server application revision with the enqueue/status/approval routes enabled; this remains outside the current hosted infrastructure pass.
 5. ~~Run one synthetic Central Jakarta case~~ — complete for deterministic/mock execution; capture run IDs, source study versions, provider/model metadata, task names, revision and redacted logs.
 6. Duplicate-name protection and persisted retry resume are verified. Stale approval, rejection and accepted-study application remain application-level checks to run before enabling a live model path.

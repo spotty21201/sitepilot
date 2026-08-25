@@ -1,12 +1,12 @@
 # SitePilot Google technology inventory and gap register
 
-Source revision: `1d0671c` plus the bounded hosted-infrastructure documentation update on 25 August 2026. This document is a source audit, not a claim of live Gemini generation or hackathon compliance.
+Source revision: `324aea9` plus the bounded hosted-infrastructure documentation update on 25 August 2026. This document is a source audit, not a claim of live Gemini generation or hackathon compliance.
 
 ## Verification boundary
 
 - The fresh local production build verified a persisted Taskmaster fallback run through `AWAITING_APPROVAL`, canonical approval/application, completion, stale blocking, and one Spatial Console renderer.
 - On 25 August 2026 the authorized non-production hosted mock path created Firestore runs, delivered real Cloud Tasks to a private Cloud Run worker, persisted three proposals, resumed a `FAILED_RETRYABLE` checkpoint, and stopped at `AWAITING_APPROVAL`. Duplicate task creation was rejected by deterministic task naming; unauthenticated worker access returned `403`.
-- Project `project-528f858c-325a-45aa-ac0` now has Firestore Native `(default)` in `asia-southeast2`, queue `sitepilot-taskmaster`, and private service `sitepilot-taskmaster` revision `sitepilot-taskmaster-00003-dp2`. The worker image is pinned by digest `sha256:cda7ecfb17461ea2c3b98b28a1c462cab9d6ab3eacbaedafce849bfda9000519`. Existing `sitepilot-vertex` was not changed.
+- Project `project-528f858c-325a-45aa-ac0` now has Firestore Native `(default)` in `asia-southeast2`, queue `sitepilot-taskmaster`, and private service `sitepilot-taskmaster` revision `sitepilot-taskmaster-00004-qrv`. The worker image is pinned by digest `sha256:13f99cd7d28955af75ee604dfcbabb32ffac7629858dbd53d44d8f026023dded`. Existing `sitepilot-vertex` was not changed.
 - Hosted mock execution used only deterministic templates; no authenticated Gemini or Vertex AI request and no paid inference occurred.
 - `gemini-3.7-flash` is the repository default/configured identifier. It is not evidence that a live request occurred.
 - The browser application stores cases in `localStorage`; Taskmaster has a Firestore adapter but local verification uses an in-memory substitute. There is no Firebase, Cloud Storage, Google Maps, Places, or Geocoding integration.
