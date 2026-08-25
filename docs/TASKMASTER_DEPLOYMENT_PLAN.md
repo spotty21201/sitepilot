@@ -2,6 +2,22 @@
 
 This document describes the owner-authorization boundary for the bounded Taskmaster workflow. It is preparation only: this pass does not create Google Cloud resources, change IAM, deploy Cloud Run, or invoke paid Gemini inference.
 
+## Infrastructure gate — 25 August 2026
+
+The local gcloud profile identifies `project-528f858c-325a-45aa-ac0` as the candidate project, but this work session has no usable authenticated Cloud SDK credentials. The installed Cloud SDK could read the profile configuration but could not read the root-owned credential database, so project access and permissions could not be tested. Firestore database existence, mode, location, retention/TTL settings, Cloud Tasks queues, Cloud Run services/revisions, service identities, IAM bindings, and Cloud Logging access therefore remain **unverified**. No Google Cloud resource, IAM binding, hosted environment variable, or deployment was changed.
+
+Before applying the hosted slice, the owner must provide an authenticated operator context (or run the read-only commands) and confirm the Firestore location. The first commands should be:
+
+```bash
+gcloud auth list
+gcloud config get-value project
+gcloud firestore databases list --project=project-528f858c-325a-45aa-ac0
+gcloud tasks queues list --location=asia-southeast2 --project=project-528f858c-325a-45aa-ac0
+gcloud run services list --region=asia-southeast2 --project=project-528f858c-325a-45aa-ac0
+```
+
+Do not create a Firestore database until its location is confirmed. If no compatible database exists, return the proposed location for owner approval before creation. This documentation-only gate is not evidence of hosted execution.
+
 ## Local behavior
 
 - `@google/adk@2.0.0` is pinned as the official TypeScript Agent Development Kit.
