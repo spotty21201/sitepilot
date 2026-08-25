@@ -3,6 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CreateCaseParams } from '@/lib/storage/case-repository';
 import { X, Building2, ShieldCheck, Sparkles, SlidersHorizontal, Calculator, Layers, FileSpreadsheet } from 'lucide-react';
+import {
+  deriveStreetName,
+  resolveRectangularParcel,
+} from '@/lib/opportunity/canonical-opportunity';
 
 interface NewCaseModalProps {
   isOpen: boolean;
@@ -34,6 +38,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const [objective, setObjective] = useState('');
   const [grossSiteArea, setGrossSiteArea] = useState<string>('');
   const [frontageLength, setFrontageLength] = useState<string>('');
+  const [lotDepth, setLotDepth] = useState<string>('');
+  const [manualStreetName, setManualStreetName] = useState<string>('');
 
   // Existing Asset Facts
   const [existingBuildingGFA, setExistingBuildingGFA] = useState<string>('');
@@ -47,7 +53,6 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
   const [statutoryMaxFAR, setStatutoryMaxFAR] = useState<string>('6.65');
   const [statutoryMaxCoveragePct, setStatutoryMaxCoveragePct] = useState<string>('55');
   const [statutoryMinKDHPct, setStatutoryMinKDHPct] = useState<string>('20');
-  const [statutoryMaxFloors, setStatutoryMaxFloors] = useState<string>('');
   const [statutoryMaxHeightMeters, setStatutoryMaxHeightMeters] = useState<string>('');
   const [setbackFront, setSetbackFront] = useState<string>('');
   const [setbackRear, setSetbackRear] = useState<string>('');
@@ -97,9 +102,26 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
 
   if (!isOpen) return null;
 
-  const parsedArea = parseFloat(grossSiteArea) || 0;
-  const effectiveArea = parsedArea > 0 ? parsedArea : 10000;
-  const parsedFAR = parseFloat(statutoryMaxFAR) || 3.20;
+  const parsedArea = grossSiteArea.trim() ? parseFloat(grossSiteArea) : undefined;
+  const parsedFrontagePreview = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
+  const parsedDepthPreview = lotDepth.trim() ? parseFloat(lotDepth) : undefined;
+  const parcelPreview = resolveRectangularParcel({
+    frontageMeters: parsedFrontagePreview,
+    depthMeters: parsedDepthPreview,
+    siteAreaM2: parsedArea,
+  });
+  const estimatedDepth = !lotDepth.trim() && parcelPreview.valid
+    && parcelPreview.provenance.depth.source === 'ESTIMATED'
+    ? parcelPreview.depthMeters.toString()
+    : '';
+  const estimatedArea = !grossSiteArea.trim() && parcelPreview.valid
+    && parcelPreview.provenance.area.source === 'ESTIMATED'
+    ? parcelPreview.siteAreaM2.toString()
+    : '';
+  const effectiveArea = parcelPreview.valid ? parcelPreview.siteAreaM2 : 10000;
+  const streetPreview = deriveStreetName(address, manualStreetName);
+  const enteredFAR = statutoryMaxFAR.trim() ? parseFloat(statutoryMaxFAR) : undefined;
+  const parsedFAR = enteredFAR && enteredFAR > 0 ? enteredFAR : 3.20;
   const maxGFA = Math.round(effectiveArea * parsedFAR);
   const parsedExistingGFA = parseFloat(existingBuildingGFA) || 0;
   const headroomGFA = parsedExistingGFA > 0 ? Math.max(0, maxGFA - parsedExistingGFA) : maxGFA;
@@ -126,10 +148,20 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
     }
 
     const parsedFrontage = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
+    const parsedDepth = lotDepth.trim() ? parseFloat(lotDepth) : undefined;
+    const resolvedParcel = resolveRectangularParcel({
+      frontageMeters: parsedFrontage,
+      depthMeters: parsedDepth,
+      siteAreaM2: parsedArea,
+    });
+    if (!resolvedParcel.valid) {
+      setError(resolvedParcel.errors.join(' '));
+      setActiveTab('SITE');
+      return;
+    }
     const parsedFloors = existingFloors.trim() ? parseInt(existingFloors, 10) : undefined;
-    const parsedMaxCoverage = statutoryMaxCoveragePct.trim() ? parseFloat(statutoryMaxCoveragePct) : 55.0;
-    const parsedMinKDH = statutoryMinKDHPct.trim() ? parseFloat(statutoryMinKDHPct) : 20.0;
-    const parsedMaxFloors = statutoryMaxFloors.trim() ? parseInt(statutoryMaxFloors, 10) : undefined;
+    const parsedMaxCoverage = statutoryMaxCoveragePct.trim() ? parseFloat(statutoryMaxCoveragePct) : undefined;
+    const parsedMinKDH = statutoryMinKDHPct.trim() ? parseFloat(statutoryMinKDHPct) : undefined;
     const parsedMaxHeight = statutoryMaxHeightMeters.trim() ? parseFloat(statutoryMaxHeightMeters) : undefined;
     const parsedFrontSetback = setbackFront.trim() ? parseFloat(setbackFront) : undefined;
     const parsedRearSetback = setbackRear.trim() ? parseFloat(setbackRear) : undefined;
@@ -142,8 +174,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       city: city.trim() || 'Jakarta',
       country: country.trim() || 'Indonesia',
       objective: objective.trim() || 'Evaluate site viability, development yield, and zoning envelope.',
-      grossSiteArea: effectiveArea,
-      frontageLength: parsedFrontage && !isNaN(parsedFrontage) ? parsedFrontage : undefined,
+      grossSiteArea: parsedArea,
+      frontageLength: parsedFrontage,
+      lotDepth: parsedDepth,
+      streetName: manualStreetName.trim() || undefined,
       
       // Existing Asset
       existingBuildingGFA: parsedExistingGFA > 0 ? parsedExistingGFA : undefined,
@@ -154,10 +188,9 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       // Planning & Zoning
       zoneCode: zoneCode.trim() || 'KT + K-1',
       zoneName: zoneName.trim() || 'Commercial / Hospitality',
-      statutoryMaxFAR: parsedFAR,
+      statutoryMaxFAR: enteredFAR,
       statutoryMaxCoveragePct: parsedMaxCoverage,
       statutoryMinKDHPct: parsedMinKDH,
-      statutoryMaxFloors: parsedMaxFloors,
       statutoryMaxHeightMeters: parsedMaxHeight,
       setbackFront: parsedFrontSetback,
       setbackRear: parsedRearSetback,
@@ -319,35 +352,71 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <label className="block font-semibold text-[var(--text-secondary)]">
-                    Gross Land Area (m²) <span className="text-[var(--text-muted)] font-normal">(e.g. 2,014 m²)</span>
+                    Site Area (m²) {estimatedArea && <span className="text-[var(--status-investigation)] font-normal">Estimated</span>}
                   </label>
                   <input
                     type="number"
-                    min="100"
-                    step="1"
+                    min="0.01"
+                    step="0.01"
                     placeholder="e.g. 2014"
-                    value={grossSiteArea}
+                    value={grossSiteArea || estimatedArea}
                     onChange={(e) => setGrossSiteArea(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="block font-semibold text-[var(--text-secondary)]">
-                    Primary Frontage Width (m) <span className="text-[var(--text-muted)] font-normal">(e.g. 40m)</span>
+                    Street Frontage / Lot Width (m)
                   </label>
                   <input
                     type="number"
-                    min="5"
-                    step="0.5"
+                    min="0.01"
+                    step="0.01"
                     placeholder="e.g. 40.0"
                     value={frontageLength}
                     onChange={(e) => setFrontageLength(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="block font-semibold text-[var(--text-secondary)]">
+                    Lot Depth (m) {estimatedDepth && <span className="text-[var(--status-investigation)] font-normal">Estimated</span>}
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="Calculated from area ÷ frontage"
+                    value={lotDepth || estimatedDepth}
+                    onChange={(e) => setLotDepth(e.target.value)}
+                    className="intake-control w-full px-3 py-2 font-mono"
+                  />
+                </div>
+              </div>
+
+              {parcelPreview.valid && (
+                <div className="surface-inspector p-2.5 text-[11px] text-[var(--text-secondary)]" aria-live="polite">
+                  Rectangular study parcel: <span className="font-mono text-[var(--text-primary)]">{parcelPreview.frontageMeters}m × {parcelPreview.depthMeters}m = {parcelPreview.siteAreaM2.toLocaleString()} m²</span>.
+                  {' '}This is a planning representation, not surveyed cadastral geometry.
+                  {parcelPreview.warning && <p className="mt-1 text-[var(--status-warning)]">{parcelPreview.warning}</p>}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-[var(--text-secondary)]">
+                  Street Name Override <span className="text-[var(--text-muted)] font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Use when the address cannot be parsed reliably"
+                  value={manualStreetName}
+                  onChange={(e) => setManualStreetName(e.target.value)}
+                  className="intake-control w-full px-3 py-2"
+                />
+                <p className="text-[10px] text-[var(--text-muted)]">Road label: {streetPreview.value} · {streetPreview.source.replace(/_/g, ' ').toLowerCase()}</p>
               </div>
 
               <div className="space-y-1">
@@ -463,7 +532,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="space-y-1">
                   <label className="block font-semibold text-[var(--text-secondary)]">
                     Max FAR / KLB <span className="text-[var(--text-muted)] font-normal">(e.g. 6.65)</span>
@@ -502,18 +571,6 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="1"
                     value={statutoryMinKDHPct}
                     onChange={(e) => setStatutoryMinKDHPct(e.target.value)}
-                    className="intake-control w-full px-3 py-2 font-mono"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-semibold text-[var(--text-secondary)]">Max Floors</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="80"
-                    placeholder="e.g. 14 (leave blank if unknown)"
-                    value={statutoryMaxFloors}
-                    onChange={(e) => setStatutoryMaxFloors(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
@@ -648,7 +705,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--text-secondary)]">
               <div className="flex items-center gap-1.5 text-[var(--status-evidence)]">
                 <Calculator className="w-3.5 h-3.5" />
-                <span>Live Intake Yield & Financial Synthesis</span>
+                <span>Current Site &amp; Financial Figures</span>
               </div>
               <span className="status-badge status-badge--assumed !min-h-0 !px-1.5 !py-0.5 text-[10px]">
                 PROVISIONAL
@@ -693,8 +750,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <ShieldCheck className="w-4 h-4 text-[var(--status-assumed)] shrink-0 mt-0.5" />
             <div className="text-[11px] text-[var(--text-secondary)] leading-relaxed space-y-1">
               <div>
-                <span className="font-semibold text-[var(--status-assumed)]">Provenance: [USER_ENTERED_ASSUMPTION]. </span>
-                Initial study envelopes are generated as illustrative study baselines until confirmed by title scans or cadastral surveys.
+                <span className="font-semibold text-[var(--status-assumed)]">Input basis: Provided by the user and not yet confirmed. </span>
+                Initial study envelopes are illustrative until confirmed by title documents or cadastral surveys.
               </div>
               <div className="text-[10px] text-[var(--text-secondary)] border-t border-[var(--border-default)] pt-1">
                 ⚠️ Release 1 stores cases locally in this browser. Use synthetic test cases for exploration.
@@ -708,7 +765,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
               {activeTab === 'SITE' && <span>Next: Existing Asset or Planning Limits →</span>}
               {activeTab === 'EXISTING' && <span>Next: Planning Limits →</span>}
               {activeTab === 'ZONING' && <span>Next: Commercial Valuation →</span>}
-              {activeTab === 'VALUATION' && <span>Ready to initialize 3 parametric schemes</span>}
+              {activeTab === 'VALUATION' && <span>Ready to prepare 3 development options</span>}
             </div>
 
             <div className="flex items-center gap-2">

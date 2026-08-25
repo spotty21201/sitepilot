@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Project } from '@/types';
 import { 
   TrendingUp, 
@@ -10,20 +10,41 @@ import {
   Clock, 
   CheckCircle2, 
   Compass, 
-  User
+  User,
+  Download,
+  Printer,
 } from 'lucide-react';
+import { buildProjectReport, generateProjectReportPdf, safeReportFilename } from '@/lib/reporting/project-report';
 
 interface DecisionRoomSummaryProps {
   project: Project;
+  selectedScenarioId?: string;
 }
 
-export function DecisionRoomSummary({ project }: DecisionRoomSummaryProps) {
+export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoomSummaryProps) {
   const { actions = [], executiveSummary, issues = [] } = project;
+  const report = useMemo(
+    () => buildProjectReport(project, selectedScenarioId, project.updatedAt),
+    [project, selectedScenarioId],
+  );
 
   const topOpportunities = executiveSummary?.topOpportunities || [];
   const criticalRisks = executiveSummary?.criticalRisks || [];
   const recommendedNextMove = executiveSummary?.recommendedNextMove || 
-    'Upload land certificates, topographic surveys, or municipal planning documents to build verified feasibility evidence.';
+    'Upload land certificates, topographic surveys, or municipal planning documents to establish a reliable feasibility basis.';
+
+  const downloadBrief = () => {
+    const bytes = generateProjectReportPdf(buildProjectReport(project, selectedScenarioId));
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = safeReportFilename(project.name, 'pdf');
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
 
   return (
     <div className="panel-shell flex flex-col h-full overflow-hidden select-none">
@@ -33,13 +54,44 @@ export function DecisionRoomSummary({ project }: DecisionRoomSummaryProps) {
           <Compass className="w-4 h-4 text-[var(--status-evidence)]" />
           <h3 className="type-section-title">Executive Decision Brief</h3>
         </div>
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-1 text-xs">
+          <button type="button" onClick={() => window.print()} className="button-secondary p-1.5" aria-label="Print Executive Brief"><Printer className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={downloadBrief} className="button-secondary p-1.5" aria-label="Download Executive Brief PDF"><Download className="h-3.5 w-3.5" /></button>
           <span className="text-[var(--text-muted)]">Site Readiness:</span>
           <span className="font-bold text-[var(--status-verified)] font-mono">{project.siteReadinessPercentage}%</span>
         </div>
       </div>
 
       <div className="p-3.5 flex-1 overflow-y-auto space-y-3.5">
+        <section className="surface-inspector space-y-2 p-3" aria-label="Opportunity and parcel summary">
+          <div>
+            <h4 className="text-xs font-semibold text-[var(--text-primary)]">{report.opportunity}</h4>
+            <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{report.address}</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 border-y border-[var(--border-subtle)] py-2 text-center font-mono">
+            <div><span className="block text-[9px] text-[var(--text-muted)]">AREA</span><strong className="text-[11px] text-[var(--text-primary)]">{report.site.areaM2.toLocaleString()} m²</strong></div>
+            <div><span className="block text-[9px] text-[var(--text-muted)]">FRONTAGE</span><strong className="text-[11px] text-[var(--text-primary)]">{report.site.frontageMeters ?? '—'} m</strong></div>
+            <div><span className="block text-[9px] text-[var(--text-muted)]">DEPTH</span><strong className="text-[11px] text-[var(--text-primary)]">{report.site.depthMeters ?? '—'} m</strong></div>
+          </div>
+          <p className="text-[10px] leading-relaxed text-[var(--text-muted)]">Sources: area {report.site.areaSource}; frontage {report.site.frontageSource}; depth {report.site.depthSource}. {report.site.rectangularStudyWarning}</p>
+        </section>
+
+        <section className="surface-inspector p-3" aria-label="Planning limits and options comparison">
+          <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-semibold text-[var(--text-primary)]">Options A, B & C</h4><span className="type-metadata">{report.currentOption} selected</span></div>
+          <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace}</p>
+          <div className="mt-2 space-y-1.5">
+            {report.options.map((option) => (
+              <div key={option.scenarioId} className={`grid grid-cols-[54px_1fr_auto] items-center gap-2 rounded-[var(--radius-control)] border px-2 py-1.5 text-[10px] ${option.selected ? 'border-[var(--spatial-selection)] bg-[var(--spatial-selection-surface)]' : 'border-[var(--border-subtle)]'}`}>
+                <strong className="text-[var(--text-primary)]">{option.option}</strong>
+                <span className="font-mono text-[var(--text-secondary)]">{option.floors} Fl · {option.heightMeters}m · {option.gfaM2.toLocaleString()} m² · FAR {option.farKLB.toFixed(2)}x</span>
+                <span className={option.compliance.startsWith('Compliant') ? 'text-[var(--status-verified)]' : 'text-[var(--status-warning)]'}>{option.compliance}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10px] leading-relaxed text-[var(--text-secondary)]"><strong className="text-[var(--text-primary)]">Decision statement:</strong> {report.recommendation}</div>
+          {(report.missingInputs.length > 0 || report.warnings.length > 0) && <div className="mt-2 rounded-[var(--radius-control)] bg-[var(--status-warning-surface)] p-2 text-[10px] text-[var(--status-warning)]">{report.warnings[0] || `Missing: ${report.missingInputs.join(', ')}`}</div>}
+          <p className="mt-2 font-mono text-[9px] text-[var(--text-muted)]">Last updated {new Date(report.generatedAt).toLocaleString()} · {report.options.find((option) => option.selected)?.scenarioRevision ?? 'Study version not recorded'}</p>
+        </section>
         {/* Recommended Pre-Offer Strategy */}
         <div className="p-3 bg-[var(--status-evidence-surface)] border border-[color-mix(in_srgb,var(--status-evidence)_55%,transparent)] rounded-[var(--radius-card)]">
           <div className="flex items-center gap-2 text-[var(--status-evidence)] text-xs font-semibold mb-1.5">

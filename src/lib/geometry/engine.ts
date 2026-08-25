@@ -11,6 +11,7 @@ import {
   SiteGeometry,
   ScenarioEditClassification
 } from '@/types';
+import { deriveStreetName } from '@/lib/opportunity/street-name';
 
 export interface CanonicalParcelBounds {
   width: number;
@@ -75,10 +76,11 @@ export function getCanonicalParcelBounds(
   const minY = -halfL;
   const maxY = halfL;
 
-  const buildableMinX = minX + (setbacks.sideLeft || 5);
-  const buildableMaxX = maxX - (setbacks.sideRight || 5);
-  const buildableMinY = minY + (setbacks.rear || 6);
-  const buildableMaxY = maxY - (setbacks.front || 10);
+  // Zero is a valid user-entered setback, so defaults must not use truthiness.
+  const buildableMinX = minX + (setbacks.sideLeft ?? 5);
+  const buildableMaxX = maxX - (setbacks.sideRight ?? 5);
+  const buildableMinY = minY + (setbacks.rear ?? 6);
+  const buildableMaxY = maxY - (setbacks.front ?? 10);
 
   const buildableWidth = Math.max(0, buildableMaxX - buildableMinX);
   const buildableLength = Math.max(0, buildableMaxY - buildableMinY);
@@ -649,26 +651,29 @@ export function checkConstraintViolations(
 ): { hasViolations: boolean; warnings: string[]; primaryViolation?: string } {
   const warnings: string[] = [];
 
-  const maxFloors = constraints.maxHeightFloors || 8;
-  const maxMeters = constraints.maxHeightMeters || 32.0;
-  const maxFAR = constraints.maxFAR || 3.20;
-  const maxCoverage = constraints.maxCoveragePct || 55.0;
+  const maxFloors = constraints.maxHeightFloors;
+  const maxMeters = constraints.maxHeightMeters;
+  const maxFAR = constraints.maxFAR;
+  const maxCoverage = constraints.maxCoveragePct;
 
-  if (metrics.totalHeightMeters > maxMeters + 0.05 || metrics.totalFloors > maxFloors) {
-    const overrunMeters = Math.max(0, Math.round((metrics.totalHeightMeters - maxMeters) * 10) / 10);
+  if ((maxMeters !== undefined && metrics.totalHeightMeters > maxMeters + 0.05)
+    || (maxFloors !== undefined && metrics.totalFloors > maxFloors)) {
+    const overrunMeters = maxMeters === undefined
+      ? 0
+      : Math.max(0, Math.round((metrics.totalHeightMeters - maxMeters) * 10) / 10);
     warnings.push(
-      `Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds maximum allowable height (${maxMeters.toFixed(1)}m / ${maxFloors} floors) by +${overrunMeters.toFixed(1)}m.`
+      `Massing height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} floors) exceeds maximum allowable height (${maxMeters === undefined ? 'not supplied' : `${maxMeters.toFixed(1)}m`} / ${maxFloors === undefined ? 'not supplied' : `${maxFloors} floors`}) by +${overrunMeters.toFixed(1)}m.`
     );
   }
 
-  if (metrics.farKLB > maxFAR + 0.005) {
+  if (maxFAR !== undefined && metrics.farKLB > maxFAR + 0.005) {
     const overrunFAR = Math.max(0, Math.round((metrics.farKLB - maxFAR) * 100) / 100);
     warnings.push(
       `Floor Area Ratio (${metrics.farKLB.toFixed(2)}x) exceeds statutory maximum (${maxFAR.toFixed(2)}x) by +${overrunFAR.toFixed(2)}x.`
     );
   }
 
-  if (metrics.siteCoveragePercentage > maxCoverage + 0.05) {
+  if (maxCoverage !== undefined && metrics.siteCoveragePercentage > maxCoverage + 0.05) {
     const overrunCoverage = Math.max(0, Math.round((metrics.siteCoveragePercentage - maxCoverage) * 10) / 10);
     warnings.push(
       `Site coverage (${metrics.siteCoveragePercentage}%) exceeds statutory limit (${maxCoverage}%) by +${overrunCoverage.toFixed(1)}%.`
@@ -753,19 +758,19 @@ export function evaluateScenarioCompliance(
   const scenarioName = options.scenarioName;
   const hasZoningEvidence = options.hasZoningEvidence !== undefined
     ? options.hasZoningEvidence
-    : (grossSiteArea === 16850 || (scenarioName ? (scenarioName.includes('Menteng') || scenarioName.includes('Subzone')) : false));
-  const zoningName = options.zoningName || (hasZoningEvidence ? 'Subzone R.9' : undefined);
+    : false;
+  const zoningName = options.zoningName;
 
   const warnings: string[] = [];
-  const hasExplicitHeight = options.maxHeightMeters !== undefined || options.maxFloors !== undefined || hasZoningEvidence;
-  const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters || (options.maxFloors ? options.maxFloors * 3.5 : 32.0);
-  const STATUTORY_MAX_FLOORS = options.maxFloors || 8;
+  const hasExplicitHeight = options.maxHeightMeters !== undefined || options.maxFloors !== undefined;
+  const STATUTORY_HEIGHT_CAP_METERS = options.maxHeightMeters ?? Number.POSITIVE_INFINITY;
+  const STATUTORY_MAX_FLOORS = options.maxFloors ?? Number.POSITIVE_INFINITY;
 
-  const hasExplicitFAR = options.maxFAR !== undefined || hasZoningEvidence;
-  const STATUTORY_MAX_FAR = options.maxFAR || 3.20;
+  const hasExplicitFAR = options.maxFAR !== undefined;
+  const STATUTORY_MAX_FAR = options.maxFAR ?? Number.POSITIVE_INFINITY;
 
-  const hasExplicitCoverage = options.maxCoveragePct !== undefined || hasZoningEvidence;
-  const STATUTORY_MAX_KDB_PERCENT = options.maxCoveragePct || 55.0;
+  const hasExplicitCoverage = options.maxCoveragePct !== undefined;
+  const STATUTORY_MAX_KDB_PERCENT = options.maxCoveragePct ?? Number.POSITIVE_INFINITY;
 
   const heightOverrunM = Math.max(0, Math.round((metrics.totalHeightMeters - STATUTORY_HEIGHT_CAP_METERS) * 10) / 10);
   const farOverrun = Math.max(0, Math.round((metrics.farKLB - STATUTORY_MAX_FAR) * 100) / 100);
@@ -815,8 +820,14 @@ export function evaluateScenarioCompliance(
     ? 'Zoning: Compliant · Within Envelope'
     : 'Provisional Study · Within Envelope';
 
+  const verifiedLimitSummary = [
+    hasExplicitHeight ? `height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m)` : null,
+    hasExplicitFAR ? `FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x)` : null,
+    hasExplicitCoverage ? `coverage (${metrics.siteCoveragePercentage.toFixed(1)}% ≤ ${STATUTORY_MAX_KDB_PERCENT.toFixed(1)}%)` : null,
+    'setback envelopes',
+  ].filter(Boolean).join(', ');
   let decisionText = hasZoningEvidence
-    ? `Compliant: Fully conforms to ${zoningName || 'applicable zoning'} height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m), FAR (${metrics.farKLB.toFixed(2)}x ≤ ${STATUTORY_MAX_FAR.toFixed(2)}x), and setback envelopes.`
+    ? `Compliant against the supplied ${zoningName || 'applicable zoning'} controls: ${verifiedLimitSummary}.`
     : `Provisional Study: Envelope conforms to working geometric parameters (Height: ${metrics.totalHeightMeters.toFixed(1)}m, FAR: ${metrics.farKLB.toFixed(2)}x). Statutory municipal zoning compliance is UNKNOWN because official planning evidence (RDTR / KRK) is absent.`;
 
   let recommendedAction = hasZoningEvidence
@@ -837,7 +848,7 @@ export function evaluateScenarioCompliance(
       statusPillLabel = `Collision: ${collisionVolumeM3.toLocaleString()} m³ overlap`;
       decisionText = `Non-compliant: Active 3D mass collision (${collisionVolumeM3.toLocaleString()} m³ overlap volume).`;
       recommendedAction = 'Separate intersecting building masses to eliminate volumetric clash.';
-    } else if (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS) {
+    } else if (hasExplicitHeight && (metrics.totalHeightMeters > STATUTORY_HEIGHT_CAP_METERS + 0.05 || metrics.totalFloors > STATUTORY_MAX_FLOORS)) {
       violationCategory = 'HEIGHT';
       assessmentStatus = 'NON_COMPLIANT_HEIGHT';
       statusPillLabel = `Height Overrun: +${heightOverrunM.toFixed(1)}m (>${STATUTORY_HEIGHT_CAP_METERS}m cap)`;
@@ -878,8 +889,8 @@ export function evaluateScenarioCompliance(
   if (violationCategory === 'NONE') {
     if (hasZoningEvidence) {
       identifiedRisks = [
-        'Northern access corridor (6.5m width) requires traffic management for residential volume.',
-        'Narrow height buffer to statutory cap requires strict rooftop MEP coordination.'
+        'Street access, servicing, and emergency-vehicle capacity require project-specific verification.',
+        'Confirm rooftop plant and screening remain within the supplied height control.'
       ];
     } else {
       identifiedRisks = [
@@ -1038,13 +1049,15 @@ export function exportToColladaDAE(
   const roadVertices = [
     bounds.minX - 20, bounds.maxY, 0,
     bounds.maxX + 20, bounds.maxY, 0,
-    bounds.maxX + 20, bounds.maxY + 18, 0,
-    bounds.minX - 20, bounds.maxY + 18, 0
+    bounds.maxX + 20, bounds.maxY + 20, 0,
+    bounds.minX - 20, bounds.maxY + 20, 0
   ].join(' ');
 
-  const frontageNodeName = (site.address && site.address.includes('Teuku Umar')) || (site.grossSiteArea === 16850 && !site.address)
-    ? 'ACCESS_JL_TEUKU_UMAR'
-    : (site.address ? `ACCESS_${site.address.split(',')[0].replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}` : 'ACCESS_PRIMARY_FRONTAGE');
+  const frontageStreetName = site.streetName || deriveStreetName(site.address).value;
+  const frontageNodeName = `ACCESS_${frontageStreetName
+    .replace(/[^a-zA-Z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .toUpperCase()}`;
 
   geometriesXml += `
     <geometry id="geom-access-frontage" name="${frontageNodeName}">
@@ -1073,42 +1086,7 @@ export function exportToColladaDAE(
         <instance_geometry url="#geom-access-frontage"/>
       </node>`;
 
-  // 4. Secondary Continuous Access Corridor
-  const corridorVertices = [
-    bounds.minX, bounds.minY - 15, 0.02,
-    bounds.minX + 6.5, bounds.minY - 15, 0.02,
-    bounds.minX + 6.5, bounds.minY + 25, 0.02,
-    bounds.minX, bounds.minY + 25, 0.02
-  ].join(' ');
-
-  geometriesXml += `
-    <geometry id="geom-access-corridor" name="ACCESS_SECONDARY_CORRIDOR">
-      <mesh>
-        <source id="geom-access-corridor-positions">
-          <float_array id="geom-access-corridor-positions-array" count="12">${corridorVertices}</float_array>
-          <technique_common>
-            <accessor source="#geom-access-corridor-positions-array" count="4" stride="3">
-              <param name="X" type="float"/><param name="Y" type="float"/><param name="Z" type="float"/>
-            </accessor>
-          </technique_common>
-        </source>
-        <vertices id="geom-access-corridor-vertices">
-          <input semantic="POSITION" source="#geom-access-corridor-positions"/>
-        </vertices>
-        <polylist count="1">
-          <input semantic="VERTEX" source="#geom-access-corridor-vertices" offset="0"/>
-          <vcount>4</vcount>
-          <p>0 1 2 3</p>
-        </polylist>
-      </mesh>
-    </geometry>`;
-
-  visualNodesXml += `
-      <node id="node-access-corridor" name="ACCESS_SECONDARY_CORRIDOR">
-        <instance_geometry url="#geom-access-corridor"/>
-      </node>`;
-
-  // 5. BUILDING_MASS_* Geometries (Exact non-overlapping solids)
+  // 4. BUILDING_MASS_* Geometries (Exact non-overlapping solids)
   masses.forEach((mass, index) => {
     const geoId = `geom-mass-${index}`;
     const nodeId = `node-mass-${index}`;

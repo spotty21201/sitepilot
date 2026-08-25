@@ -15,6 +15,11 @@ import {
   fitMassesToBuildableEnvelope
 } from '@/lib/geometry/engine';
 import { ensureCanonicalProjectRevisions } from '@/lib/spatial/canonical-command-service';
+import {
+  deriveScenarioFloorLimit,
+  deriveStreetName,
+  resolveRectangularParcel,
+} from '@/lib/opportunity/canonical-opportunity';
 
 const STORAGE_VERSION = 'v1';
 const CASES_STORAGE_KEY = `sitepilot_cases_${STORAGE_VERSION}`;
@@ -28,6 +33,8 @@ export interface CreateCaseParams {
   objective?: string;
   grossSiteArea?: number;
   frontageLength?: number;
+  lotDepth?: number;
+  streetName?: string;
 
   // Existing asset facts
   existingBuildingGFA?: number;   // e.g. 3,760 m²
@@ -315,14 +322,21 @@ export const resetDemoCase = resetDemo;
 export function createCase(params: CreateCaseParams): Project {
   const caseId = `proj-${Date.now()}`;
   const now = new Date().toISOString();
-  const grossSiteArea = params.grossSiteArea && !isNaN(params.grossSiteArea) && params.grossSiteArea > 0
-    ? Math.max(100, Math.round(params.grossSiteArea))
-    : 10000;
-  
-  // Calculate reasonable initial frontage and rectangular bounding dimensions
-  const standardFrontage = params.frontageLength && params.frontageLength > 0
-    ? params.frontageLength
-    : Math.max(20, Math.round(Math.sqrt(grossSiteArea * 0.75) * 10) / 10);
+  const suppliedArea = params.grossSiteArea && params.grossSiteArea > 0 ? params.grossSiteArea : 10000;
+  const inferredFrontage = Math.max(20, Math.round(Math.sqrt(suppliedArea * 0.75) * 10) / 10);
+  const parcelResolution = resolveRectangularParcel({
+    frontageMeters: params.frontageLength ?? inferredFrontage,
+    depthMeters: params.lotDepth,
+    siteAreaM2: suppliedArea,
+    frontageSource: params.frontageLength ? 'USER_ENTERED' : 'LEGACY_INFERRED',
+    depthSource: params.lotDepth ? 'USER_ENTERED' : 'ESTIMATED',
+    areaSource: params.grossSiteArea ? 'USER_ENTERED' : 'LEGACY_INFERRED',
+  });
+  if (!parcelResolution.valid) throw new Error(parcelResolution.errors.join(' '));
+  const grossSiteArea = parcelResolution.siteAreaM2;
+  const standardFrontage = parcelResolution.frontageMeters;
+  const lotDepth = parcelResolution.depthMeters;
+  const street = deriveStreetName(params.address, params.streetName);
 
   const defaultSetbacks = {
     front: params.setbacks?.front ?? params.setbackFront ?? 8,
@@ -336,12 +350,23 @@ export function createCase(params: CreateCaseParams): Project {
   const centerZ = (bounds.buildableMinY + bounds.buildableMaxY) / 2;
 
   // Planning & Zoning Limits
-  const maxFAR = params.maxFAR ?? params.statutoryMaxFAR ?? 3.20;
-  const maxCoveragePct = params.maxCoveragePct ?? params.statutoryMaxCoveragePct ?? 55.0;
+  const suppliedMaxFAR = params.maxFAR ?? params.statutoryMaxFAR;
+  const suppliedMaxCoveragePct = params.maxCoveragePct ?? params.statutoryMaxCoveragePct;
+  const suppliedMaxHeightMeters = params.maxHeightMeters ?? params.statutoryMaxHeightMeters;
+  const maxFAR = suppliedMaxFAR ?? 3.20;
+  const maxCoveragePct = suppliedMaxCoveragePct ?? 55.0;
   const minKDHPct = params.minKDHPct ?? params.statutoryMinKDHPct ?? 20.0;
-  const maxFloors = params.maxFloors ?? params.statutoryMaxFloors ?? (maxFAR > 5.0 ? 14 : 8);
-  const maxHeightMeters = params.maxHeightMeters ?? params.statutoryMaxHeightMeters ?? (maxFloors * 3.5);
+  const floorStudy = deriveScenarioFloorLimit({
+    maximumHeightMeters: suppliedMaxHeightMeters,
+    maximumFAR: suppliedMaxFAR,
+    maximumCoveragePct: suppliedMaxCoveragePct,
+    floorToFloorHeight: 3.5,
+  });
+  const maxFloors = params.maxFloors ?? params.statutoryMaxFloors ?? floorStudy.floorCount ?? 8;
+  const maxHeightMeters = suppliedMaxHeightMeters;
   const maxGFA = Math.round(grossSiteArea * maxFAR);
+  const verifiedPlanningBasis = Boolean(params.hasZoningEvidence && suppliedMaxFAR);
+  const densityBasisLabel = verifiedPlanningBasis ? 'verified planning limit' : 'working planning-study assumption';
   const rawExistingGFA = params.existingGFA ?? params.existingBuildingGFA;
   const existingGFA = rawExistingGFA ? Math.round(rawExistingGFA) : undefined;
   const isFloorsAssumed = params.existingFloors === undefined;
@@ -410,11 +435,11 @@ export function createCase(params: CreateCaseParams): Project {
   const complianceA = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesA, metricsA, overlapA, {
     scenarioName: scenarioAName,
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
-    maxFAR,
-    maxCoveragePct,
+    maxFAR: suppliedMaxFAR,
+    maxCoveragePct: suppliedMaxCoveragePct,
     minKDHPct,
     maxHeightMeters,
-    maxFloors,
+    maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
   });
 
@@ -440,7 +465,7 @@ export function createCase(params: CreateCaseParams): Project {
       setbacks: defaultSetbacks,
       unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
-    risks: ['Preserves baseline without capitalizing on permissible statutory expansion headroom.'],
+    risks: [`Preserves baseline without using the ${densityBasisLabel} for potential expansion headroom.`],
     opportunities: ['Immediate operational cashflow without construction disruption.'],
     createdAt: now,
     updatedAt: now
@@ -458,7 +483,7 @@ export function createCase(params: CreateCaseParams): Project {
   const footprintPerWing = Math.round(widthWing * lengthWing);
 
   const floorsB1 = existingFloors;
-  const floorsB2 = Math.min(maxFloors, 14);
+  const floorsB2 = maxFloors;
 
   const posX_B1 = -Math.round((widthWing / 2 + 1.0) * 10) / 10;
   const posX_B2 = Math.round((widthWing / 2 + 1.0) * 10) / 10;
@@ -537,11 +562,11 @@ export function createCase(params: CreateCaseParams): Project {
   const complianceB = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesB, metricsB, overlapB, {
     scenarioName: scenarioBName,
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
-    maxFAR: params.maxFAR ?? params.statutoryMaxFAR,
-    maxCoveragePct: params.maxCoveragePct ?? params.statutoryMaxCoveragePct,
+    maxFAR: suppliedMaxFAR,
+    maxCoveragePct: suppliedMaxCoveragePct,
     minKDHPct: params.minKDHPct ?? params.statutoryMinKDHPct,
-    maxHeightMeters: params.maxHeightMeters ?? params.statutoryMaxHeightMeters,
-    maxFloors: params.maxFloors ?? params.statutoryMaxFloors,
+    maxHeightMeters,
+    maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
   });
 
@@ -574,9 +599,9 @@ export function createCase(params: CreateCaseParams): Project {
   };
 
   // ----------------------------------------------------
-  // SCENARIO C: Maximum Statutory Buildout (Full KLB Envelope)
+  // SCENARIO C: high-yield study using either verified controls or an explicit working assumption.
   // ----------------------------------------------------
-  const towerFloorsC = Math.min(maxFloors, 14);
+  const towerFloorsC = maxFloors;
   const towerHeightC = towerFloorsC * 3.5;
   const targetFootprintC = Math.min(Math.floor(bounds.netBuildableArea * 0.85), Math.floor((maxGFA * 0.995) / towerFloorsC));
   const widthC = Math.min(Math.floor(bounds.buildableWidth * 0.90 * 10) / 10, Math.max(15, Math.floor(Math.sqrt(targetFootprintC * 0.90) * 10) / 10));
@@ -605,16 +630,18 @@ export function createCase(params: CreateCaseParams): Project {
   const fittedMassesC = fitMassesToBuildableEnvelope(grossSiteArea, defaultSetbacks, massesC, standardFrontage);
   const metricsC = calculateDevelopmentMetrics(grossSiteArea, fittedMassesC, defaultSetbacks, standardFrontage);
   const overlapC = calculateMassPairwiseIntersections(fittedMassesC);
-  const scenarioCName = `Scenario C: Maximum Statutory Buildout (${metricsC.totalGFA.toLocaleString()} m² · KLB ${maxFAR.toFixed(2)}x)`;
+  const scenarioCName = verifiedPlanningBasis
+    ? `Scenario C: Verified-Control Buildout (${metricsC.totalGFA.toLocaleString()} m² · KLB ${maxFAR.toFixed(2)}x)`
+    : `Scenario C: Planning Study Buildout (${metricsC.totalGFA.toLocaleString()} m² · working KLB ${maxFAR.toFixed(2)}x)`;
 
   const complianceC = evaluateScenarioCompliance(grossSiteArea, defaultSetbacks, fittedMassesC, metricsC, overlapC, {
     scenarioName: scenarioCName,
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
-    maxFAR: params.maxFAR ?? params.statutoryMaxFAR,
-    maxCoveragePct: params.maxCoveragePct ?? params.statutoryMaxCoveragePct,
+    maxFAR: suppliedMaxFAR,
+    maxCoveragePct: suppliedMaxCoveragePct,
     minKDHPct: params.minKDHPct ?? params.statutoryMinKDHPct,
-    maxHeightMeters: params.maxHeightMeters ?? params.statutoryMaxHeightMeters,
-    maxFloors: params.maxFloors ?? params.statutoryMaxFloors,
+    maxHeightMeters,
+    maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
   });
 
@@ -622,7 +649,9 @@ export function createCase(params: CreateCaseParams): Project {
     id: `scen-${caseId}-03`,
     projectId: caseId,
     name: scenarioCName,
-    description: `Full statutory density redevelopment achieving ${metricsC.totalGFA.toLocaleString()} m² GFA across ${towerFloorsC} storeys, maximizing permissible KLB ${maxFAR.toFixed(2)}x.`,
+    description: verifiedPlanningBasis
+      ? `Buildout study achieving ${metricsC.totalGFA.toLocaleString()} m² GFA across ${towerFloorsC} storeys against the supplied verified KLB ${maxFAR.toFixed(2)}x control.`
+      : `Non-legal planning study achieving ${metricsC.totalGFA.toLocaleString()} m² GFA across an assumed ${towerFloorsC} storeys using working KLB ${maxFAR.toFixed(2)}x. Verify planning controls before reliance.`,
     isPreferred: false,
     status: complianceC.status as DevelopmentScenario['status'],
     complianceReport: complianceC,
@@ -639,7 +668,9 @@ export function createCase(params: CreateCaseParams): Project {
       unverifiedAssumptionsCount: params.hasZoningEvidence ? 0 : 2
     },
     risks: ['Demands total demolition and high construction capital expenditure.'],
-    opportunities: ['Maximizes allowable real estate asset value under statutory municipal limits.'],
+    opportunities: [verifiedPlanningBasis
+      ? 'Tests potential asset value against the supplied verified municipal density control.'
+      : 'Tests potential asset value under a clearly marked working density assumption.'],
     createdAt: now,
     updatedAt: now
   };
@@ -681,7 +712,9 @@ export function createCase(params: CreateCaseParams): Project {
       projectId: caseId,
       sourceId: 'src-intake-01',
       sourceName: params.hasZoningEvidence ? 'Official Municipal Zoning Certificate (RDTR)' : 'Opportunity Intake (User Parameter)',
-      statement: `Zoning parameter indicates ${params.zoneCode || 'K.1'} (${params.zoneName || 'Commercial'}) with statutory KLB/FAR limit of ${maxFAR.toFixed(2)}x (Max GFA: ${maxGFA.toLocaleString()} m²).`,
+      statement: params.hasZoningEvidence
+        ? `Zoning evidence indicates ${params.zoneCode || 'K.1'} (${params.zoneName || 'Commercial'}) with KLB/FAR limit ${maxFAR.toFixed(2)}x (maximum study GFA: ${maxGFA.toLocaleString()} m²).`
+        : `User-entered working planning parameter: ${params.zoneCode || 'zone not provided'} with KLB/FAR ${maxFAR.toFixed(2)}x (study GFA: ${maxGFA.toLocaleString()} m²). This is not verified statutory evidence.`,
       category: 'ZONING_PLANNING',
       classification: params.hasZoningEvidence ? 'FACT' : 'CLAIM',
       confidence: params.hasZoningEvidence ? 'HIGH' : 'LOW',
@@ -762,12 +795,12 @@ export function createCase(params: CreateCaseParams): Project {
     zoningLimits: {
       zoneCode: params.zoneCode || 'K.1',
       zoneName: params.zoneName || 'Perkantoran, Perdagangan dan Jasa',
-      maxFAR,
-      maxCoveragePct,
+      maxFAR: suppliedMaxFAR,
+      maxCoveragePct: suppliedMaxCoveragePct,
       minKDHPct,
       maxKTBPct: params.statutoryMaxKTBPct || 55.0,
       maxHeightMeters,
-      maxFloors,
+      maxFloors: params.maxFloors ?? params.statutoryMaxFloors,
       setbacks: defaultSetbacks
     },
     valuation: params.askingPriceAmount ? {
@@ -795,8 +828,12 @@ export function createCase(params: CreateCaseParams): Project {
       buildableArea: netBuildableArea,
       coordinateSystem: 'WGS84',
       frontageLength: standardFrontage,
+      lotDepth,
       accessRoadWidth: 8.0,
       address: params.address.trim(),
+      streetName: street.value,
+      streetNameSource: street.source,
+      dimensionProvenance: parcelResolution.provenance,
       projectName: params.name.trim(),
       hasZoningEvidence: Boolean(params.hasZoningEvidence),
       setbacks: defaultSetbacks,

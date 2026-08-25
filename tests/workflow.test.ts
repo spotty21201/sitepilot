@@ -4,6 +4,7 @@ import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 
 const ZONING_LIMITS = {
   maxHeightFloors: 8,
+  maxHeightMeters: 32,
   maxFAR: 3.2,
   maxCoveragePct: 55,
 };
@@ -120,7 +121,8 @@ describe('SitePilot complete user journey', () => {
     expect(dae).toContain('name="SITE_BOUNDARY"');
     expect(dae).toContain('name="BUILDABLE_AREA"');
     expect(dae).toContain('name="ACCESS_JL_TEUKU_UMAR"');
-    expect(dae.match(/<geometry\s/g)).toHaveLength(scenarioB.masses.length + 4);
+    expect(dae.match(/<geometry\s/g)).toHaveLength(scenarioB.masses.length + 3);
+    expect(dae).not.toContain('6.5m access');
     for (const mass of scenarioB.masses) {
       expect(dae).toContain(mass.name.toUpperCase().replace(/[^A-Z0-9_]/g, '_'));
     }

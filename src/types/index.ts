@@ -61,12 +61,35 @@ export interface SiteGeometry {
   buildableArea: number;       // in m² (gross minus setbacks & constraints)
   setbacks: Setbacks;
   frontageLength?: number;     // in meters
+  lotDepth?: number;           // in meters; rectangular study depth from the street-facing edge
   accessRoadWidth?: number;    // in meters
   address?: string;
+  streetName?: string;
+  streetNameSource?: 'ADDRESS_DERIVED' | 'USER_ENTERED' | 'NOT_PROVIDED';
+  dimensionProvenance?: ParcelDimensionProvenance;
   projectName?: string;
   hasZoningEvidence?: boolean;
   coordinateSystem: 'WGS84' | 'EPSG:3857';
   boundingBox?: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+}
+
+export type ParcelDimensionSource = 'USER_ENTERED' | 'ESTIMATED' | 'EVIDENCE_VERIFIED' | 'LEGACY_INFERRED';
+
+export interface ParcelDimensionValue {
+  value: number;
+  source: ParcelDimensionSource;
+  formula?: string;
+  originatingInputs?: string[];
+}
+
+export interface ParcelDimensionProvenance {
+  assumption: 'RECTANGULAR_STUDY_PARCEL';
+  calculationMethod: 'WIDTH_X_DEPTH' | 'AREA_DIVIDED_BY_FRONTAGE' | 'LEGACY_AREA_DIVIDED_BY_FRONTAGE';
+  frontage: ParcelDimensionValue;
+  depth: ParcelDimensionValue;
+  area: ParcelDimensionValue;
+  suppliedAreaM2?: number;
+  warning?: string;
 }
 
 export interface BuildingMass {
@@ -300,12 +323,12 @@ export interface ExistingAssetInfo {
 export interface ProjectZoningLimits {
   zoneCode?: string;        // e.g. "K.1" or "Subzone R.9"
   zoneName?: string;        // e.g. "Perkantoran, Perdagangan dan Jasa"
-  maxFAR: number;           // e.g. 6.65
-  maxCoveragePct: number;   // e.g. 55.0%
+  maxFAR?: number;          // e.g. 6.65
+  maxCoveragePct?: number;  // e.g. 55.0%
   minKDHPct?: number;       // e.g. 20.0%
   maxKTBPct?: number;       // e.g. 55.0%
-  maxHeightMeters: number;  // e.g. 32.0m or 48.0m
-  maxFloors: number;        // e.g. 8 or 14 floors
+  maxHeightMeters?: number; // e.g. 32.0m or 48.0m
+  maxFloors?: number;       // legacy/input reference; derived height limit is authoritative when height exists
   setbacks: Setbacks;
 }
 

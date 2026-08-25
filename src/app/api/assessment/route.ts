@@ -6,6 +6,7 @@ import {
   evaluateScenarioCompliance 
 } from '@/lib/geometry/engine';
 import { BuildingMass, PlanningAssessment, Setbacks } from '@/types';
+import { deriveScenarioFloorLimit } from '@/lib/opportunity/canonical-opportunity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,7 @@ interface AssessmentRequestBody {
   scenarioId: string;
   scenarioName: string;
   grossSiteArea: number;
+  frontageLength?: number;
   setbacks: Setbacks;
   masses: BuildingMass[];
   hasZoningEvidence?: boolean;
@@ -247,20 +249,31 @@ export async function POST(request: NextRequest) {
     const masses = body.masses;
     const hasZoningEvidence = body.hasZoningEvidence !== undefined
       ? Boolean(body.hasZoningEvidence)
-      : (grossSiteArea === 16850 || Boolean(body.projectName && body.projectName.includes('Menteng')));
+      : false;
     const targetProjectName = body.projectName || body.caseName || 'Development Opportunity';
     const targetAddress = body.address || 'Site Location';
 
-    const statMaxFAR = body.zoningLimits?.maxFAR ?? 3.20;
-    const statMaxCoveragePct = body.zoningLimits?.maxCoveragePct ?? 55.0;
-    const statMinKDHPct = body.zoningLimits?.minKDHPct ?? 20.0;
-    const statMaxFloors = body.zoningLimits?.maxFloors ?? (statMaxFAR > 5.0 ? 14 : 8);
-    const statMaxHeightM = body.zoningLimits?.maxHeightMeters ?? (body.zoningLimits?.maxFloors ? (body.zoningLimits.maxFloors * 3.5 + 2.0) : 32.0);
+    const statMaxFAR = body.zoningLimits?.maxFAR;
+    const statMaxCoveragePct = body.zoningLimits?.maxCoveragePct;
+    const statMinKDHPct = body.zoningLimits?.minKDHPct;
+    const statMaxHeightM = body.zoningLimits?.maxHeightMeters;
+    const scenarioFloorToFloor = masses.reduce((referenceMass, mass) => (
+      !referenceMass || mass.height > referenceMass.height ? mass : referenceMass
+    ), masses[0])?.floorToFloorHeight || 3.5;
+    const floorLimit = deriveScenarioFloorLimit({
+      maximumHeightMeters: statMaxHeightM,
+      maximumFAR: statMaxFAR,
+      maximumCoveragePct: statMaxCoveragePct,
+      floorToFloorHeight: scenarioFloorToFloor,
+    });
+    const statMaxFloors = floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
+      ? floorLimit.floorCount ?? undefined
+      : undefined;
     const statZoneName = body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode;
 
-    const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks);
+    const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks, body.frontageLength);
     const overlaps = calculateMassPairwiseIntersections(masses);
-    const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses);
+    const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses, body.frontageLength);
     const complianceReport = evaluateScenarioCompliance(
       grossSiteArea, 
       canonicalSetbacks, 
@@ -286,14 +299,15 @@ export async function POST(request: NextRequest) {
       `- Planning Evidence Status: ${hasZoningEvidence ? 'VERIFIED (Municipal Certificate on File)' : 'UNVERIFIED (No RDTR/KRK Certificate on file)'}`,
       body.zoningLimits ? `- Zoning Classification: ${body.zoningLimits.zoneCode || 'K.1'} (${body.zoningLimits.zoneName || 'Commercial'})` : '',
       `- Total Building Height: ${metrics.totalHeightMeters.toFixed(1)}m (${metrics.totalFloors} Storeys)`,
-      `- Height Limit: ${statMaxHeightM.toFixed(1)}m (${statMaxFloors} Storeys max)`,
+      `- Floor Limit Basis: ${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'HEIGHT DERIVED WHOLE FLOOR LIMIT FROM SUPPLIED MAXIMUM' : floorLimit.kind.replace(/_/g, ' ')}; ${floorLimit.formula}; ${floorLimit.explanation}`,
+      `- Height Limit: ${statMaxHeightM === undefined ? 'Not provided' : `${statMaxHeightM.toFixed(1)}m (${statMaxFloors} whole storeys at ${scenarioFloorToFloor}m floor-to-floor)`}`,
       `- Height Overrun: ${complianceReport.metrics.heightOverrunMeters > 0 ? `+${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Within Envelope)'}`,
-      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${statMaxFAR.toFixed(2)}x)`,
+      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${statMaxFAR === undefined ? 'Not provided' : `${statMaxFAR.toFixed(2)}x`})`,
       `- Total Gross Floor Area (GFA): ${metrics.totalGFA.toLocaleString()} m²`,
       body.existingAsset?.gfa ? `- Existing Structure: ${body.existingAsset.gfa.toLocaleString()} m² (${body.existingAsset.floors || 4} floors, status: ${body.existingAsset.currentStatus || 'Operational'})` : '',
       body.expansionHeadroomGFA !== undefined ? `- Permissible Expansion Headroom: ${body.expansionHeadroomGFA.toLocaleString()} m²` : '',
-      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct}%)`,
-      `- Unbuilt Open Space (KDH Basis): ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%, min required: ${statMinKDHPct}%)`,
+      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct === undefined ? 'Not provided' : `${statMaxCoveragePct}%`})`,
+      `- Unbuilt Open Space (KDH Basis): ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%, min required: ${statMinKDHPct === undefined ? 'Not provided' : `${statMinKDHPct}%`})`,
       body.valuation?.askingPriceAmount ? `- Commercial Terms: Asking Rp ${(body.valuation.askingPriceAmount / 1e9).toFixed(1)}B (~Rp ${(body.valuation.pricePerM2 ? (body.valuation.pricePerM2 / 1e6).toFixed(1) : (body.valuation.askingPriceAmount / grossSiteArea / 1e6).toFixed(1))}M/m² land)` : '',
       body.valuation?.njopAmount ? `- Tax Benchmark (NJOP): Rp ${(body.valuation.njopAmount / 1e9).toFixed(1)}B` : '',
       `- Setbacks: Front ${canonicalSetbacks.front}m, Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
@@ -386,9 +400,9 @@ Provide a professional, clear assessment.`;
         status: complianceReport.assessmentStatus,
         decision: complianceReport.decisionText,
         supportingEvidence: evidenceLines.length > 0 ? evidenceLines : [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${statMaxHeightM === undefined ? 'Limit not provided' : `Cap: ${statMaxHeightM.toFixed(1)}m`})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${statMaxFAR === undefined ? 'Limit not provided' : `Max: ${statMaxFAR.toFixed(2)}x`})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${statMaxCoveragePct === undefined ? 'Limit not provided' : `Max: ${statMaxCoveragePct}%`})`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
         identifiedRisks: complianceReport.identifiedRisks,
@@ -421,9 +435,9 @@ Provide a professional, clear assessment.`;
         status: complianceReport.assessmentStatus,
         decision: complianceReport.decisionText,
         supportingEvidence: [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${hasZoningEvidence ? `Cap: ${statMaxHeightM.toFixed(1)}m` : 'Provisional'})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${hasZoningEvidence ? `Max: ${statMaxFAR.toFixed(2)}x` : 'Provisional'})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${hasZoningEvidence ? `Max: ${statMaxCoveragePct}%` : 'Provisional'})`,
+          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${statMaxHeightM === undefined ? 'Limit not provided' : `Cap: ${statMaxHeightM.toFixed(1)}m`})`,
+          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${statMaxFAR === undefined ? 'Limit not provided' : `Max: ${statMaxFAR.toFixed(2)}x`})`,
+          `Site Coverage: ${metrics.siteCoveragePercentage}% (${statMaxCoveragePct === undefined ? 'Limit not provided' : `Max: ${statMaxCoveragePct}%`})`,
           `Setbacks: Front ${canonicalSetbacks.front}m`
         ],
         identifiedRisks: complianceReport.identifiedRisks,

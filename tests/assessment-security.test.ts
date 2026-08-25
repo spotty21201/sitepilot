@@ -16,7 +16,20 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     vi.restoreAllMocks();
   });
 
+  const planningEvidence = {
+    hasZoningEvidence: true,
+    frontageLength: GOLDEN_PROJECT.site.frontageLength,
+    zoningLimits: {
+      zoneName: GOLDEN_PROJECT.zoningLimits?.zoneName,
+      maxFAR: GOLDEN_PROJECT.zoningLimits?.maxFAR,
+      maxCoveragePct: GOLDEN_PROJECT.zoningLimits?.maxCoveragePct,
+      minKDHPct: GOLDEN_PROJECT.zoningLimits?.minKDHPct,
+      maxHeightMeters: GOLDEN_PROJECT.zoningLimits?.maxHeightMeters,
+    },
+  };
+
   const validScenarioBPayload = {
+    ...planningEvidence,
     scenarioId: GOLDEN_PROJECT.scenarios[1].id,
     scenarioName: GOLDEN_PROJECT.scenarios[1].name,
     grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
@@ -25,6 +38,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
   };
 
   const validScenarioCPayload = {
+    ...planningEvidence,
     scenarioId: GOLDEN_PROJECT.scenarios[2].id,
     scenarioName: GOLDEN_PROJECT.scenarios[2].name,
     grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
@@ -291,6 +305,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
   // Test 11: Regression test: Height 31m against 32m cap is compliant and says 31.0m
   it('11. verifies height 31.0m against 32.0m cap is compliant and reports 31.0m', async () => {
     const payload31m = {
+      ...planningEvidence,
       scenarioId: 'scen-test-31m',
       scenarioName: 'Test 31m Scheme',
       grossSiteArea: 16850,
@@ -329,12 +344,13 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(data.status).toBe('COMPLIANT');
     expect(data.decision).toContain('31.0m');
     expect(data.decision).toContain('Compliant');
-    expect(data.identifiedRisks[0]).toContain('Northern access');
+    expect(data.identifiedRisks[0]).toContain('Street access');
   });
 
   // Test 12: Regression test: Height 33m against 32m cap is non-compliant by exactly +1.0m
   it('12. verifies height 33.0m against 32.0m cap is non-compliant by exactly +1.0m', async () => {
     const payload33m = {
+      ...planningEvidence,
       scenarioId: 'scen-test-33m',
       scenarioName: 'Test 33m Scheme',
       grossSiteArea: 16850,
@@ -380,6 +396,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
   // Test 13: Regression test: FAR violation returns tailored FAR risks
   it('13. verifies FAR above 3.20x returns NON_COMPLIANT_FAR and specific FAR risks without northern-access text', async () => {
     const payloadHighFar = {
+      ...planningEvidence,
       scenarioId: 'scen-test-far',
       scenarioName: 'High FAR Scheme',
       grossSiteArea: 16850,
@@ -426,6 +443,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
   // Test 14: Regression test: Coverage violation returns tailored coverage risks
   it('14. verifies coverage above 55% returns NON_COMPLIANT_COVERAGE and specific coverage risks without height-buffer text', async () => {
     const payloadHighKdb = {
+      ...planningEvidence,
       scenarioId: 'scen-test-kdb',
       scenarioName: 'High KDB Scheme',
       grossSiteArea: 16850,

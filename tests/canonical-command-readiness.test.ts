@@ -70,6 +70,7 @@ describe('Production canonical spatial command reducer', () => {
       { type: 'MOVE_MASS', targetId: west.id, payload: { position: { ...west.position, x: -22 } }, description: 'move' },
       { type: 'RESIZE_MASS', targetId: west.id, payload: { width: 36, length: 70 }, description: 'resize' },
       { type: 'SET_MASS_FLOORS', targetId: west.id, payload: { floors: 7 }, description: 'storeys' },
+      { type: 'SET_MASS_TYPE_FLOORS', targetId: scenario.id, payload: { massType: 'TOWER', floors: 5 }, description: 'tower storeys' },
       { type: 'SET_FLOOR_TO_FLOOR_HEIGHT', targetId: west.id, payload: { floorToFloorHeight: 4 }, description: 'f2f' },
       { type: 'SET_MASS_PROGRAM', targetId: west.id, payload: { program: 'RETAIL' }, description: 'programme' },
       { type: 'ADD_MASS', targetId: added.id, payload: { mass: added }, description: 'add' },
@@ -424,6 +425,61 @@ describe('Planning and export invariants at a canonical revision', () => {
     expect(f2f.scenario.metrics.siteCoveragePercentage).toBe(scenario.metrics.siteCoveragePercentage);
   });
 
+  it('updates podium and tower storeys independently while preserving podium stacking', () => {
+    const project = freshProject();
+    const scenario = project.scenarios[1];
+    const service = new CanonicalSpatialCommandService(successfulPersist);
+    const podium = scenario.masses.find((mass) => mass.type === 'PODIUM')!;
+    const originalTowerFloors = scenario.masses.filter((mass) => mass.type === 'TOWER').map((mass) => mass.floors);
+    const podiumEdit = service.execute(project, command(project, scenario.id, {
+      type: 'SET_MASS_TYPE_FLOORS', targetId: scenario.id, payload: { massType: 'PODIUM', floors: 1 }, description: 'podium storeys',
+    }, 'cmd:podium-storeys'));
+    expect(podiumEdit.accepted).toBe(true);
+    if (!podiumEdit.accepted) return;
+    const editedPodium = podiumEdit.scenario.masses.find((mass) => mass.type === 'PODIUM')!;
+    expect(editedPodium.floors).toBe(1);
+    expect(editedPodium.height).toBe(podium.floorToFloorHeight);
+    expect(podiumEdit.scenario.masses.filter((mass) => mass.type === 'TOWER').map((mass) => mass.floors)).toEqual(originalTowerFloors);
+    expect(podiumEdit.scenario.masses.filter((mass) => mass.type === 'TOWER').every((mass) => mass.position.y === editedPodium.height)).toBe(true);
+
+    const towerEdit = service.execute(podiumEdit.project, command(podiumEdit.project, scenario.id, {
+      type: 'SET_MASS_TYPE_FLOORS', targetId: scenario.id, payload: { massType: 'TOWER', floors: 5 }, description: 'tower storeys',
+    }, 'cmd:tower-storeys'));
+    expect(towerEdit.accepted).toBe(true);
+    if (!towerEdit.accepted) return;
+    expect(towerEdit.scenario.masses.filter((mass) => mass.type === 'TOWER').every((mass) => mass.floors === 5)).toBe(true);
+    expect(towerEdit.scenario.masses.find((mass) => mass.type === 'PODIUM')?.floors).toBe(1);
+
+    const undoTower = service.undo(towerEdit.project, project.id, scenario.id, '2026-08-24T18:00:00.000Z');
+    expect(undoTower.accepted).toBe(true);
+    expect(undoTower.project.scenarios[1].masses.filter((mass) => mass.type === 'TOWER').map((mass) => mass.floors)).toEqual(originalTowerFloors);
+    const redoTower = service.redo(undoTower.project, project.id, scenario.id, '2026-08-24T18:01:00.000Z');
+    expect(redoTower.accepted).toBe(true);
+    expect(redoTower.project.scenarios[1].masses.filter((mass) => mass.type === 'TOWER').every((mass) => mass.floors === 5)).toBe(true);
+  });
+
+  it('accepts a 0 m front setback and symmetric 4 m sides as one undoable canonical revision', () => {
+    const project = freshProject();
+    const scenario = project.scenarios[1];
+    const service = new CanonicalSpatialCommandService(successfulPersist);
+    const edit = service.execute(project, command(project, scenario.id, {
+      type: 'SET_SETBACKS', targetId: scenario.id,
+      payload: { setbacks: { ...scenario.assumptionsUsed.setbacks, front: 0, sideLeft: 4, sideRight: 4 } },
+      description: 'front and symmetric side setbacks',
+    }, 'cmd:setbacks-zero-four'));
+    expect(edit.accepted).toBe(true);
+    if (!edit.accepted) return;
+    expect(edit.scenario.assumptionsUsed.setbacks).toMatchObject({ front: 0, sideLeft: 4, sideRight: 4 });
+    expect(edit.scenario.metrics.netBuildableArea).toBeGreaterThan(scenario.metrics.netBuildableArea);
+    expect(edit.scenario.complianceReport?.status).toBe(edit.scenario.status);
+    const undo = service.undo(edit.project, project.id, scenario.id, '2026-08-24T18:02:00.000Z');
+    expect(undo.accepted).toBe(true);
+    expect(undo.project.scenarios[1].assumptionsUsed.setbacks.front).toBe(scenario.assumptionsUsed.setbacks.front);
+    const redo = service.redo(undo.project, project.id, scenario.id, '2026-08-24T18:03:00.000Z');
+    expect(redo.accepted).toBe(true);
+    expect(redo.project.scenarios[1].assumptionsUsed.setbacks).toMatchObject({ front: 0, sideLeft: 4, sideRight: 4 });
+  });
+
   it('resizing the podium updates footprint, GFA, FAR, coverage, containment, and compliance together', () => {
     const project = freshProject();
     const scenario = project.scenarios[1];
@@ -479,7 +535,8 @@ describe('Planning and export invariants at a canonical revision', () => {
     const document = new DOMParser().parseFromString(xml, 'application/xml');
     expect(document.querySelector('unit')?.getAttribute('meter')).toBe('1.0');
     expect(document.querySelector('up_axis')?.textContent).toBe('Z_UP');
-    expect(document.querySelectorAll('instance_geometry')).toHaveLength(7);
+    expect(document.querySelectorAll('instance_geometry')).toHaveLength(6);
+    expect(xml).not.toContain('ACCESS_SECONDARY_CORRIDOR');
     const westPositions = document.querySelector('#geom-mass-1-positions-array')?.textContent || '';
     expect(westPositions.split(/\s+/).map(Number)).toContain(36);
     expect(westPositions.split(/\s+/).map(Number)).not.toContain(50);

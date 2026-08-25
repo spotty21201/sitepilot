@@ -12,11 +12,13 @@ import {
   evaluateScenarioCompliance,
   fitMassesToBuildableEnvelope,
 } from '@/lib/geometry/engine';
+import { deriveScenarioFloorLimit, getScenarioFloorToFloorHeight } from '@/lib/opportunity/canonical-opportunity';
 
 export type CanonicalSpatialCommandType =
   | 'MOVE_MASS'
   | 'RESIZE_MASS'
   | 'SET_MASS_FLOORS'
+  | 'SET_MASS_TYPE_FLOORS'
   | 'SET_FLOOR_TO_FLOOR_HEIGHT'
   | 'SET_MASS_PROGRAM'
   | 'ADD_MASS'
@@ -43,6 +45,7 @@ export type CanonicalSpatialCommand =
   | (CommandBase & { type: 'MOVE_MASS'; payload: { position: BuildingMass['position'] } })
   | (CommandBase & { type: 'RESIZE_MASS'; payload: { width: number; length: number } })
   | (CommandBase & { type: 'SET_MASS_FLOORS'; payload: { floors: number } })
+  | (CommandBase & { type: 'SET_MASS_TYPE_FLOORS'; payload: { massType: 'PODIUM' | 'TOWER'; floors: number } })
   | (CommandBase & { type: 'SET_FLOOR_TO_FLOOR_HEIGHT'; payload: { floorToFloorHeight: number } })
   | (CommandBase & { type: 'SET_MASS_PROGRAM'; payload: { program: BuildingMass['program'] } })
   | (CommandBase & { type: 'ADD_MASS'; payload: { mass: BuildingMass } })
@@ -313,6 +316,7 @@ function validateCommandPayload(command: CanonicalSpatialCommand): string | null
         ? null
         : 'Width and length must be positive finite values.';
     case 'SET_MASS_FLOORS':
+    case 'SET_MASS_TYPE_FLOORS':
     case 'SET_SCENARIO_FLOORS':
       return Number.isInteger(command.payload.floors) && command.payload.floors > 0
         ? null
@@ -364,6 +368,12 @@ function deriveScenario(
     project.site.frontageLength
   );
   const pairwiseOverlap = calculateMassPairwiseIntersections(masses);
+  const floorLimit = deriveScenarioFloorLimit({
+    maximumHeightMeters: project.zoningLimits?.maxHeightMeters,
+    maximumFAR: project.zoningLimits?.maxFAR,
+    maximumCoveragePct: project.zoningLimits?.maxCoveragePct,
+    floorToFloorHeight: getScenarioFloorToFloorHeight({ ...scenario, masses }),
+  });
   const complianceReport = evaluateScenarioCompliance(
     project.site.grossSiteArea,
     setbacks,
@@ -377,7 +387,9 @@ function deriveScenario(
       maxCoveragePct: project.zoningLimits?.maxCoveragePct,
       minKDHPct: project.zoningLimits?.minKDHPct,
       maxHeightMeters: project.zoningLimits?.maxHeightMeters,
-      maxFloors: project.zoningLimits?.maxFloors,
+      maxFloors: floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
+        ? floorLimit.floorCount ?? undefined
+        : undefined,
       zoningName: project.zoningLimits?.zoneName,
       frontageLength: project.site.frontageLength,
     }
@@ -464,7 +476,7 @@ export function executeCanonicalSpatialCommand(
   let setbacks = { ...scenario.assumptionsUsed.setbacks };
   let flags: { fitted?: boolean; reset?: boolean } | undefined;
   const massIndex = masses.findIndex((mass) => mass.id === command.targetId);
-  const requiresMass = !['SET_SCENARIO_FLOORS', 'SET_SETBACKS', 'FIT_TO_ENVELOPE', 'RESET_SCENARIO'].includes(command.type);
+  const requiresMass = !['SET_MASS_TYPE_FLOORS', 'SET_SCENARIO_FLOORS', 'SET_SETBACKS', 'FIT_TO_ENVELOPE', 'RESET_SCENARIO'].includes(command.type);
   if (requiresMass && command.type !== 'ADD_MASS' && command.type !== 'DUPLICATE_MASS' && massIndex < 0) {
     return reject(project, 'TARGET_NOT_FOUND', 'Command target mass does not exist in this scenario.');
   }
@@ -492,6 +504,28 @@ export function executeCanonicalSpatialCommand(
     case 'SET_MASS_FLOORS':
       masses[massIndex] = normalizeChangedMass({ ...masses[massIndex], floors: command.payload.floors });
       break;
+    case 'SET_MASS_TYPE_FLOORS': {
+      const matchingMasses = masses.filter((mass) => mass.type === command.payload.massType);
+      if (matchingMasses.length === 0) {
+        return reject(project, 'TARGET_NOT_FOUND', `This scenario has no ${command.payload.massType.toLowerCase()} mass.`);
+      }
+      const previousPodiumTop = command.payload.massType === 'PODIUM'
+        ? matchingMasses.reduce((top, mass) => Math.max(top, mass.position.y + mass.height), 0)
+        : null;
+      masses = masses.map((mass) => mass.type === command.payload.massType
+        ? normalizeChangedMass({ ...mass, floors: command.payload.floors })
+        : mass);
+      if (previousPodiumTop !== null) {
+        const nextPodiumTop = masses
+          .filter((mass) => mass.type === 'PODIUM')
+          .reduce((top, mass) => Math.max(top, mass.position.y + mass.height), 0);
+        masses = masses.map((mass) => mass.type === 'TOWER'
+          && Math.abs(mass.position.y - previousPodiumTop) <= 0.05
+          ? { ...mass, position: { ...mass.position, y: nextPodiumTop } }
+          : mass);
+      }
+      break;
+    }
     case 'SET_FLOOR_TO_FLOOR_HEIGHT':
       masses[massIndex] = normalizeChangedMass({
         ...masses[massIndex],

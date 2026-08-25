@@ -39,9 +39,9 @@ export function ScenarioComparisonModal({
   if (!isOpen) return null;
 
   const scenarios = project.scenarios || [];
-  const statMaxFAR = project.zoningLimits?.maxFAR || 3.20;
-  const statMaxCoverage = project.zoningLimits?.maxCoveragePct || 55.0;
-  const statMinKDH = project.zoningLimits?.minKDHPct || 20.0;
+  const statMaxFAR = project.zoningLimits?.maxFAR;
+  const statMaxCoverage = project.zoningLimits?.maxCoveragePct;
+  const statMinKDH = project.zoningLimits?.minKDHPct;
   const askingPrice = project.valuation?.askingPriceAmount || project.askingPrice?.amount;
 
   return (
@@ -162,10 +162,10 @@ export function ScenarioComparisonModal({
               <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Floor Area Ratio (KLB)</span>
-                  <span className="text-[10px] text-[var(--text-muted)] block">(Statutory Cap: {statMaxFAR.toFixed(2)}x)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">({statMaxFAR === undefined ? 'Limit not provided' : `Supplied cap: ${statMaxFAR.toFixed(2)}x`})</span>
                 </div>
                 {scenarios.map((scen) => {
-                  const farExceeded = scen.metrics.farKLB > statMaxFAR + 0.01;
+                  const farExceeded = statMaxFAR !== undefined && scen.metrics.farKLB > statMaxFAR + 0.01;
                   return (
                     <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
                       <span className={`font-bold ${farExceeded ? 'text-[var(--status-error)]' : 'text-[var(--status-verified)]'}`}>
@@ -198,10 +198,10 @@ export function ScenarioComparisonModal({
               <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Site Coverage (KDB)</span>
-                  <span className="text-[10px] text-[var(--text-muted)] block">(Statutory Limit: {statMaxCoverage}%)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">({statMaxCoverage === undefined ? 'Limit not provided' : `Supplied limit: ${statMaxCoverage}%`})</span>
                 </div>
                 {scenarios.map((scen) => {
-                  const covExceeded = scen.metrics.siteCoveragePercentage > statMaxCoverage + 0.1;
+                  const covExceeded = statMaxCoverage !== undefined && scen.metrics.siteCoveragePercentage > statMaxCoverage + 0.1;
                   return (
                     <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
                       <span className={`font-bold ${covExceeded ? 'text-[var(--status-error)]' : 'text-[var(--text-primary)]'}`}>
@@ -219,7 +219,7 @@ export function ScenarioComparisonModal({
               <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">
                   <span>Open Space (KDH Basis)</span>
-                  <span className="text-[10px] text-[var(--text-muted)] block">(Target: ≥{statMinKDH}%)</span>
+                  <span className="text-[10px] text-[var(--text-muted)] block">({statMinKDH === undefined ? 'Requirement not provided' : `Supplied minimum: ≥${statMinKDH}%`})</span>
                 </div>
                 {scenarios.map((scen) => (
                   <div key={scen.id} className="font-mono tabular-nums text-[var(--text-secondary)] text-right sm:text-left">

@@ -150,7 +150,19 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
       16850,
       scenarioB.assumptionsUsed.setbacks,
       scenarioB.masses,
-      scenarioB.metrics
+      scenarioB.metrics,
+      calculateMassPairwiseIntersections(scenarioB.masses),
+      {
+        scenarioName: scenarioB.name,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        maxFAR: GOLDEN_PROJECT.zoningLimits?.maxFAR,
+        maxCoveragePct: GOLDEN_PROJECT.zoningLimits?.maxCoveragePct,
+        minKDHPct: GOLDEN_PROJECT.zoningLimits?.minKDHPct,
+        maxHeightMeters: GOLDEN_PROJECT.zoningLimits?.maxHeightMeters,
+        maxFloors: 8,
+        zoningName: GOLDEN_PROJECT.zoningLimits?.zoneName,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+      },
     );
     expect(baselineComp.isCompliant).toBe(true);
     expect(baselineComp.isGreen).toBe(true);
@@ -166,7 +178,19 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
       16850,
       scenarioB.assumptionsUsed.setbacks,
       scenarioB.masses,
-      overheightMetrics
+      overheightMetrics,
+      calculateMassPairwiseIntersections(scenarioB.masses),
+      {
+        scenarioName: scenarioB.name,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        maxFAR: GOLDEN_PROJECT.zoningLimits?.maxFAR,
+        maxCoveragePct: GOLDEN_PROJECT.zoningLimits?.maxCoveragePct,
+        minKDHPct: GOLDEN_PROJECT.zoningLimits?.minKDHPct,
+        maxHeightMeters: GOLDEN_PROJECT.zoningLimits?.maxHeightMeters,
+        maxFloors: 8,
+        zoningName: GOLDEN_PROJECT.zoningLimits?.zoneName,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+      },
     );
     expect(overheightComp.isCompliant).toBe(false);
     expect(overheightComp.isGreen).toBe(false);

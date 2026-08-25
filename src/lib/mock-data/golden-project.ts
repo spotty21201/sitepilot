@@ -43,7 +43,22 @@ export const GOLDEN_PROJECT: Project = {
     hasZoningEvidence: true,
     coordinateSystem: 'WGS84',
     frontageLength: 110,
+    lotDepth: 153.18,
     accessRoadWidth: 6.5,
+    streetName: 'Jl. Teuku Umar',
+    streetNameSource: 'ADDRESS_DERIVED',
+    dimensionProvenance: {
+      assumption: 'RECTANGULAR_STUDY_PARCEL',
+      calculationMethod: 'AREA_DIVIDED_BY_FRONTAGE',
+      frontage: { value: 110, source: 'USER_ENTERED' },
+      depth: {
+        value: 153.18,
+        source: 'ESTIMATED',
+        formula: 'site area ÷ street frontage',
+        originatingInputs: ['site area', 'street frontage'],
+      },
+      area: { value: 16850, source: 'EVIDENCE_VERIFIED' },
+    },
     setbacks: {
       front: 10,
       rear: 6,

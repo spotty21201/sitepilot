@@ -104,8 +104,9 @@ describe('Hotel Sofyan Betawi — Human Acceptance & Investor Workflow Integrati
     expect(scenB.masses.length).toBe(2);
     expect(scenB.complianceReport?.isCompliant).toBe(true);
 
-    // Scenario C: Maximum Statutory Buildout
-    expect(scenC.name).toContain('Scenario C: Maximum Statutory Buildout');
+    // Scenario C is explicitly a study because the entered planning values are not verified evidence.
+    expect(scenC.name).toContain('Scenario C: Planning Study Buildout');
+    expect(scenC.description).toContain('Non-legal planning study');
     expect(scenC.metrics.totalGFA).toBeGreaterThan(scenB.metrics.totalGFA);
     expect(scenC.metrics.farKLB).toBeLessThanOrEqual(6.65);
     expect(scenC.metrics.siteCoveragePercentage).toBeLessThanOrEqual(55.0);

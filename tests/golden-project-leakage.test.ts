@@ -144,7 +144,7 @@ describe('Golden Project Zero-Leakage & Provenance Decoupling Suite', () => {
     }
 
     // Verify node uses dynamic street address
-    expect(daeXml).toContain('ACCESS_JL__ASIA_AFRIKA_NO__100');
+    expect(daeXml).toContain('ACCESS_JL_ASIA_AFRIKA');
   });
 
   it('adapts clean scene graph nodes into Pascal format without hardcoded Menteng descriptions', () => {

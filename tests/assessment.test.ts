@@ -27,6 +27,9 @@ describe('AI Planning Assessment API & Security Suite', () => {
         scenarioId: GOLDEN_PROJECT.scenarios[1].id,
         scenarioName: GOLDEN_PROJECT.scenarios[1].name,
         grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        zoningLimits: GOLDEN_PROJECT.zoningLimits,
         setbacks: GOLDEN_PROJECT.scenarios[1].assumptionsUsed.setbacks,
         masses: GOLDEN_PROJECT.scenarios[1].masses
       })
@@ -50,6 +53,9 @@ describe('AI Planning Assessment API & Security Suite', () => {
         scenarioId: GOLDEN_PROJECT.scenarios[1].id,
         scenarioName: GOLDEN_PROJECT.scenarios[1].name,
         grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        zoningLimits: GOLDEN_PROJECT.zoningLimits,
         setbacks: GOLDEN_PROJECT.scenarios[1].assumptionsUsed.setbacks,
         masses: GOLDEN_PROJECT.scenarios[1].masses
       })
@@ -81,6 +87,9 @@ describe('AI Planning Assessment API & Security Suite', () => {
         scenarioId: GOLDEN_PROJECT.scenarios[2].id,
         scenarioName: GOLDEN_PROJECT.scenarios[2].name,
         grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+        hasZoningEvidence: GOLDEN_PROJECT.site.hasZoningEvidence,
+        zoningLimits: GOLDEN_PROJECT.zoningLimits,
         setbacks: GOLDEN_PROJECT.scenarios[2].assumptionsUsed.setbacks,
         masses: GOLDEN_PROJECT.scenarios[2].masses
       })
