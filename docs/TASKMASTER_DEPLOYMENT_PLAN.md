@@ -4,9 +4,19 @@ This document describes the owner-authorization boundary for the bounded Taskmas
 
 ## Infrastructure gate — 25 August 2026
 
-The local gcloud profile identifies `project-528f858c-325a-45aa-ac0` as the candidate project, but this work session has no usable authenticated Cloud SDK credentials. The installed Cloud SDK could read the profile configuration but could not read the root-owned credential database, so project access and permissions could not be tested. Firestore database existence, mode, location, retention/TTL settings, Cloud Tasks queues, Cloud Run services/revisions, service identities, IAM bindings, and Cloud Logging access therefore remain **unverified**. No Google Cloud resource, IAM binding, hosted environment variable, or deployment was changed.
+The authenticated Sentani inspection identified `project-528f858c-325a-45aa-ac0` as the active project. Firestore and Cloud Tasks APIs were not enabled, so those two APIs were enabled as the only infrastructure change in this pass. No database, queue, service account, IAM binding, hosted variable, deployment, or model call was made.
 
-Before applying the hosted slice, the owner must provide an authenticated operator context (or run the read-only commands) and confirm the Firestore location. The first commands should be:
+The read-only inventory found:
+
+- **Firestore:** no database is currently listed. `asia-southeast2` is a valid Firestore location, but creation remains blocked pending owner confirmation because the location is difficult to change later.
+- **Cloud Tasks:** no queue is currently listed in `asia-southeast2`.
+- **Cloud Run:** existing `sitepilot-vertex` remains at 100% traffic on `sitepilot-vertex-00002-4wd`, using `sitepilot-runner`, with image digest `sha256:8f0034901aba58e4b8db1b7944e8e7fd39acd751302c4d2c95df9298f5cce6fa`. Its current IAM policy is public (`allUsers` / `roles/run.invoker`) and it must not be changed by this slice. The proposed `sitepilot-taskmaster` service does not conflict by name.
+- **Artifact Registry:** existing `sitepilot` and `sitepilot-repo` Docker repositories are present in `asia-southeast2`.
+- **Cloud Build:** recent builds exist for the existing Vertex gateway; no Taskmaster image has been built.
+- **Logging:** read access was confirmed for existing Cloud Run revision logs.
+- **IAM:** the project has an existing Owner user binding and broad legacy Run Admin/build bindings. No roles were broadened or removed. The least-privilege Taskmaster identities remain uncreated.
+
+Before applying the hosted slice, the owner must confirm `asia-southeast2` as the Firestore location. The first commands after that confirmation should be:
 
 ```bash
 gcloud auth list
@@ -16,7 +26,7 @@ gcloud tasks queues list --location=asia-southeast2 --project=project-528f858c-3
 gcloud run services list --region=asia-southeast2 --project=project-528f858c-325a-45aa-ac0
 ```
 
-Do not create a Firestore database until its location is confirmed. If no compatible database exists, return the proposed location for owner approval before creation. This documentation-only gate is not evidence of hosted execution.
+Do not create a Firestore database until its location is confirmed. If the owner confirms `asia-southeast2`, create the database and record its ID/mode before creating the queue or worker. This gate is not evidence of hosted Taskmaster execution.
 
 ## Local behavior
 

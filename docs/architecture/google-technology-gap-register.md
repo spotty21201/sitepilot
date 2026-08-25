@@ -6,7 +6,7 @@ Source revision: current uncommitted worktree after the bounded Taskmaster slice
 
 - The fresh local production build at `http://127.0.0.1:3020/` verified a persisted Taskmaster fallback run through `AWAITING_APPROVAL`, canonical approval/application, completion, stale blocking, and one Spatial Console renderer.
 - No authenticated Gemini request, Vertex AI request, Cloud Run request, Firestore emulator request, Cloud Tasks request, or paid inference was invoked.
-- On 25 August 2026 the local gcloud profile identified `project-528f858c-325a-45aa-ac0` as a candidate project, but the Cloud SDK could not use the root-owned credential database in this work session. Firestore location, queues, Cloud Run revisions, IAM, and logs remain unverified; no cloud change was made.
+- On 25 August 2026 authenticated Sentani inspection identified project `project-528f858c-325a-45aa-ac0`. Firestore and Cloud Tasks APIs were enabled; no Firestore database or Cloud Tasks queue exists yet. Existing `sitepilot-vertex` Cloud Run, Artifact Registry, Cloud Build and Cloud Logging access were verified read-only. Firestore creation remains blocked pending owner confirmation of `asia-southeast2`; no database, queue, worker, IAM binding, deployment, or model call was made.
 - `gemini-3.7-flash` is the repository default/configured identifier. It is not evidence that a live request occurred.
 - The browser application stores cases in `localStorage`; Taskmaster has a Firestore adapter but local verification uses an in-memory substitute. There is no Firebase, Cloud Storage, Google Maps, Places, or Geocoding integration.
 
