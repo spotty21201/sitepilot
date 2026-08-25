@@ -31,6 +31,7 @@ import {
   CanonicalCommandResult,
   createCanonicalCommandId,
 } from '@/lib/spatial/canonical-command-service';
+import { getScenarioFloorLimit } from '@/lib/opportunity/canonical-opportunity';
 import {
   evaluateSpatialProposal,
   spatialProposalToCommand,
@@ -114,6 +115,15 @@ export function DevelopmentWorkspace({
 
   const setbacks = activeScenario.assumptionsUsed.setbacks;
   const bounds = getCanonicalParcelBounds(site.grossSiteArea, setbacks, site.frontageLength || 110);
+  const streetName = site.streetName || 'Street name not provided';
+  const planPadding = Math.max(16, Math.min(bounds.width, bounds.length) * 0.15);
+  const planRoadDepth = 20;
+  const planViewBox = [
+    bounds.minX - planPadding,
+    bounds.minY - planPadding,
+    bounds.width + planPadding * 2,
+    bounds.length + planPadding * 2 + planRoadDepth,
+  ].join(' ');
   const selectedMass = activeScenario.masses.find(m => m.id === selectedMassId) || null;
 
   // Single Authoritative Compliance Source
@@ -420,10 +430,11 @@ export function DevelopmentWorkspace({
   };
 
   const handleDisplayModeChange = (mode: ViewportDisplayMode) => {
-    setDisplayMode(mode);
-    if (mode === 'CONSTRAINTS') {
-      setShowZoningCap(true);
-    }
+    const isTurningPlanningChecksOff = mode === 'CONSTRAINTS'
+      && displayMode === 'CONSTRAINTS'
+      && showZoningCap;
+    setDisplayMode(isTurningPlanningChecksOff ? 'DEVELOPMENT' : mode);
+    setShowZoningCap(mode === 'CONSTRAINTS' && !isTurningPlanningChecksOff);
   };
 
   // Node count for Pascal scene graph
@@ -576,6 +587,7 @@ export function DevelopmentWorkspace({
                     isRotating={isRotating}
                     showDimensions={showDimensions}
                     showZoningCap={showZoningCap}
+                    zoningHeightLimitMeters={zoningHeightLimitMeters}
                     onSelectMass={setSelectedMassId}
                     onUpdateMassGeometry={handleUpdateMass}
                     onSetCameraPreset={setCameraPreset}
@@ -589,9 +601,9 @@ export function DevelopmentWorkspace({
                 <div
                   role="status"
           className="absolute top-3 left-3 z-30 max-w-md border border-[var(--status-warning)] bg-[var(--status-warning-surface)] px-2.5 py-1.5 text-[10px] font-mono text-[var(--status-warning)]"
-                  title={effectiveSpatialDiagnostic}
+                  title="The Spatial Console could not start. The fallback 3D view is active."
                 >
-                  Spatial Console unavailable · Legacy renderer active
+                  Spatial Console unavailable · Fallback 3D view active
                 </div>
               )}
 
@@ -626,7 +638,8 @@ export function DevelopmentWorkspace({
                 <MassPropertiesPanel
                   scenario={activeScenario}
                   selectedMass={selectedMass}
-                  setbacks={setbacks}
+                  site={site}
+                  floorLimit={getScenarioFloorLimit(project, activeScenario)}
                   onUpdateMass={handleUpdateMass}
                   onDuplicateMass={handleDuplicateMass}
                   onDeleteMass={handleDeleteMass}
@@ -637,14 +650,11 @@ export function DevelopmentWorkspace({
           ) : (
             /* 2D Cadastral SVG View with Normalized Non-Colliding Legend */
             <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-[var(--bg-primary)]">
-              <svg viewBox="-90 -115 180 230" className="w-full flex-1 max-w-2xl drop-shadow-2xl">
-                <rect x="-85" y="76.59" width="170" height="20" fill="#10141e" stroke="#2a3348" strokeWidth="0.8" />
-                <text x="0" y="88" fill="#94a3b8" fontSize="4.5" textAnchor="middle" letterSpacing="1" fontWeight="bold">
-                  {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} (FRONTAGE: ${bounds.width}M)` : `PRIMARY STREET (FRONTAGE: ${bounds.width}M)`}
+              <svg viewBox={planViewBox} className="w-full flex-1 max-w-2xl drop-shadow-2xl" aria-label={`Illustrative rectangular site plan fronting ${streetName}`}>
+                <rect data-study-road-width="20" x={bounds.minX - planPadding / 2} y={bounds.maxY} width={bounds.width + planPadding} height={planRoadDepth} fill="#252a31" stroke="#3b424d" strokeWidth="0.8" />
+                <text x="0" y={bounds.maxY + planRoadDepth * 0.62} fill="#c9a96a" fontSize={Math.max(3, Math.min(5, bounds.width / 24))} textAnchor="middle" letterSpacing="0.5" fontWeight="bold">
+                  {`${streetName.toUpperCase()} · FRONTAGE ${bounds.width}M`}
                 </text>
-
-                <rect x="-55" y="-105" width="6.5" height="40" fill="var(--bg-tertiary)" stroke="var(--status-evidence)" strokeWidth="0.8" strokeDasharray="1 1" />
-                <text x="-51.75" y="-95" fill="var(--status-evidence)" fontSize="2.5" textAnchor="middle">6.5m Access</text>
 
                 <rect
                   x={bounds.minX}
@@ -656,6 +666,11 @@ export function DevelopmentWorkspace({
                   stroke="var(--status-evidence)"
                   strokeWidth="1.2"
                 />
+                <line x1={bounds.minX} y1={bounds.maxY} x2={bounds.maxX} y2={bounds.maxY} stroke="var(--action-primary)" strokeWidth="1.6" />
+
+                <text x={bounds.minX - 3} y="0" fill="var(--text-secondary)" fontSize="3" textAnchor="middle" transform={`rotate(-90 ${bounds.minX - 3} 0)`}>
+                  DEPTH {bounds.length}M
+                </text>
 
                 <rect
                   x={bounds.buildableMinX}
@@ -710,6 +725,15 @@ export function DevelopmentWorkspace({
                     </g>
                   );
                 })}
+
+                <g aria-label={`Study setback lines: front ${setbacks.front} metres, sides ${setbacks.sideLeft} metres`} pointerEvents="none">
+                  <line x1={bounds.minX} y1={bounds.buildableMaxY} x2={bounds.maxX} y2={bounds.buildableMaxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
+                  <line x1={bounds.buildableMinX} y1={bounds.minY} x2={bounds.buildableMinX} y2={bounds.maxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
+                  <line x1={bounds.buildableMaxX} y1={bounds.minY} x2={bounds.buildableMaxX} y2={bounds.maxY} stroke="#d9a7b7" strokeWidth="0.9" strokeDasharray="2 1.5" />
+                  <text x="0" y={bounds.buildableMaxY - 2} fill="#efc4d1" fontSize="2.6" textAnchor="middle">FRONT SETBACK {setbacks.front} M</text>
+                  <text x={bounds.buildableMinX + 2} y="0" fill="#efc4d1" fontSize="2.5" textAnchor="middle" transform={`rotate(-90 ${bounds.buildableMinX + 2} 0)`}>SIDE {setbacks.sideLeft} M</text>
+                  <text x={bounds.buildableMaxX - 2} y="0" fill="#efc4d1" fontSize="2.5" textAnchor="middle" transform={`rotate(90 ${bounds.buildableMaxX - 2} 0)`}>SIDE {setbacks.sideRight} M</text>
+                </g>
               </svg>
 
               {/* Exact Requested Indexed Mass Legend ([1] Podium, [2] East Wing, [3] West Wing) */}
@@ -752,6 +776,14 @@ export function DevelopmentWorkspace({
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[var(--spatial-selection)]" />
               <span>Massing ({activeScenario.name.split(':')[0]})</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-5 border-t border-dashed border-[#d9a7b7]" />
+              <span>Study setbacks · front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#252a31]" />
+              <span>20 m study road · user/address-derived context, not cadastral data</span>
             </div>
           </div>
 

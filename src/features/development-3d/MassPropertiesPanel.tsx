@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { BuildingMass, DevelopmentScenario, Setbacks } from '@/types';
+import { BuildingMass, DevelopmentScenario, SiteGeometry } from '@/types';
+import type { ScenarioFloorLimit } from '@/lib/opportunity/canonical-opportunity';
 import { ArchitecturalNumericInput } from './ArchitecturalNumericInput';
 import { 
   Box, 
@@ -20,7 +21,8 @@ import {
 interface MassPropertiesPanelProps {
   scenario: DevelopmentScenario;
   selectedMass: BuildingMass | null;
-  setbacks: Setbacks;
+  site: SiteGeometry;
+  floorLimit: ScenarioFloorLimit;
   onUpdateMass: (massId: string, updates: Partial<BuildingMass>) => void;
   onDuplicateMass: (massId: string) => void;
   onDeleteMass: (massId: string) => void;
@@ -30,7 +32,8 @@ interface MassPropertiesPanelProps {
 export function MassPropertiesPanel({
   scenario,
   selectedMass,
-  setbacks,
+  site,
+  floorLimit,
   onUpdateMass,
   onDuplicateMass,
   onDeleteMass,
@@ -50,18 +53,15 @@ export function MassPropertiesPanel({
   const footprint = Math.round(w * l * 10) / 10;
   const gfa = Math.round(footprint * f * 10) / 10;
 
-  // Setback Encroachment check
-  const halfW = w / 2;
-  const halfL = l / 2;
-  const massMaxY = posZ + halfL;
-  const massMinY = posZ - halfL;
-  const massMaxX = posX + halfW;
-  const massMinX = posX - halfW;
-
-  const isFrontEncroached = massMaxY > (76.59 - setbacks.front);
-  const isRearEncroached = massMinY < (-76.59 + setbacks.rear);
-  const isSideEncroached = massMaxX > (55 - setbacks.sideRight) || massMinX < (-55 + setbacks.sideLeft);
-  const hasEncroachment = isFrontEncroached || isRearEncroached || isSideEncroached;
+  const hasEncroachment = scenario.complianceReport?.assessmentStatus === 'NON_COMPLIANT_SETBACK';
+  const parcelWidth = site.frontageLength || Math.sqrt(site.grossSiteArea);
+  const parcelDepth = site.lotDepth || site.grossSiteArea / parcelWidth;
+  const editableFloorMaximum = Math.max(24, f, floorLimit.floorCount ?? 0);
+  const floorLimitHelper = floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
+    ? `Height-derived whole-floor limit: ${floorLimit.floorCount} Fl`
+    : floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE'
+      ? `Study estimate: ${floorLimit.floorCount} Fl`
+      : 'No legal floor maximum supplied';
 
   // Mass Pairwise Collision Check
   const massOverlap = scenario.pairwiseOverlap?.overlaps.find(
@@ -221,10 +221,10 @@ export function MassPropertiesPanel({
                   label="Width (X)"
                   value={w}
                   min={2}
-                  max={110}
+                  max={parcelWidth}
                   step={0.5}
                   unit="m"
-                  helperText="Parcel: 110m"
+                  helperText={`Parcel: ${parcelWidth.toFixed(2)}m`}
                   onChange={handleWidthChange}
                 />
 
@@ -232,10 +232,10 @@ export function MassPropertiesPanel({
                   label="Length (Z)"
                   value={Number(l.toFixed(2))}
                   min={2}
-                  max={153}
+                  max={parcelDepth}
                   step={0.5}
                   unit="m"
-                  helperText="Parcel: 153m"
+                  helperText={`Parcel: ${parcelDepth.toFixed(2)}m`}
                   onChange={handleLengthChange}
                 />
 
@@ -243,10 +243,10 @@ export function MassPropertiesPanel({
                   label="Storeys"
                   value={f}
                   min={1}
-                  max={24}
+                  max={editableFloorMaximum}
                   step={1}
                   unit="Fl"
-                  helperText="Cap: 8 Fl"
+                  helperText={floorLimitHelper}
                   onChange={handleFloorsChange}
                 />
 

@@ -17,6 +17,11 @@ export class SpatialConsoleCamera {
   private targetPhi = Math.PI / 4;
   private readonly target = new THREE.Vector3();
   private readonly dampedTarget = new THREE.Vector3();
+  private dampingFactor = 0.16;
+
+  setReducedMotion(reduced: boolean): void {
+    this.dampingFactor = reduced ? 1 : 0.16;
+  }
 
   get camera(): THREE.Camera {
     return this.projection === 'ORTHOGRAPHIC' ? this.orthographic : this.perspective;
@@ -94,7 +99,7 @@ export class SpatialConsoleCamera {
   update(): boolean {
     const previousPosition = this.camera.position.clone();
     const previousTarget = this.dampedTarget.clone();
-    const k = 0.16;
+    const k = this.dampingFactor;
     this.radius += (this.targetRadius - this.radius) * k;
     this.theta += (this.targetTheta - this.theta) * k;
     this.phi += (this.targetPhi - this.phi) * k;

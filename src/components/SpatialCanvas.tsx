@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { SiteGeometry, DevelopmentScenario } from '@/types';
 import { getCanonicalParcelBounds, checkSetbackEncroachments } from '@/lib/geometry/engine';
+import { deriveStreetName } from '@/lib/opportunity/street-name';
 import { 
   Layers, 
   Box, 
@@ -38,6 +39,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
     activeScenario.assumptionsUsed.setbacks, 
     site.frontageLength || 110
   );
+  const streetName = site.streetName || deriveStreetName(site.address).value;
 
   const encroachments = checkSetbackEncroachments(
     site.grossSiteArea, 
@@ -182,19 +184,11 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
 
     // Primary Frontage Road (positive Y / South)
     const roadGeo = new THREE.PlaneGeometry(bounds.width + 40, 20);
-    const roadMat = new THREE.MeshStandardMaterial({ color: '#0d1118', roughness: 0.9 });
+    const roadMat = new THREE.MeshStandardMaterial({ color: '#30363f', roughness: 0.9 });
     const roadMesh = new THREE.Mesh(roadGeo, roadMat);
     roadMesh.rotation.x = -Math.PI / 2;
     roadMesh.position.set(0, 0.01, bounds.maxY + 10);
     scene.add(roadMesh);
-
-    // Continuous 6.5m Northern Access Corridor (at negative Y / North)
-    const corridorGeo = new THREE.PlaneGeometry(6.5, 40);
-    const corridorMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.8 });
-    const corridorMesh = new THREE.Mesh(corridorGeo, corridorMat);
-    corridorMesh.rotation.x = -Math.PI / 2;
-    corridorMesh.position.set(bounds.minX + 3.25, 0.02, bounds.minY + 5);
-    scene.add(corridorMesh);
 
     // If in Zoning Mode: Render the 32m Height Cap Envelope Volume
     if (viewMode === 'CONSTRAINTS') {
@@ -505,7 +499,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
               {/* Frontage Road Baseline Callout */}
               {(cameraPreset === 'SOUTH' || cameraPreset === 'FRONT') && (
                 <div className="self-center bg-[#161c28]/90 border border-slate-700 px-3 py-1 rounded text-slate-300 text-xs font-mono font-semibold">
-                  {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} FRONTAGE (${bounds.width.toFixed(1)}M)` : `PRIMARY STREET FRONTAGE (${bounds.width.toFixed(1)}M)`}
+                  {`${streetName.toUpperCase()} FRONTAGE (${bounds.width.toFixed(1)}M)`}
                 </div>
               )}
             </div>
@@ -519,12 +513,8 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
               {/* Main Road Frontage at South */}
               <rect x="-85" y="76.59" width="170" height="20" fill="#10141e" stroke="#2a3348" strokeWidth="0.8" />
               <text x="0" y="88" fill="#94a3b8" fontSize="4.5" textAnchor="middle" letterSpacing="1" fontWeight="bold">
-                {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} (FRONTAGE: ${bounds.width}M)` : `PRIMARY STREET (FRONTAGE: ${bounds.width}M)`}
+                {`${streetName.toUpperCase()} (FRONTAGE: ${bounds.width}M)`}
               </text>
-
-              {/* 6.5m Continuous Northern Access Corridor */}
-              <rect x="-55" y="-105" width="6.5" height="40" fill="#1e293b" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="1 1" />
-              <text x="-51.75" y="-95" fill="#38bdf8" fontSize="2.5" textAnchor="middle">6.5m Access</text>
 
               {/* Site Boundary */}
               <rect

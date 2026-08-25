@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
 import { Project, CaseSummary } from '@/types';
 import { 
   MapPin, 
@@ -15,7 +14,9 @@ import {
   HelpCircle,
   FileCheck,
   Trash2,
-  Box
+  Box,
+  PencilRuler,
+  LoaderCircle,
 } from 'lucide-react';
 
 interface DecisionRoomHeaderProps {
@@ -26,6 +27,24 @@ interface DecisionRoomHeaderProps {
   onOpenNewCaseModal?: () => void;
   onResetDemo?: () => void;
   onDeleteCase?: (id: string) => void;
+  onOpenOpportunityInputs?: () => void;
+  onOpenSpatialLab?: () => void;
+  isSpatialLabOpening?: boolean;
+}
+
+function areaBasisLabel(sourceType: string): string {
+  if (sourceType === 'VERIFIED_TITLE') return 'Confirmed title information';
+  if (sourceType === 'USER_ENTERED_ASSUMPTION') return 'Provided by user';
+  return sourceType.replace(/_/g, ' ').toLowerCase();
+}
+
+function checkStatusLabel(status: Project['evidenceConfidence']): string {
+  switch (status) {
+    case 'HIGH': return 'Confirmed';
+    case 'MEDIUM': return 'Review advised';
+    case 'LOW': return 'Limited';
+    default: return 'Not confirmed';
+  }
 }
 
 export function DecisionRoomHeader({
@@ -35,7 +54,10 @@ export function DecisionRoomHeader({
   onSelectCase,
   onOpenNewCaseModal,
   onResetDemo,
-  onDeleteCase
+  onDeleteCase,
+  onOpenOpportunityInputs,
+  onOpenSpatialLab,
+  isSpatialLabOpening = false,
 }: DecisionRoomHeaderProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -154,6 +176,17 @@ export function DecisionRoomHeader({
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span className="hidden md:inline">New Opportunity</span>
+              </button>
+            )}
+            {onOpenOpportunityInputs && (
+              <button
+                type="button"
+                onClick={onOpenOpportunityInputs}
+                title="Edit opportunity and planning inputs"
+                className="button-secondary flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold"
+              >
+                <PencilRuler className="h-3.5 w-3.5" />
+                <span className="hidden xl:inline">Edit Inputs</span>
               </button>
             )}
           </div>
@@ -276,7 +309,7 @@ export function DecisionRoomHeader({
                 ) : (
                   <HelpCircle className="w-2.5 h-2.5 text-[var(--status-assumed)]" />
                 )}
-                <span>{project.site.grossSiteArea.toLocaleString()} m² ({project.areaProvenance.sourceType.replace(/_/g, ' ')})</span>
+                <span>{project.site.grossSiteArea.toLocaleString()} m² ({areaBasisLabel(project.areaProvenance.sourceType)})</span>
               </span>
             </>
           )}
@@ -285,14 +318,18 @@ export function DecisionRoomHeader({
 
       {/* Right: Recommendation Status, Confidence, Readiness & Spatial Lab */}
       <div className="flex items-center gap-2.5 lg:gap-4 shrink-0">
-        <Link
-          href="/lab/phase-0-spatial-workspace"
-          title="Open Phase 0 Spatial Workspace Lab"
+        <button
+          type="button"
+          onClick={onOpenSpatialLab}
+          disabled={!onOpenSpatialLab || isSpatialLabOpening}
+          title="Open expanded Spatial Lab workspace"
           className="button-secondary hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors cursor-pointer"
         >
-          <Box className="w-3.5 h-3.5 text-[var(--status-investigation)]" />
-          <span className="hidden sm:inline">Spatial Lab</span>
-        </Link>
+          {isSpatialLabOpening
+            ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--status-investigation)]" />
+            : <Box className="h-3.5 w-3.5 text-[var(--status-investigation)]" />}
+          <span className="hidden sm:inline">{isSpatialLabOpening ? 'Opening…' : 'Spatial Lab'}</span>
+        </button>
 
         <div className="hidden sm:block">
           {getRecommendationBadge(project.recommendation)}
@@ -310,11 +347,11 @@ export function DecisionRoomHeader({
           <span className="text-xs font-bold text-[var(--text-primary)] font-mono">{project.siteReadinessPercentage}%</span>
         </div>
 
-        {/* Evidence Confidence */}
+        {/* User-facing source check status */}
         <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] px-2.5 lg:px-3 py-1.5 rounded-[var(--radius-card)] border border-[var(--border-subtle)] text-xs">
           <ShieldCheck className="w-3.5 h-3.5 text-[var(--status-assumed)]" />
-          <span className="text-[var(--text-muted)] hidden sm:inline">Confidence:</span>
-          <span className="font-semibold text-[var(--status-assumed)] uppercase font-mono text-[11px]">{project.evidenceConfidence}</span>
+          <span className="text-[var(--text-muted)] hidden sm:inline">Check status:</span>
+          <span className="font-semibold text-[var(--status-assumed)] uppercase font-mono text-[11px]">{checkStatusLabel(project.evidenceConfidence)}</span>
         </div>
       </div>
     </header>

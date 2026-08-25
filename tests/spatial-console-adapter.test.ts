@@ -8,6 +8,7 @@ import { evaluateScenarioCompliance } from '@/lib/geometry/engine';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { ensureCanonicalProjectRevisions } from '@/lib/spatial/canonical-command-service';
 import type { Project } from '@/types';
+import { deriveStudyEnvelopeDescriptor } from '@/features/development-3d/spatial-console/SpatialConsoleScene';
 
 function canonicalProject(): Project {
   return ensureCanonicalProjectRevisions(structuredClone(GOLDEN_PROJECT));
@@ -66,7 +67,7 @@ describe('read-only Spatial Console adapter', () => {
     expect(project).toEqual(before);
   });
 
-  it('converts the non-rectangular WGS84 parcel to a centered metric ring without rectangularizing it', () => {
+  it('projects the canonical rectangular study parcel with the supplied frontage and depth', () => {
     const project = canonicalProject();
     const snapshot = buildSpatialConsoleSnapshot({
       caseId: project.id,
@@ -76,12 +77,13 @@ describe('read-only Spatial Console adapter', () => {
     });
     const ring = snapshot.site.parcelBoundary.points;
 
-    expect(snapshot.site.parcelBoundary.source).toBe('CANONICAL_SITE_BOUNDARY');
-    expect(ring).toHaveLength(project.site.boundary.coordinates[0].length);
+    expect(snapshot.site.parcelBoundary.source).toBe('CANONICAL_RECTANGULAR_STUDY');
+    expect(ring).toHaveLength(5);
     expect(ring[0]).toEqual(ring.at(-1));
-    expect(new Set(ring.slice(0, -1).map((point) => point.x))).toHaveLength(4);
-    expect(new Set(ring.slice(0, -1).map((point) => point.z))).toHaveLength(4);
-    expect(Math.max(...ring.map((point) => Math.abs(point.x)))).toBeGreaterThan(90);
+    expect(new Set(ring.slice(0, -1).map((point) => point.x))).toHaveLength(2);
+    expect(new Set(ring.slice(0, -1).map((point) => point.z))).toHaveLength(2);
+    expect(Math.max(...ring.map((point) => point.x)) - Math.min(...ring.map((point) => point.x))).toBe(project.site.frontageLength);
+    expect(Math.max(...ring.map((point) => point.z)) - Math.min(...ring.map((point) => point.z))).toBeCloseTo(project.site.lotDepth!, 2);
   });
 
   it('preserves non-rectangular EPSG:3857 mass footprints and canonical vertical position', () => {
@@ -181,6 +183,38 @@ describe('read-only Spatial Console adapter', () => {
     });
     expect(snapshot.compliance.isCompliant).toBe(false);
     expect(snapshot.compliance.status).toBe('WARNING_EXCEEDS_CONSTRAINT');
+  });
+
+  it('uses the adapted buildable boundary and supplied height for the study envelope', () => {
+    const project = canonicalProject();
+    const scenario = project.scenarios[1];
+    const snapshot = buildSpatialConsoleSnapshot({
+      caseId: project.id,
+      site: project.site,
+      scenario,
+      complianceReport: complianceFor(project, scenario),
+      zoningHeightLimitMeters: 37,
+    });
+    const descriptor = deriveStudyEnvelopeDescriptor(snapshot.site);
+    expect(descriptor.kind).toBe('VOLUME');
+    expect(descriptor.heightMeters).toBe(37);
+    expect(descriptor.boundary).toEqual(snapshot.site.buildableBoundary);
+    expect(descriptor.boundary).not.toBe(snapshot.site.buildableBoundary);
+  });
+
+  it('shows only the buildable footprint when no maximum height is supplied', () => {
+    const project = canonicalProject();
+    const scenario = project.scenarios[0];
+    const snapshot = buildSpatialConsoleSnapshot({
+      caseId: project.id,
+      site: project.site,
+      scenario,
+      complianceReport: complianceFor(project, scenario),
+    });
+    const descriptor = deriveStudyEnvelopeDescriptor(snapshot.site);
+    expect(descriptor.kind).toBe('FOOTPRINT_ONLY');
+    expect(descriptor.heightMeters).toBeNull();
+    expect(descriptor.boundary).toEqual(snapshot.site.buildableBoundary);
   });
 
   it('rejects a scenario that has not entered the canonical revision system', () => {

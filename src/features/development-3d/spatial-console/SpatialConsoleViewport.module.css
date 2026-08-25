@@ -122,6 +122,86 @@
   transition: transform 120ms linear;
 }
 
+.streetLabel {
+  position: absolute;
+  right: 12px;
+  bottom: 42px;
+  display: flex;
+  max-width: min(320px, calc(100% - 24px));
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid var(--sc-line-strong);
+  border-radius: 3px;
+  background: rgba(14, 16, 20, 0.9);
+  padding: 6px 9px;
+  color: var(--sc-muted);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.streetLabel strong {
+  color: var(--sc-accent);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.envelopeStatus {
+  position: absolute;
+  right: 12px;
+  bottom: 78px;
+  display: grid;
+  max-width: min(310px, calc(100% - 24px));
+  gap: 2px;
+  border: 1px solid rgba(214, 224, 231, 0.42);
+  border-radius: 3px;
+  background: rgba(14, 16, 20, 0.9);
+  padding: 6px 9px;
+  color: #d6e0e7;
+  font-family: var(--font-sans);
+  font-size: 9px;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.envelopeStatus strong {
+  color: #edf2f5;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.envelopeStatus span,
+.envelopeStatus small {
+  color: #aebbc4;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 1.3;
+}
+
+.massTooltip {
+  position: absolute;
+  bottom: 42px;
+  left: 50%;
+  max-width: min(360px, calc(100% - 320px));
+  transform: translateX(-50%);
+  overflow: hidden;
+  border: 1px solid var(--sc-line-strong);
+  border-radius: 3px;
+  background: rgba(14, 16, 20, 0.92);
+  padding: 5px 8px;
+  color: var(--sc-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.massTooltip strong { color: var(--sc-text); }
+
 .cameraDock {
   position: absolute;
   top: 48px;
@@ -595,8 +675,17 @@
 }
 
 .siteKey { background: var(--status-evidence); }
-.envelopeKey { background: var(--status-verified); }
+.envelopeKey { background: #d6e0e7; }
 .massingKey { background: var(--sc-accent); }
+.setbackKey { background: #d9a7b7; }
+.roadKey { height: 7px !important; background: #30363f; }
+
+.legendPanel small {
+  max-width: 260px;
+  color: var(--sc-muted);
+  font-size: 8px;
+  line-height: 1.35;
+}
 
 .scale {
   position: absolute;
@@ -665,5 +754,23 @@
 
   .previewDimensionsRegion {
     align-items: flex-end;
+  }
+
+  .streetLabel,
+  .envelopeStatus,
+  .massTooltip {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .northArrow,
+  .root *,
+  .root *::before,
+  .root *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

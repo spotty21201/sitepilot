@@ -55,6 +55,16 @@ function niceScaleDistance(target: number): number {
   return best;
 }
 
+function describeEditRejection(reason: string): string {
+  if (/stale|revision/i.test(reason)) {
+    return 'The study changed before this edit was applied. Review the current values and try again.';
+  }
+  if (/canonical/i.test(reason)) {
+    return 'The edit could not be applied to the current study.';
+  }
+  return reason;
+}
+
 export function SpatialConsoleViewport({
   snapshot,
   displayMode,
@@ -88,6 +98,7 @@ export function SpatialConsoleViewport({
   });
   const callbackRef = useRef({ onPreviewProposal, onCommitProposal });
   const selectedMass = snapshot.masses.find((mass) => mass.id === selectedMassId) ?? null;
+  const pointedMass = snapshot.masses.find((mass) => mass.id === (hoveredMassId ?? selectedMassId)) ?? null;
 
   useEffect(() => {
     callbackRef.current = { onPreviewProposal, onCommitProposal };
@@ -101,7 +112,7 @@ export function SpatialConsoleViewport({
       : proposal.type;
     setFeedback({
       phase: 'preview',
-      message: result.valid ? `Preview · ${detail}` : `Preview rejected · ${result.reason}`,
+      message: result.valid ? `Preview · ${detail}` : `Preview rejected · ${describeEditRejection(result.reason)}`,
       result,
     });
     return result;
@@ -110,19 +121,19 @@ export function SpatialConsoleViewport({
   const commitProposal = useCallback((proposal: SpatialEditProposal): SpatialProposalCommitResult => {
     const result = callbackRef.current.onCommitProposal(proposal);
     setFeedback(result.accepted
-      ? { phase: 'accepted', message: `Accepted · revision ${result.revisionId}` }
-      : { phase: 'rejected', message: `Rejected · ${result.reason}` });
+      ? { phase: 'accepted', message: 'Edit applied to the current study' }
+      : { phase: 'rejected', message: `Rejected · ${describeEditRejection(result.reason)}` });
     return result;
   }, []);
 
   const cancelProposal = useCallback(() => {
-    setFeedback({ phase: 'cancelled', message: 'Cancelled · canonical geometry restored' });
+    setFeedback({ phase: 'cancelled', message: 'Cancelled · site geometry restored' });
   }, []);
 
   const recordActionResult = useCallback((result: SpatialProposalCommitResult, acceptedMessage: string) => {
     setFeedback(result.accepted
-      ? { phase: 'accepted', message: `${acceptedMessage} · revision ${result.revisionId}` }
-      : { phase: 'rejected', message: `Rejected · ${result.reason}` });
+      ? { phase: 'accepted', message: `${acceptedMessage} · study updated` }
+      : { phase: 'rejected', message: `Rejected · ${describeEditRejection(result.reason)}` });
   }, []);
 
   useEffect(() => {
@@ -207,6 +218,12 @@ export function SpatialConsoleViewport({
       data-selected-mass-id={selectedMassId ?? ''}
       data-hovered-mass-id={hoveredMassId ?? ''}
       data-north-angle={northAngle ?? 'unavailable'}
+      data-road-width="20"
+      data-front-setback={snapshot.site.setbacks.front}
+      data-side-setback-left={snapshot.site.setbacks.sideLeft}
+      data-side-setback-right={snapshot.site.setbacks.sideRight}
+      data-envelope-kind={snapshot.site.zoningHeightLimitMeters === null ? 'footprint-only' : 'volume'}
+      data-envelope-height={snapshot.site.zoningHeightLimitMeters ?? 'not-provided'}
     >
       <div ref={surfaceRef} className={styles.surface} aria-label="Editable Spatial Console viewport" tabIndex={0} />
       <div className={styles.vignette} />
@@ -217,7 +234,7 @@ export function SpatialConsoleViewport({
         }`} />
         <div className={styles.statusCopy}>
           <strong>{snapshot.scenarioName}</strong>
-          <span title="Context not yet verified">REV {snapshot.revision.sequence} · CANONICAL · Provisional study · Context unverified</span>
+          <span title={snapshot.compliance.summary}>Study version {snapshot.revision.sequence} · Provisional study · Context not yet confirmed · {snapshot.compliance.label}</span>
         </div>
       </div>
 
@@ -232,6 +249,23 @@ export function SpatialConsoleViewport({
         />
         <span>{northAngle === null ? 'N AXIS' : 'N'}</span>
       </div>
+
+      <div className={styles.streetLabel} aria-label={`Twenty metre study road and setback context for ${snapshot.site.streetName}`}>
+        <span>20 m study road</span>
+        <strong>Front {snapshot.site.setbacks.front} m · sides {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m · Context not yet verified</strong>
+      </div>
+
+      {showZoningCap && (
+        <div className={styles.envelopeStatus} role="status" data-envelope-status>
+          <strong>{snapshot.site.zoningHeightLimitMeters === null ? 'Buildable footprint' : 'Study envelope'}</strong>
+          <span>{snapshot.site.zoningHeightLimitMeters === null
+            ? 'Height limit not provided'
+            : `Buildable footprint × ${snapshot.site.zoningHeightLimitMeters} m supplied height`}</span>
+          <small>Study geometry · not surveyed or legally confirmed</small>
+        </div>
+      )}
+
+      {pointedMass && <div className={styles.massTooltip} role="status">{hoveredMassId ? 'Selectable' : 'Selected'} · <strong>{pointedMass.name}</strong> · {pointedMass.type.toLowerCase()}</div>}
 
       <div className={styles.cameraDock} aria-label="Spatial Console camera controls">
         <div className={styles.cameraPresets} role="group" aria-label="Standard views">
@@ -333,7 +367,7 @@ export function SpatialConsoleViewport({
         {([
           ['DEVELOPMENT', 'Development', <Box key="development" size={13} />],
           ['MONOCHROME', 'Monochrome', <Layers3 key="monochrome" size={13} />],
-          ['CONSTRAINTS', 'Constraints', <Map key="constraints" size={13} />],
+          ['CONSTRAINTS', 'Planning checks', <Map key="constraints" size={13} />],
         ] as Array<[ViewportDisplayMode, string, React.ReactNode]>).map(([mode, label, icon]) => (
           <button
             key={mode}
@@ -341,7 +375,9 @@ export function SpatialConsoleViewport({
             className={styles.displayButton}
             aria-label={`${label} display mode`}
             aria-pressed={displayMode === mode}
-            title={label}
+            title={mode === 'CONSTRAINTS'
+              ? (showZoningCap ? 'Hide planning checks and study envelope' : 'Show planning checks and study envelope')
+              : label}
             onClick={() => onChangeDisplayMode(mode)}
           >
             {icon}
@@ -403,8 +439,11 @@ export function SpatialConsoleViewport({
         {legendOpen && (
           <div className={styles.legendPanel} aria-label="Spatial legend">
             <span><i className={styles.siteKey} />Site boundary</span>
-            <span><i className={styles.envelopeKey} />Buildable envelope</span>
+            <span><i className={styles.envelopeKey} />{snapshot.site.zoningHeightLimitMeters === null ? 'Buildable footprint; height not provided' : `Study envelope to ${snapshot.site.zoningHeightLimitMeters} m`}</span>
             <span><i className={styles.massingKey} />Active scenario massing</span>
+            <span><i className={styles.setbackKey} />Study setback lines ({snapshot.site.setbacks.front} m front; {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m sides)</span>
+            <span><i className={styles.roadKey} />20 m user/address-derived study road</span>
+            <small>Study context only · not verified cadastral or municipal geometry.</small>
           </div>
         )}
       </div>

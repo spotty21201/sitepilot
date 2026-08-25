@@ -24,10 +24,37 @@ interface ViewportCanvasProps {
   isRotating: boolean;
   showDimensions?: boolean;
   showZoningCap: boolean;
+  zoningHeightLimitMeters?: number;
   onSelectMass: (massId: string | null) => void;
   onUpdateMassGeometry?: (massId: string, updates: Partial<BuildingMass>) => boolean;
   onHoverMass?: (massId: string | null) => void;
   onSetCameraPreset: (preset: CameraPreset) => void;
+}
+
+function createRoadLabel(text: string, width: number): THREE.Mesh | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  // JSDOM and privacy-hardened browsers can expose canvas without a 2D context.
+  // The road remains usable without its supplementary in-world label.
+  if (!context) return null;
+  context.fillStyle = 'rgba(20, 23, 28, 0.84)';
+  context.fillRect(0, 12, canvas.width, 104);
+  context.fillStyle = '#f0d39c';
+  context.font = '600 48px "JetBrains Mono", monospace';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, canvas.width / 2, canvas.height / 2, canvas.width - 40);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, 5.5),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = 8;
+  return mesh;
 }
 
 export function ViewportCanvas({
@@ -39,6 +66,7 @@ export function ViewportCanvas({
   selectedMassId,
   isRotating,
   showZoningCap,
+  zoningHeightLimitMeters,
   onSelectMass,
   onUpdateMassGeometry,
   onSetCameraPreset
@@ -61,10 +89,12 @@ export function ViewportCanvas({
     () => getCanonicalParcelBounds(site.grossSiteArea, setbacks, site.frontageLength || 110),
     [site.frontageLength, site.grossSiteArea, setbacks]
   );
-  const zoningHeightCap = 32.0;
+  const zoningHeightCap = zoningHeightLimitMeters;
 
   const towerMaxHeight = scenario.metrics.totalHeightMeters;
-  const heightOverrun = towerMaxHeight > zoningHeightCap ? Math.round((towerMaxHeight - zoningHeightCap) * 10) / 10 : 0;
+  const heightOverrun = zoningHeightCap !== undefined && towerMaxHeight > zoningHeightCap
+    ? Math.round((towerMaxHeight - zoningHeightCap) * 10) / 10
+    : 0;
 
   const selectedMass = scenario.masses.find(m => m.id === selectedMassId) || null;
 
@@ -243,22 +273,40 @@ export function ViewportCanvas({
 
     // 3. Primary Arterial Frontage Road
     const roadGeo = new THREE.PlaneGeometry(bounds.width + 40, 20);
-    const roadMat = new THREE.MeshStandardMaterial({ color: '#0d1118', roughness: 0.9 });
+    const roadMat = new THREE.MeshStandardMaterial({ color: '#30363f', roughness: 0.9 });
     const roadMesh = new THREE.Mesh(roadGeo, roadMat);
     roadMesh.rotation.x = -Math.PI / 2;
     roadMesh.position.set(0, 0.01, bounds.maxY + 10);
     scene.add(roadMesh);
+    const roadLabel = createRoadLabel(
+      (site.streetName || 'Street name not provided').toUpperCase(),
+      Math.min(bounds.width + 12, Math.max(34, (site.streetName || 'Street name not provided').length * 3.2)),
+    );
+    if (roadLabel) {
+      roadLabel.position.set(0, 0.09, bounds.maxY + 10);
+      scene.add(roadLabel);
+    }
 
-    // 4. Secondary Northern Access Corridor (6.5m strip)
-    const corridorGeo = new THREE.PlaneGeometry(6.5, 40);
-    const corridorMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.8 });
-    const corridorMesh = new THREE.Mesh(corridorGeo, corridorMat);
-    corridorMesh.rotation.x = -Math.PI / 2;
-    corridorMesh.position.set(bounds.minX + 3.25, 0.02, bounds.minY + 5);
-    scene.add(corridorMesh);
+    const setbackLineMaterial = () => new THREE.LineDashedMaterial({ color: '#d9a7b7', dashSize: 1.6, gapSize: 1.1 });
+    const setbackLines = [
+      [[bounds.minX, bounds.buildableMaxY], [bounds.maxX, bounds.buildableMaxY]],
+      [[bounds.buildableMinX, bounds.minY], [bounds.buildableMinX, bounds.maxY]],
+      [[bounds.buildableMaxX, bounds.minY], [bounds.buildableMaxX, bounds.maxY]],
+    ] as const;
+    setbackLines.forEach(([start, end]) => {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(start[0], 0.13, start[1]),
+          new THREE.Vector3(end[0], 0.13, end[1]),
+        ]),
+        setbackLineMaterial(),
+      );
+      line.computeLineDistances();
+      scene.add(line);
+    });
 
-    // 5. Zoning Envelope Volume
-    if (displayMode === 'CONSTRAINTS' || showZoningCap) {
+    // 4. Zoning Envelope Volume
+    if ((displayMode === 'CONSTRAINTS' || showZoningCap) && zoningHeightCap !== undefined) {
       const envelopeGeo = new THREE.BoxGeometry(bW, zoningHeightCap, bL);
       const envelopeMat = new THREE.MeshBasicMaterial({
         color: '#10b981',
@@ -402,7 +450,7 @@ export function ViewportCanvas({
       }
 
       // Over-height Violation Crown (for masses > 32m in Constraints Mode)
-      if (displayMode === 'CONSTRAINTS' && (baseElevation + h) > zoningHeightCap) {
+      if (displayMode === 'CONSTRAINTS' && zoningHeightCap !== undefined && (baseElevation + h) > zoningHeightCap) {
         const overrunH = (baseElevation + h) - zoningHeightCap;
         const overrunGeo = new THREE.BoxGeometry(w, overrunH, l);
         const overrunMat = new THREE.MeshStandardMaterial({
@@ -772,6 +820,7 @@ export function ViewportCanvas({
     selectedMassId,
     selectedMass,
     showZoningCap,
+    zoningHeightCap,
     isRotating,
     bounds,
     cameraPreset,
@@ -792,6 +841,11 @@ export function ViewportCanvas({
 
       {/* Main 3D Canvas */}
       <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+
+      <div className="pointer-events-none absolute bottom-3 right-3 z-20 flex max-w-xs items-baseline gap-2 rounded border border-[#c9a96a] bg-[#121622]/95 px-3 py-1.5 text-[10px] text-slate-400 backdrop-blur-md" data-road-width="20">
+        <span>20 m study road</span>
+        <strong className="truncate font-mono text-[#e2c17f]">Front {setbacks.front} m · sides {setbacks.sideLeft}/{setbacks.sideRight} m</strong>
+      </div>
 
       {/* Floating In-World Measurement Pill during direct manipulation */}
       {activeDrag && (
@@ -853,7 +907,7 @@ export function ViewportCanvas({
                 : `${cameraPreset} ELEVATION`}
             </div>
 
-            {/* Exact requested height ticks: +32m, +30m, +9m, +0m */}
+            {/* Scenario-derived height datums and the supplied planning limit. */}
             {heightOverrun > 0 && (
               <div className="flex justify-between gap-6 text-rose-400 font-bold border-b border-rose-900 pb-1">
                 <span>+{towerMaxHeight.toFixed(1)}m</span>
@@ -862,18 +916,18 @@ export function ViewportCanvas({
             )}
 
             <div className="flex justify-between gap-6 text-emerald-400 font-bold">
-              <span>+32m</span>
-              <span>Subzone R.9 Height Cap</span>
+              <span>{zoningHeightCap ? `+${zoningHeightCap}m` : 'Not supplied'}</span>
+              <span>Planning Height Limit</span>
             </div>
 
             <div className="flex justify-between gap-6 text-slate-200 font-bold">
-              <span>+30m</span>
-              <span>Tower Ridge Datum (8 Fl)</span>
+              <span>+{scenario.metrics.totalHeightMeters}m</span>
+              <span>Scenario Ridge Datum ({scenario.metrics.totalFloors} Fl)</span>
             </div>
 
             <div className="flex justify-between gap-6 text-sky-300">
-              <span>+9m</span>
-              <span>Podium Roof Datum (2 Fl)</span>
+              <span>+{Math.min(...scenario.masses.map((mass) => mass.height))}m</span>
+              <span>Lowest Mass Roof Datum</span>
             </div>
 
             <div className="flex justify-between gap-6 text-slate-400 border-t border-[#222c40] pt-1">
@@ -884,7 +938,7 @@ export function ViewportCanvas({
 
           {(cameraPreset === 'SOUTH' || cameraPreset === 'FRONT') && (
             <div className="self-center bg-[#161c28]/95 border border-slate-700 px-3 py-1 rounded text-slate-300 text-xs font-mono font-semibold backdrop-blur-md shadow-md">
-              {site.address ? `${site.address.split(',')[0].trim().toUpperCase()} FRONTAGE (${bounds.width.toFixed(1)}M)` : `PRIMARY STREET FRONTAGE (${bounds.width.toFixed(1)}M)`}
+              {(site.streetName || 'Street name not provided').toUpperCase()} FRONTAGE ({bounds.width.toFixed(1)}M)
             </div>
           )}
         </div>

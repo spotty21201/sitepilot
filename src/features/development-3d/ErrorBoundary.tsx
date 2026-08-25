@@ -40,12 +40,11 @@ export class Development3DErrorBoundary extends Component<Props, State> {
           </div>
           
           <h3 className="text-sm font-bold text-slate-100 uppercase tracking-wider mb-1">
-            {this.props.fallbackTitle || '3D Development Workspace Fallback'}
+            {this.props.fallbackTitle || '3D Workspace Unavailable'}
           </h3>
           
           <p className="text-xs text-slate-400 max-w-md mb-4 leading-relaxed">
-            The 3D WebGPU/WebGL acceleration layer encountered a display exception ({this.state.error?.message || 'Context lost'}).
-            Your SitePilot project data, metrics, evidence, and 2D cadastral map remain 100% safe and intact.
+            The 3D view could not be displayed. Your opportunity inputs, development figures, sources, assumptions, and 2D site plan remain available.
           </p>
 
           <button

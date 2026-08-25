@@ -113,6 +113,31 @@ function lineFromRing(
   return line;
 }
 
+function groundLabel(text: string, width: number, height = 5): THREE.Mesh {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 128;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Unable to create Spatial Console label canvas.');
+  context.fillStyle = 'rgba(20, 23, 28, 0.82)';
+  context.fillRect(0, 12, canvas.width, 104);
+  context.fillStyle = '#f0d39c';
+  context.font = '600 48px "JetBrains Mono", monospace';
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(text, canvas.width / 2, canvas.height / 2, canvas.width - 40);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.renderOrder = 8;
+  return mesh;
+}
+
 function massRing(mass: SpatialMassSnapshot): SpatialPoint2[] {
   if (mass.footprint) return [...mass.footprint];
   const halfWidth = mass.dimensions.width / 2;
@@ -134,6 +159,9 @@ function canonicalGeometryKey(snapshot: SpatialConsoleSnapshot): string {
     snapshot.site.parcelBoundary.points,
     snapshot.site.planningParcelBoundary,
     snapshot.site.buildableBoundary,
+    snapshot.site.frontageMeters,
+    snapshot.site.depthMeters,
+    snapshot.site.streetName,
     snapshot.site.zoningHeightLimitMeters,
     snapshot.masses.map((mass) => [
       mass.id,
@@ -144,6 +172,27 @@ function canonicalGeometryKey(snapshot: SpatialConsoleSnapshot): string {
       mass.footprint,
     ]),
   ]);
+}
+
+export interface StudyEnvelopeDescriptor {
+  kind: 'VOLUME' | 'FOOTPRINT_ONLY';
+  boundary: SpatialPoint2[];
+  heightMeters: number | null;
+}
+
+export function deriveStudyEnvelopeDescriptor(
+  site: SpatialConsoleSnapshot['site'],
+): StudyEnvelopeDescriptor {
+  const heightMeters = site.zoningHeightLimitMeters !== null
+    && Number.isFinite(site.zoningHeightLimitMeters)
+    && site.zoningHeightLimitMeters > 0
+    ? site.zoningHeightLimitMeters
+    : null;
+  return {
+    kind: heightMeters === null ? 'FOOTPRINT_ONLY' : 'VOLUME',
+    boundary: site.buildableBoundary.map((point) => ({ ...point })),
+    heightMeters,
+  };
 }
 
 export class SpatialConsoleScene {
@@ -164,6 +213,8 @@ export class SpatialConsoleScene {
   private readonly massEdges = new Map<string, THREE.LineSegments>();
   private readonly editHandles: THREE.Mesh[] = [];
   private resizeObserver: ResizeObserver | null = null;
+  private reducedMotionQuery: MediaQueryList | null = null;
+  private readonly reducedMotionHandler = (event: MediaQueryListEvent) => this.camera.setReducedMotion(event.matches);
   private readonly contextMenuHandler = (event: Event) => event.preventDefault();
 
   private snapshot: SpatialConsoleSnapshot | null = null;
@@ -205,6 +256,9 @@ export class SpatialConsoleScene {
       this.scene.fog = new THREE.Fog(0x0e1014, 300, 850);
       this.scene.add(this.parcelGroup, this.envelopeGroup, this.massGroup, this.editGroup, this.gridGroup);
       this.addLightingAndGround();
+      this.reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      this.camera.setReducedMotion(this.reducedMotionQuery.matches);
+      this.reducedMotionQuery.addEventListener('change', this.reducedMotionHandler);
 
       const canvas = this.renderer.domElement;
       canvas.addEventListener('pointerdown', this.onPointerDown);
@@ -305,6 +359,8 @@ export class SpatialConsoleScene {
     cancelAnimationFrame(this.animationFrame);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.reducedMotionQuery?.removeEventListener('change', this.reducedMotionHandler);
+    this.reducedMotionQuery = null;
     const canvas = this.renderer.domElement;
     canvas.removeEventListener('pointerdown', this.onPointerDown);
     canvas.removeEventListener('pointermove', this.onPointerMove);
@@ -327,8 +383,8 @@ export class SpatialConsoleScene {
   }
 
   private addLightingAndGround(): void {
-    this.scene.add(new THREE.HemisphereLight(0xc7d8e6, 0x161a22, 0.62));
-    const sun = new THREE.DirectionalLight(0xfff1d6, 1.45);
+    this.scene.add(new THREE.HemisphereLight(0xd5e3ed, 0x202630, 1.5));
+    const sun = new THREE.DirectionalLight(0xfff3dc, 1.58);
     sun.position.set(110, 170, 95);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -336,7 +392,7 @@ export class SpatialConsoleScene {
     sun.shadow.bias = -0.00015;
     sun.shadow.normalBias = 0.025;
     this.scene.add(sun);
-    const fill = new THREE.DirectionalLight(0x7896b4, 0.24);
+    const fill = new THREE.DirectionalLight(0x91acc4, 0.6);
     fill.position.set(-120, 90, -100);
     this.scene.add(fill);
 
@@ -381,6 +437,82 @@ export class SpatialConsoleScene {
       color: 0x6f93b9, dashSize: 2, gapSize: 1.4, transparent: true, opacity: 0.55,
     })));
 
+    const planningPoints = openRing(snapshot.site.planningParcelBoundary);
+    const planningXs = planningPoints.map((point) => point.x);
+    const planningZs = planningPoints.map((point) => point.z);
+    const streetMinX = Math.min(...planningXs);
+    const streetMaxX = Math.max(...planningXs);
+    const streetEdgeZ = Math.max(...planningZs);
+    const roadDepth = 20;
+    const roadShape = shapeFromRing([
+      { x: streetMinX - 8, z: streetEdgeZ },
+      { x: streetMaxX + 8, z: streetEdgeZ },
+      { x: streetMaxX + 8, z: streetEdgeZ + roadDepth },
+      { x: streetMinX - 8, z: streetEdgeZ + roadDepth },
+      { x: streetMinX - 8, z: streetEdgeZ },
+    ]);
+    const roadGeometry = new THREE.ShapeGeometry(roadShape);
+    roadGeometry.rotateX(-Math.PI / 2);
+    const road = new THREE.Mesh(roadGeometry, new THREE.MeshStandardMaterial({
+      color: 0x30363f,
+      roughness: 0.94,
+    }));
+    road.name = `street-${snapshot.site.streetName}`;
+    road.position.y = 0.015;
+    road.receiveShadow = true;
+    this.parcelGroup.add(road);
+    this.parcelGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(streetMinX, 0.11, streetEdgeZ),
+        new THREE.Vector3(streetMaxX, 0.11, streetEdgeZ),
+      ]),
+      new THREE.LineBasicMaterial({ color: 0xe2c17f }),
+    ));
+    const streetLabel = groundLabel(
+      snapshot.site.streetName.toUpperCase(),
+      Math.min(streetMaxX - streetMinX + 12, Math.max(34, snapshot.site.streetName.length * 3.2)),
+      5.5,
+    );
+    streetLabel.name = `street-label-${snapshot.site.streetName}`;
+    streetLabel.position.set((streetMinX + streetMaxX) / 2, 0.09, streetEdgeZ + roadDepth / 2);
+    this.parcelGroup.add(streetLabel);
+
+    const rearEdgeZ = Math.min(...planningZs);
+    const frontSetbackZ = streetEdgeZ - snapshot.site.setbacks.front;
+    const leftSetbackX = streetMinX + snapshot.site.setbacks.sideLeft;
+    const rightSetbackX = streetMaxX - snapshot.site.setbacks.sideRight;
+    const setbackMaterial = () => new THREE.LineDashedMaterial({
+      color: 0xd9a7b7, dashSize: 1.6, gapSize: 1.1, transparent: true, opacity: 0.95,
+    });
+    const frontLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(streetMinX, 0.13, frontSetbackZ),
+        new THREE.Vector3(streetMaxX, 0.13, frontSetbackZ),
+      ]),
+      setbackMaterial(),
+    );
+    frontLine.computeLineDistances();
+    frontLine.name = `front-setback-${snapshot.site.setbacks.front}m`;
+    const leftLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(leftSetbackX, 0.13, rearEdgeZ),
+        new THREE.Vector3(leftSetbackX, 0.13, streetEdgeZ),
+      ]),
+      setbackMaterial(),
+    );
+    leftLine.computeLineDistances();
+    leftLine.name = `left-setback-${snapshot.site.setbacks.sideLeft}m`;
+    const rightLine = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(rightSetbackX, 0.13, rearEdgeZ),
+        new THREE.Vector3(rightSetbackX, 0.13, streetEdgeZ),
+      ]),
+      setbackMaterial(),
+    );
+    rightLine.computeLineDistances();
+    rightLine.name = `right-setback-${snapshot.site.setbacks.sideRight}m`;
+    this.parcelGroup.add(frontLine, leftLine, rightLine);
+
     const buildableShape = shapeFromRing(snapshot.site.buildableBoundary);
     const buildableGeometry = new THREE.ShapeGeometry(buildableShape);
     buildableGeometry.rotateX(-Math.PI / 2);
@@ -393,23 +525,68 @@ export class SpatialConsoleScene {
       color: 0xc98da2, dashSize: 1.6, gapSize: 1.1,
     })));
 
-    if (snapshot.site.zoningHeightLimitMeters) {
-      const points = openRing(snapshot.site.buildableBoundary);
-      const xs = points.map((point) => point.x);
-      const zs = points.map((point) => point.z);
-      const minX = Math.min(...xs); const maxX = Math.max(...xs);
-      const minZ = Math.min(...zs); const maxZ = Math.max(...zs);
-      const geometry = new THREE.BoxGeometry(maxX - minX, snapshot.site.zoningHeightLimitMeters, maxZ - minZ);
-      const envelope = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-        color: 0xb9768d, wireframe: true, transparent: true, opacity: 0.16,
+    const studyEnvelope = deriveStudyEnvelopeDescriptor(snapshot.site);
+    this.envelopeGroup.userData.envelopeKind = studyEnvelope.kind;
+    this.envelopeGroup.userData.heightMeters = studyEnvelope.heightMeters;
+    if (studyEnvelope.heightMeters === null) {
+      const footprintGeometry = new THREE.ShapeGeometry(shapeFromRing(studyEnvelope.boundary));
+      footprintGeometry.rotateX(-Math.PI / 2);
+      const footprint = new THREE.Mesh(footprintGeometry, new THREE.MeshBasicMaterial({
+        color: 0xd6e0e7,
+        transparent: true,
+        opacity: 0.14,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       }));
-      envelope.name = 'zoning-envelope';
-      envelope.position.set(
-        (minX + maxX) / 2,
-        snapshot.site.zoningHeightLimitMeters / 2,
-        (minZ + maxZ) / 2,
-      );
+      footprint.name = 'study-envelope-footprint-height-not-provided';
+      footprint.position.y = 0.16;
+      footprint.renderOrder = 3;
+      this.envelopeGroup.add(footprint);
+      const footprintEdge = lineFromRing(studyEnvelope.boundary, 0.19, new THREE.LineBasicMaterial({
+        color: 0xdce6ec,
+        transparent: true,
+        opacity: 0.72,
+      }));
+      footprintEdge.name = 'study-envelope-footprint-edge';
+      footprintEdge.renderOrder = 4;
+      this.envelopeGroup.add(footprintEdge);
+    } else {
+      const envelopeGeometry = new THREE.ExtrudeGeometry(shapeFromRing(studyEnvelope.boundary), {
+        depth: studyEnvelope.heightMeters,
+        bevelEnabled: false,
+      });
+      envelopeGeometry.rotateX(-Math.PI / 2);
+      const envelope = new THREE.Mesh(envelopeGeometry, new THREE.MeshBasicMaterial({
+        color: 0xd6e0e7,
+        transparent: true,
+        opacity: 0.14,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: true,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      }));
+      envelope.name = 'study-envelope-volume';
+      envelope.position.y = 0.12;
+      envelope.renderOrder = 3;
       this.envelopeGroup.add(envelope);
+      const envelopeEdges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(envelopeGeometry, 28),
+        new THREE.LineBasicMaterial({
+          color: 0xdce6ec,
+          transparent: true,
+          opacity: 0.68,
+          depthTest: true,
+        }),
+      );
+      envelopeEdges.name = 'study-envelope-edges';
+      envelopeEdges.position.copy(envelope.position);
+      envelopeEdges.renderOrder = 4;
+      this.envelopeGroup.add(envelopeEdges);
     }
     this.updateEnvelopeVisibility(showZoningCap);
 

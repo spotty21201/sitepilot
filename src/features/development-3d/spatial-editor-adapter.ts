@@ -28,7 +28,7 @@ export interface SpatialPoint2 {
 
 export interface SpatialPolygonSnapshot {
   points: readonly SpatialPoint2[];
-  source: 'CANONICAL_SITE_BOUNDARY' | 'CANONICAL_PLANNING_BOUNDS_FALLBACK';
+  source: 'CANONICAL_SITE_BOUNDARY' | 'CANONICAL_PLANNING_BOUNDS_FALLBACK' | 'CANONICAL_RECTANGULAR_STUDY';
 }
 
 export interface SpatialMassSnapshot {
@@ -71,6 +71,9 @@ export interface SpatialConsoleSnapshot {
     planningParcelBoundary: readonly SpatialPoint2[];
     buildableBoundary: readonly SpatialPoint2[];
     grossSiteArea: number;
+    frontageMeters: number;
+    depthMeters: number;
+    streetName: string;
     buildableArea: number;
     setbacks: Readonly<DevelopmentScenario['assumptionsUsed']['setbacks']>;
     zoningHeightLimitMeters: number | null;
@@ -237,9 +240,11 @@ export function buildSpatialConsoleSnapshot({
     bounds.buildableMaxY,
   );
   const convertedBoundary = convertBoundary(site, caseId);
-  const parcelBoundary = convertedBoundary.points.length > 0
-    ? { points: convertedBoundary.points, source: 'CANONICAL_SITE_BOUNDARY' as const }
-    : { points: planningParcelBoundary, source: 'CANONICAL_PLANNING_BOUNDS_FALLBACK' as const };
+  const parcelBoundary = site.dimensionProvenance?.assumption === 'RECTANGULAR_STUDY_PARCEL'
+    ? { points: planningParcelBoundary, source: 'CANONICAL_RECTANGULAR_STUDY' as const }
+    : convertedBoundary.points.length > 0
+      ? { points: convertedBoundary.points, source: 'CANONICAL_SITE_BOUNDARY' as const }
+      : { points: planningParcelBoundary, source: 'CANONICAL_PLANNING_BOUNDS_FALLBACK' as const };
   return {
     schemaVersion: 1,
     caseId,
@@ -259,6 +264,9 @@ export function buildSpatialConsoleSnapshot({
       planningParcelBoundary,
       buildableBoundary,
       grossSiteArea: site.grossSiteArea,
+      frontageMeters: bounds.width,
+      depthMeters: bounds.length,
+      streetName: site.streetName || 'Street name not provided',
       buildableArea: scenario.metrics.netBuildableArea,
       setbacks: { ...scenario.assumptionsUsed.setbacks },
       zoningHeightLimitMeters: Number.isFinite(zoningHeightLimitMeters)

@@ -2,7 +2,14 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DevelopmentScenario, SiteGeometry, PlanningAssessment, Project } from '@/types';
-import { checkSetbackEncroachments, exportToColladaDAE } from '@/lib/geometry/engine';
+import { checkSetbackEncroachments, exportToColladaDAE, getCanonicalParcelBounds } from '@/lib/geometry/engine';
+import { deriveScenarioFloorLimit, getScenarioFloorLimit, getScenarioFloorToFloorHeight } from '@/lib/opportunity/canonical-opportunity';
+import {
+  buildProjectReport,
+  generateProjectReportPdf,
+  safeReportFilename,
+  serializeProjectReportCsv,
+} from '@/lib/reporting/project-report';
 import { 
   Building2, 
   Download, 
@@ -17,7 +24,9 @@ import {
   RotateCcw, 
   AlertTriangle,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  FileText,
+  Table2,
 } from 'lucide-react';
 
 interface CommittedRangeInputProps {
@@ -38,13 +47,18 @@ function CommittedRangeInput({
   onCommit,
 }: CommittedRangeInputProps) {
   const [draft, setDraft] = useState(value);
+  const draftRef = useRef(value);
   const pointerActive = useRef(false);
 
   useEffect(() => {
-    if (!pointerActive.current) setDraft(value);
+    if (!pointerActive.current) {
+      draftRef.current = value;
+      setDraft(value);
+    }
   }, [value]);
 
   const commit = (nextValue: number) => {
+    draftRef.current = nextValue;
     setDraft(nextValue);
     if (nextValue !== value) onCommit(nextValue);
   };
@@ -60,9 +74,9 @@ function CommittedRangeInput({
       onPointerDown={() => {
         pointerActive.current = true;
       }}
-      onPointerUp={(event) => {
+      onPointerUp={() => {
         pointerActive.current = false;
-        commit(Number(event.currentTarget.value));
+        commit(draftRef.current);
       }}
       onPointerCancel={() => {
         pointerActive.current = false;
@@ -75,6 +89,7 @@ function CommittedRangeInput({
       }}
       onChange={(event) => {
         const nextValue = Number(event.currentTarget.value);
+        draftRef.current = nextValue;
         setDraft(nextValue);
         if (!pointerActive.current) commit(nextValue);
       }}
@@ -88,7 +103,7 @@ interface ScenarioControlsProps {
   scenarios: DevelopmentScenario[];
   activeScenarioId: string;
   onSelectScenario: (id: string) => void;
-  onUpdateScenarioParam: (scenarioId: string, param: 'floors' | 'frontSetback', value: number) => void;
+  onUpdateScenarioParam: (scenarioId: string, param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback', value: number) => void;
   onFitMassingToEnvelope: (scenarioId: string) => void;
   onResetScenario: (scenarioId: string) => void;
   onOpenCompareModal?: () => void;
@@ -131,6 +146,34 @@ export function ScenarioControls({
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
   const metrics = activeScenario.metrics;
   const currentSetback = activeScenario.assumptionsUsed.setbacks.front;
+  const currentSideSetback = activeScenario.assumptionsUsed.setbacks.sideLeft;
+  const podiumMasses = activeScenario.masses.filter((mass) => mass.type === 'PODIUM');
+  const towerMasses = activeScenario.masses.filter((mass) => mass.type === 'TOWER');
+  const podiumFloors = podiumMasses.length ? Math.max(...podiumMasses.map((mass) => mass.floors)) : null;
+  const towerFloors = towerMasses.length ? Math.max(...towerMasses.map((mass) => mass.floors)) : null;
+  const floorLimit = project
+    ? getScenarioFloorLimit(project, activeScenario)
+    : deriveScenarioFloorLimit({ floorToFloorHeight: getScenarioFloorToFloorHeight(activeScenario) });
+  const parcelBounds = getCanonicalParcelBounds(site.grossSiteArea, activeScenario.assumptionsUsed.setbacks, site.frontageLength);
+  const frontSetbackMax = Math.max(currentSetback, Math.floor(Math.max(0, parcelBounds.length - activeScenario.assumptionsUsed.setbacks.rear)));
+  const sideSetbackMax = Math.max(currentSideSetback, Math.floor(parcelBounds.width / 2));
+  const heightLimit = project?.zoningLimits?.maxHeightMeters;
+  const towerPermittedFloors = towerMasses.length && heightLimit
+    ? Math.max(1, Math.min(...towerMasses.map((mass) => Math.floor((heightLimit - mass.position.y) / mass.floorToFloorHeight))))
+    : floorLimit.floorCount;
+  const tallestTowerHeight = towerMasses.reduce((height, mass) => Math.max(height, mass.height), 0);
+  const podiumPermittedFloors = podiumMasses.length && heightLimit
+    ? Math.max(1, Math.min(...podiumMasses.map((mass) => Math.floor((heightLimit - tallestTowerHeight) / mass.floorToFloorHeight))))
+    : floorLimit.floorCount;
+  // The interaction range is derived from the active study instead of imposing a
+  // statutory maximum. It deliberately extends beyond the permitted value so the
+  // user can test, and receive a truthful warning for, an over-limit assumption.
+  const interactionMax = (current: number, permitted: number | null) => {
+    const basis = permitted ?? current;
+    return Math.max(current, basis * 2);
+  };
+  const podiumSliderMax = podiumFloors === null ? 1 : interactionMax(podiumFloors, podiumPermittedFloors);
+  const towerSliderMax = towerFloors === null ? 1 : interactionMax(towerFloors, towerPermittedFloors);
 
   const isFittedToSetback = activeScenario.isFittedOverride === true || activeScenario.editClassification === 'FITTED_TO_SETBACK';
   const isUserOverride = (activeScenario.editClassification === 'USER_GEOMETRY_EDIT' || 
@@ -144,7 +187,8 @@ export function ScenarioControls({
   const encroachments = checkSetbackEncroachments(
     site.grossSiteArea, 
     activeScenario.assumptionsUsed.setbacks, 
-    activeScenario.masses
+    activeScenario.masses,
+    site.frontageLength,
   );
 
   const cleanProjectName = (site.projectName || 'SitePilot').split('—')[0].trim().replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -159,9 +203,8 @@ export function ScenarioControls({
     if (isOutOfBounds) {
       return `⚠️ Out of Bounds: Massing extends ${metrics.outOfBoundsAreaM2?.toLocaleString()} m² beyond parcel perimeter.`;
     }
-    if (metrics.totalHeightMeters > 32.05) {
-      const overrun = Math.round((metrics.totalHeightMeters - 32.0) * 10) / 10;
-      return `⚠️ Height Overrun: Height (${metrics.totalHeightMeters.toFixed(1)}m / ${metrics.totalFloors} Fl) exceeds allowable 32m limit by +${overrun}m.`;
+    if (activeScenario.complianceReport?.assessmentStatus === 'NON_COMPLIANT_HEIGHT') {
+      return `⚠️ ${activeScenario.complianceReport.summaryText}`;
     }
     if (encroachments.length > 0) {
       return `⚠️ Setback Warning: ${encroachments[0].description}`;
@@ -200,6 +243,28 @@ export function ScenarioControls({
     setTimeout(() => setDownloadedToast(null), 4000);
   };
 
+  const downloadReport = (format: 'csv' | 'pdf') => {
+    if (!project) return;
+    const report = buildProjectReport(project, activeScenario.id);
+    const filename = safeReportFilename(project.name, format);
+    const body: BlobPart = format === 'csv'
+      ? serializeProjectReportCsv(report)
+      : generateProjectReportPdf(report).buffer as ArrayBuffer;
+    const blob = new Blob([body], {
+      type: format === 'csv' ? 'text/csv;charset=utf-8' : 'application/pdf',
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setDownloadedToast(filename);
+    window.setTimeout(() => setDownloadedToast(null), 4000);
+  };
+
   const handleCopyXML = async () => {
     const xml = generateLiveXml();
     setRawXml(xml);
@@ -231,8 +296,8 @@ export function ScenarioControls({
   }, []);
 
   const getCurrentSnapshot = useCallback(() => {
-    return `${activeScenario.id}-${metrics.totalGFA}-${metrics.totalFloors}-${metrics.totalHeightMeters}-${currentSetback}-${isFittedToSetback}-${(activeScenario.masses || []).map(m => `${m.id}:${m.position.x},${m.position.z}:${m.dimensions.width},${m.dimensions.length}`).join('|')}`;
-  }, [activeScenario.id, activeScenario.masses, currentSetback, isFittedToSetback, metrics.totalFloors, metrics.totalGFA, metrics.totalHeightMeters]);
+    return `${activeScenario.id}-${metrics.totalGFA}-${metrics.totalFloors}-${metrics.totalHeightMeters}-${currentSetback}-${currentSideSetback}-${isFittedToSetback}-${(activeScenario.masses || []).map(m => `${m.id}:${m.position.x},${m.position.y},${m.position.z}:${m.dimensions.width},${m.dimensions.length}:${m.floors}`).join('|')}`;
+  }, [activeScenario.id, activeScenario.masses, currentSetback, currentSideSetback, isFittedToSetback, metrics.totalFloors, metrics.totalGFA, metrics.totalHeightMeters]);
 
   const baseFloors = activeScenario.originalMasses 
     ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
@@ -257,6 +322,7 @@ export function ScenarioControls({
           scenarioId: activeScenario.id,
           scenarioName: activeScenario.name,
           grossSiteArea: site.grossSiteArea,
+          frontageLength: site.frontageLength,
           setbacks: activeScenario.assumptionsUsed.setbacks,
           masses: activeScenario.masses, // CRITICAL FIX: Pass masses array
           projectName: site.projectName,
@@ -271,7 +337,9 @@ export function ScenarioControls({
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate assessment');
+        throw new Error(res.status === 400 && data.error
+          ? data.error
+          : 'The assessment could not be prepared. Try again later.');
       }
       setAssessment(data);
       setAssessedSnapshot(snapshot);
@@ -355,6 +423,24 @@ export function ScenarioControls({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => downloadReport('csv')}
+              disabled={!project}
+              title="Download Options A, B, and C as CSV"
+              className="button-secondary flex items-center gap-1 px-2 py-1.5 text-[10px] font-semibold disabled:opacity-50"
+            >
+              <Table2 className="h-3.5 w-3.5" /> CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadReport('pdf')}
+              disabled={!project}
+              title="Download Options A, B, and C as PDF"
+              className="button-secondary flex items-center gap-1 px-2 py-1.5 text-[10px] font-semibold disabled:opacity-50"
+            >
+              <FileText className="h-3.5 w-3.5" /> PDF
+            </button>
             {onOpenCompareModal && (
               <button
                 onClick={onOpenCompareModal}
@@ -545,51 +631,63 @@ export function ScenarioControls({
           </div>
 
           <div className="space-y-3">
-            {/* Floors Slider */}
-            <div>
+            {/* Tower storeys */}
+            <div className="space-y-1">
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-[var(--text-secondary)]">Building Height (Storeys)</span>
+                <span className="text-[var(--text-secondary)]">Tower storeys</span>
                 <span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">
-                  {metrics.totalFloors} Floors ({metrics.totalHeightMeters.toFixed(1)}m)
+                  {towerFloors === null ? 'Unavailable' : `${towerFloors} Fl · ${Math.max(...towerMasses.map((mass) => mass.height)).toFixed(1)} m`}
                 </span>
               </div>
-              <CommittedRangeInput
-                min={2}
-                max={16}
-                value={metrics.totalFloors}
-                ariaLabel="Building Height in Storeys"
-                onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'floors', value)}
-                className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)]"
-              />
-              <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5">
-                <span>Min: 2 Fl</span>
-                <span className="text-[var(--status-warning)] font-semibold">Zoning Cap: 8 Fl (32m)</span>
-                <span>Max: 16 Fl</span>
-              </div>
+              {towerFloors === null ? (
+                <p className="text-[9px] leading-relaxed text-[var(--text-muted)]">This option has no tower. Other building elements will not be changed.</p>
+              ) : (
+                <>
+                  <CommittedRangeInput min={1} max={towerSliderMax} value={towerFloors} ariaLabel="Tower storeys" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'towerFloors', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
+                  <p className={`text-[9px] font-mono ${towerPermittedFloors !== null && towerFloors > towerPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{towerPermittedFloors === null ? 'Planning range unavailable: supply height, or FAR and KDB.' : `${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'Height-derived tower range above its base' : 'Study range'}: 1–${towerPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' · not a legal maximum' : ''}`}</p>
+                </>
+              )}
+            </div>
+
+            {/* Podium storeys */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-xs mb-1"><span className="text-[var(--text-secondary)]">Podium storeys</span><span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">{podiumFloors === null ? 'Unavailable' : `${podiumFloors} Fl · ${Math.max(...podiumMasses.map((mass) => mass.height)).toFixed(1)} m`}</span></div>
+              {podiumFloors === null ? (
+                <p className="text-[9px] leading-relaxed text-[var(--text-muted)]">This option has no podium. Other building elements will not be changed.</p>
+              ) : (
+                <>
+                  <CommittedRangeInput min={1} max={podiumSliderMax} value={podiumFloors} ariaLabel="Podium storeys" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'podiumFloors', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--action-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
+                  <p className={`text-[9px] font-mono ${podiumPermittedFloors !== null && podiumFloors > podiumPermittedFloors ? 'text-[var(--status-error)]' : 'text-[var(--text-muted)]'}`}>{podiumPermittedFloors === null ? 'Planning range unavailable: supply height, or FAR and KDB.' : `${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'Height-derived podium range' : 'Study range'}: 1–${podiumPermittedFloors} Fl${floorLimit.kind === 'FAR_COVERAGE_STUDY_ESTIMATE' ? ' · not a legal maximum' : ''}`}</p>
+                </>
+              )}
             </div>
 
             {/* Front Setback Slider */}
             <div>
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-[var(--text-secondary)]">Front Setback</span>
+                <span className="text-[var(--text-secondary)]">Front setback</span>
                 <span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">
-                  {currentSetback} Meters
+                  {currentSetback} m
                 </span>
               </div>
               <CommittedRangeInput
-                min={5}
-                max={60}
+                min={0}
+                max={frontSetbackMax}
                 value={currentSetback}
-                ariaLabel="Front Setback in Meters"
+                ariaLabel="Front setback in metres"
                 onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'frontSetback', value)}
                 className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--spatial-selection)]"
               />
               <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5">
-                <span>5m</span>
-                <span className="text-[var(--status-verified)]">10m (Standard)</span>
-                <span className="text-[var(--status-error)]">47m (Encroaches)</span>
-                <span>60m</span>
+                <span>0 m · frontage line</span>
+                <span>{frontSetbackMax} m · parcel-derived range</span>
               </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1"><span className="text-[var(--text-secondary)]">Side setback</span><span className="font-mono font-bold text-[var(--text-primary)] bg-[var(--bg-hover)] px-2 py-0.5 rounded-[var(--radius-control)] text-[11px]">{currentSideSetback} m each side</span></div>
+              <CommittedRangeInput min={0} max={sideSetbackMax} value={currentSideSetback} ariaLabel="Symmetric side setback in metres" onCommit={(value) => onUpdateScenarioParam(activeScenario.id, 'sideSetback', value)} className="w-full h-1.5 bg-[var(--border-strong)] rounded-lg appearance-none cursor-pointer accent-[var(--spatial-selection)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--focus-ring)]" />
+              <div className="flex justify-between text-[9px] text-[var(--text-muted)] font-mono mt-0.5"><span>0 m</span><span>Default for new opportunities: 4 m</span><span>{sideSetbackMax} m</span></div>
             </div>
 
             {/* Encroachment Status Line */}
@@ -615,12 +713,12 @@ export function ScenarioControls({
         {/* Live Yield Metrics Grid */}
         <div>
           <h4 className="text-[11px] font-semibold text-[var(--text-secondary)] mb-2.5">
-            Deterministic Yield Metrics
+            Development Figures
           </h4>
 
           {(() => {
-            const maxFAR = project?.zoningLimits?.maxFAR ?? 3.20;
-            const maxCoverage = project?.zoningLimits?.maxCoveragePct ?? 55.0;
+            const maxFAR = project?.zoningLimits?.maxFAR;
+            const maxCoverage = project?.zoningLimits?.maxCoveragePct;
             const hasZoningEvidence = Boolean(site.hasZoningEvidence);
 
             return (
@@ -634,21 +732,21 @@ export function ScenarioControls({
 
                 <div className="surface-inspector p-2.5">
                   <span className="text-[10px] text-[var(--text-secondary)] block">FAR / KLB Ratio</span>
-                  <span className={`text-base font-bold font-mono ${metrics.farKLB > maxFAR + 0.01 ? 'text-[var(--status-error)]' : 'text-[var(--status-evidence)]'}`}>
+                  <span className={`text-base font-bold font-mono ${maxFAR !== undefined && metrics.farKLB > maxFAR + 0.01 ? 'text-[var(--status-error)]' : 'text-[var(--status-evidence)]'}`}>
                     {metrics.farKLB.toFixed(2)}x
                   </span>
                   <span className="text-[9px] text-[var(--text-muted)] block">
-                    {hasZoningEvidence ? 'Statutory Cap' : 'Target'}: {maxFAR.toFixed(2)}x
+                    {maxFAR === undefined ? 'FAR limit not provided' : `${hasZoningEvidence ? 'Confirmed cap' : 'Supplied target'}: ${maxFAR.toFixed(2)}x`}
                   </span>
                 </div>
 
                 <div className="surface-inspector p-2.5">
                   <span className="text-[10px] text-[var(--text-secondary)] block">Site Coverage (KDB)</span>
-                  <span className={`text-base font-bold font-mono ${metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-[var(--status-error)]' : 'text-[var(--text-primary)]'}`}>
+                  <span className={`text-base font-bold font-mono ${maxCoverage !== undefined && metrics.siteCoveragePercentage > maxCoverage + 0.1 ? 'text-[var(--status-error)]' : 'text-[var(--text-primary)]'}`}>
                     {metrics.siteCoveragePercentage}%
                   </span>
                   <span className="text-[9px] text-[var(--text-muted)] block">
-                    {hasZoningEvidence ? 'Statutory Limit' : 'Limit'}: {maxCoverage}%
+                    {maxCoverage === undefined ? 'KDB limit not provided' : `${hasZoningEvidence ? 'Confirmed limit' : 'Supplied limit'}: ${maxCoverage}%`}
                   </span>
                 </div>
 
@@ -664,22 +762,27 @@ export function ScenarioControls({
           })()}
         </div>
 
-        {/* Evidence-Backed AI Planning & Investment Advisor */}
+        {/* On-demand planning and investment review */}
         <div className="pt-2 border-t border-[var(--border-subtle)] space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[var(--status-investigation)] text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>AI Investment Advisor</span>
+              <span>Planning &amp; Investment Intelligence</span>
             </div>
-            <span className="status-badge status-badge--investigation !min-h-0 !rounded-[var(--radius-control)] !px-1.5 !py-0.5 text-[9px]">
-              gemini-3.7-flash
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[9px] text-[var(--text-muted)]" title="Configured model for planning assessment">
+                Configured model · gemini-3.7-flash
+              </span>
+              <span className="status-badge status-badge--investigation !min-h-0 !rounded-[var(--radius-control)] !px-1.5 !py-0.5 text-[9px]">
+                On request
+              </span>
+            </div>
           </div>
 
           {/* Interactive Investor Prompt Box */}
           <div className="surface-inspector space-y-1.5 p-2">
             <label className="block text-[10px] font-semibold text-[var(--text-secondary)]">
-              Investor Inquiry / Custom Prompt
+              Question for review
             </label>
             <div className="flex gap-1.5">
               <input
@@ -701,7 +804,7 @@ export function ScenarioControls({
                 disabled={isLoadingAssessment}
                 className="button-primary px-3 py-1.5 text-xs font-semibold flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
-                <span>Ask</span>
+                <span>Review</span>
               </button>
             </div>
 
@@ -731,18 +834,18 @@ export function ScenarioControls({
           <button
             onClick={() => handleGenerateAssessment(investorQuery)}
             disabled={isLoadingAssessment}
-            aria-label="Generate AI Planning Assessment"
+            aria-label="Prepare planning and investment assessment"
             className="w-full button-primary py-2 px-3 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
           >
             {isLoadingAssessment ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Evaluating with Gemini 3.7 Flash...</span>
+                <span>Preparing assessment...</span>
               </>
             ) : (
               <>
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Generate Comprehensive Assessment</span>
+                <span>Prepare Planning Assessment</span>
               </>
             )}
           </button>
@@ -772,7 +875,7 @@ export function ScenarioControls({
                 <div className="p-2 bg-[var(--status-warning-surface)] border border-[var(--status-warning)] rounded-[var(--radius-card)] flex items-center justify-between gap-2 text-[var(--status-warning)] text-[11px]">
                   <div className="flex items-center gap-1.5 font-semibold">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                    <span>[STALE] Inputs changed since assessment</span>
+                    <span>Needs updating · inputs changed since this assessment</span>
                   </div>
                   <button
                     onClick={() => handleGenerateAssessment()}
@@ -791,7 +894,7 @@ export function ScenarioControls({
                     ? 'status-badge--verified'
                     : 'status-badge--error'
                 }`}>
-                  [{assessment.status}]
+                  {assessment.status === 'COMPLIANT' ? 'Within supplied controls' : 'Planning issues found'}
                 </span>
               </div>
 
@@ -802,7 +905,7 @@ export function ScenarioControls({
               {assessment.supportingEvidence.length > 0 && (
                 <div className="space-y-1 pt-1">
                   <span className="text-[10px] text-[var(--text-secondary)] font-semibold block">
-                    Supporting Evidence:
+                    Basis for assessment:
                   </span>
                   <ul className="space-y-0.5 text-[11px] text-[var(--text-secondary)] list-disc list-inside marker:text-[var(--status-evidence)]">
                     {assessment.supportingEvidence.map((ev, idx) => (
@@ -835,9 +938,8 @@ export function ScenarioControls({
                 </div>
               </div>
 
-              <div className="pt-1 flex items-center justify-between text-[9px] text-[var(--text-muted)] font-mono">
-                <span>Model: {assessment.model}</span>
-                <span>{new Date(assessment.generatedAt).toLocaleTimeString()}</span>
+              <div className="pt-1 flex items-center justify-end text-[9px] text-[var(--text-muted)] font-mono">
+                <span>Prepared {new Date(assessment.generatedAt).toLocaleTimeString()}</span>
               </div>
             </div>
           )}

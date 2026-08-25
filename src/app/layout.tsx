@@ -16,7 +16,7 @@ const jetBrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "SitePilot · Spatial Due Diligence & Decision Room",
-  description: "Deterministic spatial due diligence workspace, cadastral verification, and massing generator for property acquisition appraisal.",
+  description: "Site planning workspace for comparing development options, planning controls, and supporting sources.",
 };
 
 export default function RootLayout({

@@ -80,12 +80,12 @@ export function Toolbar({
 
         <button
           onClick={() => onChangeDisplayMode('CONSTRAINTS')}
-          aria-label="Constraints & zoning envelope mode"
+          aria-label="Planning checks and zoning envelope mode"
           aria-pressed={displayMode === 'CONSTRAINTS'}
           className="ui-segment flex items-center gap-1.5 px-2.5 py-1.5 font-medium text-[11px] transition-colors cursor-pointer"
         >
           <Compass className="w-3.5 h-3.5" />
-          <span>Constraints</span>
+          <span>Planning checks</span>
         </button>
       </div>
 

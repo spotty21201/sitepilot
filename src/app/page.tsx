@@ -4,11 +4,12 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
 import { DecisionRoomHeader } from '@/components/DecisionRoomHeader';
 import { DevelopmentWorkspace } from '@/features/development-3d/DevelopmentWorkspace';
-import { EvidenceLedger } from '@/components/EvidenceLedger';
+import { EvidenceLedger, type ManualEvidenceInput } from '@/components/EvidenceLedger';
 import { ScenarioControls } from '@/components/ScenarioControls';
 import { DecisionRoomSummary } from '@/components/DecisionRoomSummary';
 import { NewCaseModal } from '@/components/NewCaseModal';
 import { ScenarioComparisonModal } from '@/components/ScenarioComparisonModal';
+import { OpportunityInputsModal, type OpportunityInputUpdate } from '@/components/OpportunityInputsModal';
 import { 
   getCase, 
   saveCase, 
@@ -20,13 +21,8 @@ import {
   setActiveCaseId,
   CreateCaseParams 
 } from '@/lib/storage/case-repository';
-import { 
-  calculateDevelopmentMetrics, 
-  calculateMassPairwiseIntersections,
-  detectScenarioEditClassification,
-  evaluateScenarioCompliance
-} from '@/lib/geometry/engine';
-import { Compass, ShieldCheck } from 'lucide-react';
+import { detectScenarioEditClassification } from '@/lib/geometry/engine';
+import { ArrowLeft, Compass, ShieldCheck } from 'lucide-react';
 import { Project, DevelopmentScenario, CaseSummary } from '@/types';
 import {
   CanonicalSpatialCommand,
@@ -35,41 +31,10 @@ import {
   createCanonicalCommandId,
   ensureCanonicalProjectRevisions,
 } from '@/lib/spatial/canonical-command-service';
+import { deriveStreetName, synchronizeProjectDerivedState } from '@/lib/opportunity/canonical-opportunity';
 
 function initializeProjectScenarios(rawProject: Project): Project {
-  const initialScenarios = rawProject.scenarios.map(s => {
-    const pairwiseOverlap = calculateMassPairwiseIntersections(s.masses);
-    const complianceReport = evaluateScenarioCompliance(
-      rawProject.site.grossSiteArea,
-      s.assumptionsUsed.setbacks,
-      s.masses,
-      s.metrics,
-      pairwiseOverlap,
-      {
-        scenarioName: s.name,
-        hasZoningEvidence: Boolean(rawProject.site.hasZoningEvidence),
-        maxFAR: rawProject.zoningLimits?.maxFAR,
-        maxCoveragePct: rawProject.zoningLimits?.maxCoveragePct,
-        minKDHPct: rawProject.zoningLimits?.minKDHPct,
-        maxHeightMeters: rawProject.zoningLimits?.maxHeightMeters,
-        maxFloors: rawProject.zoningLimits?.maxFloors,
-        zoningName: rawProject.zoningLimits?.zoneName,
-        frontageLength: rawProject.site.frontageLength
-      }
-    );
-    return {
-      ...s,
-      complianceReport,
-      pairwiseOverlap,
-      status: complianceReport.status as DevelopmentScenario['status'],
-      warningMessage: complianceReport.primaryWarning
-    };
-  });
-
-  return ensureCanonicalProjectRevisions({
-    ...rawProject,
-    scenarios: initialScenarios
-  });
+  return ensureCanonicalProjectRevisions(synchronizeProjectDerivedState(rawProject));
 }
 
 function getInitialCases(): CaseSummary[] {
@@ -100,8 +65,12 @@ export default function SitePilotDecisionRoom() {
   });
   const [leftTab, setLeftTab] = useState<'DECISION' | 'EVIDENCE'>('DECISION');
   const [isNewCaseModalOpen, setIsNewCaseModalOpen] = useState(false);
+  const [isOpportunityInputsOpen, setIsOpportunityInputsOpen] = useState(false);
+  const [isSpatialLabOpen, setIsSpatialLabOpen] = useState(false);
+  const [isSpatialLabOpening, setIsSpatialLabOpening] = useState(false);
   const [casesList, setCasesList] = useState<CaseSummary[]>(getInitialCases);
   const projectRef = useRef(project);
+  const spatialLabOpenTimerRef = useRef<number | null>(null);
   const commandServiceRef = useRef(new CanonicalSpatialCommandService(saveCase));
   const [historyAvailability, setHistoryAvailability] = useState({
     caseId: project.id,
@@ -149,6 +118,7 @@ export default function SitePilotDecisionRoom() {
     if (!replaceProject(updated)) return;
     commandServiceRef.current.clearCase(updated.id);
     refreshHistoryAvailability(updated.id, activeScenarioId);
+    setCasesList(listCases());
   }, [activeScenarioId, refreshHistoryAvailability, replaceProject]);
 
   // Case Switching Handler
@@ -209,54 +179,190 @@ export default function SitePilotDecisionRoom() {
   // Handle Working Site Area Basis toggle
   const handleSelectSiteArea = (newArea: number) => {
     updateProjectState(prev => {
-      const updatedSite = { ...prev.site, grossSiteArea: newArea };
-      const updatedScenarios: DevelopmentScenario[] = prev.scenarios.map(scen => {
+      const updatedSite = {
+        ...prev.site,
+        grossSiteArea: newArea,
+        lotDepth: prev.site.frontageLength ? newArea / prev.site.frontageLength : prev.site.lotDepth,
+        dimensionProvenance: undefined,
+      };
+      const updatedProject = synchronizeProjectDerivedState({ ...prev, site: updatedSite });
+      const updatedScenarios: DevelopmentScenario[] = updatedProject.scenarios.map(scen => {
         const originalScen = prev.scenarios.find(s => s.id === scen.id) || scen;
-        const newMetrics = calculateDevelopmentMetrics(newArea, scen.masses, scen.assumptionsUsed.setbacks, prev.site.frontageLength);
-        const pairwiseOverlap = calculateMassPairwiseIntersections(scen.masses);
-        const complianceReport = evaluateScenarioCompliance(
-          newArea,
-          scen.assumptionsUsed.setbacks,
-          scen.masses,
-          newMetrics,
-          pairwiseOverlap,
-          {
-            scenarioName: scen.name,
-            hasZoningEvidence: Boolean(prev.site.hasZoningEvidence),
-            maxFAR: prev.zoningLimits?.maxFAR,
-            maxCoveragePct: prev.zoningLimits?.maxCoveragePct,
-            minKDHPct: prev.zoningLimits?.minKDHPct,
-            maxHeightMeters: prev.zoningLimits?.maxHeightMeters,
-            maxFloors: prev.zoningLimits?.maxFloors,
-            zoningName: prev.zoningLimits?.zoneName,
-            frontageLength: prev.site.frontageLength
-          }
-        );
-
-        const updatedScenObj = {
-          ...scen,
-          metrics: newMetrics,
-          pairwiseOverlap,
-          complianceReport,
-          status: complianceReport.status as DevelopmentScenario['status'],
-          warningMessage: complianceReport.primaryWarning
-        };
-
-        const classification = detectScenarioEditClassification(updatedScenObj, originalScen);
+        const classification = detectScenarioEditClassification(scen, originalScen);
 
         return {
-          ...updatedScenObj,
+          ...scen,
           editClassification: classification
         };
       });
 
       return {
-        ...prev,
-        site: updatedSite,
+        ...updatedProject,
         scenarios: updatedScenarios
       };
     });
   };
+
+  const handleOpportunityInputUpdate = useCallback((update: OpportunityInputUpdate) => {
+    updateProjectState((previous) => {
+      const street = deriveStreetName(previous.location.address, update.manualStreetName);
+      const planningChanged = previous.zoningLimits?.maxHeightMeters !== update.maxHeightMeters
+        || previous.zoningLimits?.maxFAR !== update.maxFAR
+        || previous.zoningLimits?.maxCoveragePct !== update.maxCoveragePct
+        || previous.zoningLimits?.minKDHPct !== update.minKDHPct
+        || previous.zoningLimits?.setbacks.front !== update.frontSetbackMeters
+        || previous.zoningLimits?.setbacks.sideLeft !== update.sideSetbackMeters
+        || previous.zoningLimits?.setbacks.sideRight !== update.sideSetbackMeters;
+      const verifiedArea = previous.findings.find((finding) => finding.extractedValue?.key === 'gross_site_area'
+        && finding.classification === 'FACT'
+        && finding.confidence === 'HIGH')?.extractedValue?.numericValue;
+      const areaEvidenceConflict = verifiedArea !== undefined
+        && Math.abs(verifiedArea - update.parcel.siteAreaM2) > 0.01;
+      const evidenceWarning = areaEvidenceConflict
+        ? `The current rectangular study area (${update.parcel.siteAreaM2.toLocaleString()} m²) differs from confirmed site-area information (${verifiedArea.toLocaleString()} m²). The user-provided working value is active; reconcile the source information before reliance.`
+        : undefined;
+      const currentTimestamp = new Date().toISOString();
+      const sharedSetbacks = {
+        ...previous.site.setbacks,
+        front: update.frontSetbackMeters,
+        sideLeft: update.sideSetbackMeters,
+        sideRight: update.sideSetbackMeters,
+      };
+      return synchronizeProjectDerivedState({
+        ...previous,
+        findings: previous.findings.map((finding) => {
+          const isPriorArea = finding.extractedValue?.key === 'gross_site_area';
+          const isPriorPlanning = planningChanged && ['max_height_floors', 'max_height', 'max_far', 'max_coverage_pct', 'min_kdh']
+            .includes(finding.extractedValue?.key ?? '');
+          return isPriorArea || isPriorPlanning ? {
+              ...finding,
+              userOverridden: isPriorArea
+                ? finding.extractedValue?.numericValue !== update.parcel.siteAreaM2
+                : true,
+            }
+            : finding;
+        }),
+        contradictions: previous.contradictions.map((contradiction) => contradiction.topic === 'gross_site_area'
+          ? {
+              ...contradiction,
+              resolved: true,
+              workingValueSelected: update.parcel.siteAreaM2,
+            }
+          : contradiction),
+        assumptions: previous.assumptions.map((assumption) => {
+          const parameter = assumption.parameter.toLowerCase();
+          if (parameter.includes('land area')) {
+            return {
+              ...assumption,
+              workingValue: update.parcel.siteAreaM2,
+              unit: 'm²',
+              source: 'Opportunity Inputs (user-entered rectangular study value)',
+              classification: 'ASSUMPTION' as const,
+              verificationStatus: areaEvidenceConflict ? 'CHALLENGED_BY_NEW_EVIDENCE' as const : 'UNVERIFIED' as const,
+              lastUpdated: currentTimestamp,
+            };
+          }
+          if (planningChanged && parameter.includes('maximum height')) {
+            return {
+              ...assumption,
+              workingValue: update.maxHeightMeters ?? 'Not supplied',
+              unit: update.maxHeightMeters === undefined ? undefined : 'metres',
+              source: 'Opportunity Inputs (user-entered planning parameter)',
+              classification: 'ASSUMPTION' as const,
+              verificationStatus: 'UNVERIFIED' as const,
+              lastUpdated: currentTimestamp,
+            };
+          }
+          return assumption;
+        }),
+        issues: previous.issues.map((issue) => areaEvidenceConflict && issue.category === 'LEGAL_TITLE'
+          ? {
+              ...issue,
+              status: 'INVESTIGATING' as const,
+              implication: `The current user-provided rectangular study area (${update.parcel.siteAreaM2.toLocaleString()} m²) conflicts with confirmed site-area information (${verifiedArea.toLocaleString()} m²). Recalculate acquisition ratios and resolve the working basis before reliance.`,
+            }
+          : issue),
+        evidenceConfidence: planningChanged && previous.site.hasZoningEvidence
+          ? 'LOW'
+          : previous.evidenceConfidence,
+        areaProvenance: {
+          value: update.parcel.siteAreaM2,
+          sourceType: 'USER_ENTERED_ASSUMPTION',
+          sourceName: 'Opportunity Inputs',
+          confidence: 'UNVERIFIED',
+          adoptedAt: new Date().toISOString(),
+          notes: 'Rectangular planning-study dimensions; not surveyed cadastral geometry.',
+        },
+        site: {
+          ...previous.site,
+          grossSiteArea: update.parcel.siteAreaM2,
+          frontageLength: update.parcel.frontageMeters,
+          lotDepth: update.parcel.depthMeters,
+          dimensionProvenance: {
+            ...update.parcel.provenance,
+            warning: [update.parcel.provenance.warning, evidenceWarning].filter(Boolean).join(' ') || undefined,
+          },
+          streetName: street.value,
+          streetNameSource: street.source,
+          hasZoningEvidence: planningChanged ? false : previous.site.hasZoningEvidence,
+          setbacks: sharedSetbacks,
+        },
+        zoningLimits: {
+          zoneCode: previous.zoningLimits?.zoneCode,
+          zoneName: previous.zoningLimits?.zoneName,
+          maxFAR: update.maxFAR,
+          maxCoveragePct: update.maxCoveragePct,
+          minKDHPct: update.minKDHPct,
+          maxKTBPct: previous.zoningLimits?.maxKTBPct,
+          maxHeightMeters: update.maxHeightMeters,
+          maxFloors: undefined,
+          setbacks: sharedSetbacks,
+        },
+        scenarios: previous.scenarios.map((scenario) => ({
+          ...scenario,
+          assumptionsUsed: { ...scenario.assumptionsUsed, setbacks: sharedSetbacks },
+        })),
+      });
+    });
+  }, [updateProjectState]);
+
+  const handleAddManualEvidence = useCallback((input: ManualEvidenceInput) => {
+    updateProjectState((previous) => ({
+      ...previous,
+      findings: [
+        ...previous.findings,
+        {
+          id: `fnd-manual-${Date.now()}`,
+          projectId: previous.id,
+          sourceId: 'src-manual-input',
+          sourceName: input.sourceName,
+          statement: input.fact,
+          category: 'GENERAL_NOTE',
+          classification: 'ASSUMPTION',
+          confidence: 'UNVERIFIED',
+          extractedValue: input.value !== undefined && Number.isFinite(input.value)
+            ? { numericValue: input.value, unit: input.unit, key: 'manual_input' }
+            : undefined,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }));
+  }, [updateProjectState]);
+
+  const handleOpenSpatialLab = useCallback(() => {
+    setIsSpatialLabOpening(true);
+    spatialLabOpenTimerRef.current = window.setTimeout(() => {
+      setIsSpatialLabOpen(true);
+      setIsSpatialLabOpening(false);
+      spatialLabOpenTimerRef.current = null;
+    }, 50);
+  }, []);
+
+  useEffect(() => () => {
+    if (spatialLabOpenTimerRef.current !== null) {
+      window.clearTimeout(spatialLabOpenTimerRef.current);
+    }
+  }, []);
 
   const executeSpatialCommand = useCallback((command: CanonicalSpatialCommand): CanonicalCommandResult => {
     const result = commandServiceRef.current.execute(projectRef.current, command);
@@ -314,27 +420,31 @@ export default function SitePilotDecisionRoom() {
     refreshHistoryAvailability(result.project.id, scenarioId);
   }, [refreshHistoryAvailability, replaceProject]);
 
-  // Handle independent scenario parameter adjustments (Floors, Front Setback)
+  // Handle independent scenario parameters through canonical commands.
   const handleUpdateScenarioParam = (
     scenarioId: string, 
-    param: 'floors' | 'frontSetback', 
+    param: 'podiumFloors' | 'towerFloors' | 'frontSetback' | 'sideSetback',
     value: number
   ) => {
     const scenario = projectRef.current.scenarios.find((item) => item.id === scenarioId);
     const base = makeScenarioCommandBase(scenarioId, scenarioId, `scenario-${param}`);
     if (!scenario || !base) return;
-    const command: CanonicalSpatialCommand = param === 'floors'
+    const command: CanonicalSpatialCommand = param === 'podiumFloors' || param === 'towerFloors'
       ? {
           ...base,
-          type: 'SET_SCENARIO_FLOORS',
-          payload: { floors: value },
-          description: `Set ${scenario.name} to ${value} storeys`,
+          type: 'SET_MASS_TYPE_FLOORS',
+          payload: { massType: param === 'podiumFloors' ? 'PODIUM' : 'TOWER', floors: value },
+          description: `Set ${scenario.name} ${param === 'podiumFloors' ? 'podium' : 'tower'} to ${value} storeys`,
         }
       : {
           ...base,
           type: 'SET_SETBACKS',
-          payload: { setbacks: { ...scenario.assumptionsUsed.setbacks, front: value } },
-          description: `Set ${scenario.name} front setback to ${value}m`,
+          payload: {
+            setbacks: param === 'frontSetback'
+              ? { ...scenario.assumptionsUsed.setbacks, front: value }
+              : { ...scenario.assumptionsUsed.setbacks, sideLeft: value, sideRight: value },
+          },
+          description: `Set ${scenario.name} ${param === 'frontSetback' ? 'front' : 'symmetric side'} setback to ${value}m`,
         };
     handleSpatialCommand(command);
   };
@@ -391,6 +501,25 @@ export default function SitePilotDecisionRoom() {
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
 
   const activeScenario = project.scenarios.find(s => s.id === activeScenarioId) || project.scenarios[0];
+  const developmentWorkspace = (
+    <DevelopmentWorkspace
+      caseId={project.id}
+      site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks }}
+      activeScenario={activeScenario}
+      project={project}
+      onProposeCommand={handleSpatialCommand}
+      onCommitSpatialCommand={executeSpatialCommand}
+      canUndo={historyAvailability.caseId === project.id
+        && historyAvailability.scenarioId === activeScenario.id
+        && historyAvailability.canUndo}
+      canRedo={historyAvailability.caseId === project.id
+        && historyAvailability.scenarioId === activeScenario.id
+        && historyAvailability.canRedo}
+      onUndo={handleUndoSpatialCommand}
+      onRedo={handleRedoSpatialCommand}
+      zoningHeightLimitMeters={project.zoningLimits?.maxHeightMeters}
+    />
+  );
 
   return (
     <div className="flex flex-col min-h-screen lg:h-screen w-full bg-[var(--bg-primary)] text-[var(--text-primary)] overflow-x-hidden select-none">
@@ -403,9 +532,42 @@ export default function SitePilotDecisionRoom() {
         onOpenNewCaseModal={() => setIsNewCaseModalOpen(true)}
         onResetDemo={handleResetDemo}
         onDeleteCase={handleDeleteCase}
+        onOpenOpportunityInputs={() => setIsOpportunityInputsOpen(true)}
+        onOpenSpatialLab={handleOpenSpatialLab}
+        isSpatialLabOpening={isSpatialLabOpening}
       />
 
       {/* Main Responsive 3-Column Decision Workspace */}
+      {isSpatialLabOpen ? (
+        <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-y-auto lg:overflow-hidden" data-workspace="spatial-lab">
+          <section className="col-span-1 lg:col-span-9 min-h-[600px] lg:h-full flex flex-col gap-2 overflow-hidden">
+            <div className="surface-inspector flex items-center justify-between gap-3 px-3 py-2">
+              <button type="button" onClick={() => setIsSpatialLabOpen(false)} className="button-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold">
+                <ArrowLeft className="h-3.5 w-3.5" /> Return to Decision Room
+              </button>
+              <div className="min-w-0 text-right text-[10px] text-[var(--text-muted)]">
+                <strong className="block truncate text-xs text-[var(--text-primary)]">Spatial Lab · {project.name}</strong>
+                <span className="font-mono">{project.site.frontageLength}m frontage × {project.site.lotDepth}m depth · {project.site.streetName}</span>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1">{developmentWorkspace}</div>
+          </section>
+          <section className="col-span-1 lg:col-span-3 min-h-[600px] lg:h-full overflow-hidden">
+            <ScenarioControls
+              site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks, projectName: project.name, address: project.location.address }}
+              project={project}
+              scenarios={project.scenarios}
+              activeScenarioId={activeScenarioId}
+              onSelectScenario={handleSelectScenario}
+              onUpdateScenarioParam={handleUpdateScenarioParam}
+              onFitMassingToEnvelope={handleFitMassingToEnvelope}
+              onResetScenario={handleResetScenario}
+              onOpenCompareModal={() => setIsCompareModalOpen(true)}
+              onDuplicateScenario={handleDuplicateScenario}
+            />
+          </section>
+        </main>
+      ) : (
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 p-3 overflow-y-auto lg:overflow-hidden">
         {/* Left Column: Intelligence / Evidence Ledger (3 cols) */}
         <section className="col-span-1 lg:col-span-3 min-h-[480px] lg:h-full flex flex-col gap-2 overflow-hidden">
@@ -425,13 +587,13 @@ export default function SitePilotDecisionRoom() {
               className="ui-segment flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold transition-colors cursor-pointer"
             >
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Evidence Ledger</span>
+              <span>Sources &amp; Assumptions</span>
             </button>
           </div>
 
           <div className="flex-1 overflow-hidden">
             {leftTab === 'DECISION' ? (
-              <DecisionRoomSummary project={project} />
+              <DecisionRoomSummary project={project} selectedScenarioId={activeScenarioId} />
             ) : (
               <EvidenceLedger
                 sources={project.sources}
@@ -439,6 +601,8 @@ export default function SitePilotDecisionRoom() {
                 contradictions={project.contradictions}
                 activeSiteArea={project.site.grossSiteArea}
                 onSelectSiteArea={handleSelectSiteArea}
+                project={project}
+                onAddManualEvidence={handleAddManualEvidence}
               />
             )}
           </div>
@@ -446,23 +610,7 @@ export default function SitePilotDecisionRoom() {
 
         {/* Center Column: 3D Spatial Model Workspace (6 cols) */}
         <section className="col-span-1 lg:col-span-6 min-h-[520px] lg:h-full overflow-hidden">
-          <DevelopmentWorkspace 
-            caseId={project.id}
-            site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks }} 
-            activeScenario={activeScenario}
-            project={project}
-            onProposeCommand={handleSpatialCommand}
-            onCommitSpatialCommand={executeSpatialCommand}
-            canUndo={historyAvailability.caseId === project.id
-              && historyAvailability.scenarioId === activeScenario.id
-              && historyAvailability.canUndo}
-            canRedo={historyAvailability.caseId === project.id
-              && historyAvailability.scenarioId === activeScenario.id
-              && historyAvailability.canRedo}
-            onUndo={handleUndoSpatialCommand}
-            onRedo={handleRedoSpatialCommand}
-            zoningHeightLimitMeters={project.zoningLimits?.maxHeightMeters}
-          />
+          {developmentWorkspace}
         </section>
 
         {/* Right Column: Scenarios & Development Metrics (3 cols) */}
@@ -473,7 +621,6 @@ export default function SitePilotDecisionRoom() {
               setbacks: activeScenario.assumptionsUsed.setbacks,
               projectName: project.name,
               address: project.location.address,
-              hasZoningEvidence: project.id === 'proj-001' || project.sources.some(s => s.status === 'PROCESSED')
             }}
             project={project}
             scenarios={project.scenarios}
@@ -487,6 +634,7 @@ export default function SitePilotDecisionRoom() {
           />
         </section>
       </main>
+      )}
 
       {/* New Opportunity Modal */}
       <NewCaseModal 
@@ -494,6 +642,15 @@ export default function SitePilotDecisionRoom() {
         onClose={() => setIsNewCaseModalOpen(false)}
         onCreateCase={handleCreateCase}
       />
+
+      {isOpportunityInputsOpen && (
+        <OpportunityInputsModal
+          key={`${project.id}:${project.updatedAt}`}
+          project={project}
+          onClose={() => setIsOpportunityInputsOpen(false)}
+          onSave={handleOpportunityInputUpdate}
+        />
+      )}
 
       {/* Scenario Comparison Matrix Modal */}
       <ScenarioComparisonModal
