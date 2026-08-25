@@ -47,6 +47,7 @@ export const taskmasterInputSchema = z.object({
     currentStatus: z.string().max(200).optional(),
   }).optional(),
   landscapedPermeableAreaM2: z.number().finite().nonnegative().optional(),
+  landscapedPermeablePct: z.number().finite().min(0).max(100).optional(),
   planningLimits: z.object({
     maxFAR: z.number().finite().nonnegative().optional(),
     maxCoveragePct: z.number().finite().min(0).max(100).optional(),
@@ -127,6 +128,26 @@ export interface TaskmasterSimulation {
   planningStatus: 'WITHIN_SUPPLIED_LIMITS' | 'OUTSIDE_SUPPLIED_LIMITS';
   warnings: string[];
   assumptions: string[];
+  programGFAByUse?: Record<string, number>;
+}
+
+export interface TaskmasterProviderUsage {
+  provider?: string;
+  requestedModel?: string;
+  actualModel?: string;
+  location?: string;
+  responseIds?: string[];
+  providerRequests: number;
+  promptTokens: number;
+  candidateTokens: number;
+  toolUsePromptTokens: number;
+  thoughtTokens: number;
+  totalTokens: number;
+  modelLatencyMs: number;
+  repairCount: number;
+  estimatedCostUsd?: number;
+  budgetStopReason?: string;
+  costConfigVersion: string;
 }
 
 export interface TaskmasterCompletionReport {
@@ -175,13 +196,15 @@ export interface TaskmasterRunRecord {
   leaseOwner?: string;
   leaseExpiresAt?: string;
   expiresAt?: string;
+  forceFallback?: boolean;
+  providerUsage: TaskmasterProviderUsage;
 }
 
 export type PublicTaskmasterRun = Pick<TaskmasterRunRecord,
   'runId' | 'correlationId' | 'opportunityId' | 'sourceStudyVersion' | 'inputHash' | 'state' | 'currentStep' |
   'progress' | 'createdAt' | 'updatedAt' | 'retryCount' | 'plan' | 'activities' | 'generation' |
   'simulations' | 'approval' | 'completionReport' | 'error' | 'provider' | 'model' | 'modelCalled' |
-  'modelCallCount' | 'disclosure'>;
+  'modelCallCount' | 'disclosure' | 'providerUsage'>;
 
 export function toPublicTaskmasterRun(run: TaskmasterRunRecord): PublicTaskmasterRun {
   return {
@@ -208,6 +231,7 @@ export function toPublicTaskmasterRun(run: TaskmasterRunRecord): PublicTaskmaste
     modelCalled: run.modelCalled,
     modelCallCount: run.modelCallCount,
     disclosure: run.disclosure,
+    providerUsage: run.providerUsage,
   };
 }
 

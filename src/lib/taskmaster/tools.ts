@@ -35,35 +35,50 @@ function massFromProposal(
   bounds: CanonicalParcelBounds,
 ): BuildingMass[] {
   const maxCoverage = input.planningLimits.maxCoveragePct ?? 50;
-  const coverageTarget = proposal.name.includes('Adaptive')
-    ? Math.min(35, maxCoverage)
-    : proposal.name.includes('Balanced')
-      ? Math.min(45, maxCoverage)
-      : maxCoverage;
-  const targetFootprint = Math.min(bounds.netBuildableArea, input.siteAreaM2 * coverageTarget / 100);
-  const podiumFloors = proposal.podiumStoreys ?? 0;
-  const towerFloors = proposal.towerStoreys ?? 0;
-  const podiumHeight = podiumFloors * (proposal.floorToFloorAssumptions.podium ?? 4);
+  const maxCoverageArea = input.siteAreaM2 * maxCoverage / 100;
+  const podiumFloorHeight = proposal.floorToFloorAssumptions.podium ?? 4;
   const towerFloorHeight = proposal.floorToFloorAssumptions.tower ?? 3.5;
-  const podiumWidth = Math.max(0, Math.min(bounds.buildableWidth, Math.sqrt(Math.max(1, targetFootprint))));
-  const podiumLength = Math.max(0, Math.min(bounds.buildableLength, targetFootprint / Math.max(1, podiumWidth)));
-  const podiumFootprint = round(podiumWidth * podiumLength);
+  const requestedPodiumFloors = proposal.podiumStoreys ?? 0;
+  const podiumFloors = input.planningLimits.maxHeightMeters === undefined
+    ? requestedPodiumFloors
+    : Math.min(requestedPodiumFloors, Math.max(0, Math.floor(input.planningLimits.maxHeightMeters / podiumFloorHeight)));
+  const maximumTowerFloors = input.planningLimits.maxHeightMeters === undefined
+    ? proposal.towerStoreys ?? 0
+    : Math.max(0, Math.floor((input.planningLimits.maxHeightMeters - podiumFloors * podiumFloorHeight) / towerFloorHeight));
+  const towerFloors = Math.min(proposal.towerStoreys ?? 0, maximumTowerFloors);
+  const podiumHeight = podiumFloors * podiumFloorHeight;
+  const strategyFar = proposal.strategy === 'CONSERVATIVE'
+    ? Math.min(input.planningLimits.maxFAR ?? 3.2, 2.4)
+    : proposal.strategy === 'BALANCED'
+      ? Math.min(input.planningLimits.maxFAR ?? 3.2, 5.2)
+      : input.planningLimits.maxFAR ?? 3.2;
+  const targetGfa = Math.max(0, input.siteAreaM2 * strategyFar);
+  const retainedGfa = input.existingAsset && proposal.existingAssetDecision !== 'REPLACE' && proposal.existingAssetDecision !== 'NOT_APPLICABLE'
+    ? input.existingAsset.gfa * (proposal.existingAssetDecision === 'PARTIALLY_RETAIN' ? 0.5 : 1)
+    : 0;
+  const retainedFloors = input.existingAsset?.floors ?? 1;
+  const retainedFootprintTarget = retainedGfa / Math.max(1, retainedFloors);
+  const retainedWidth = retainedGfa > 0 ? Math.max(1, Math.min(bounds.buildableWidth * 0.42, Math.sqrt(retainedFootprintTarget))) : 0;
+  const retainedLength = retainedWidth > 0 ? Math.max(1, Math.min(bounds.buildableLength * 0.55, retainedFootprintTarget / retainedWidth)) : 0;
+  const availableCoverage = Math.max(1, maxCoverageArea - retainedWidth * retainedLength);
+  const targetNewGfa = Math.max(1, targetGfa - retainedGfa);
+  const towerShare = proposal.strategy === 'CONSERVATIVE' ? 0.52 : proposal.strategy === 'BALANCED' ? 0.68 : 0.82;
+  const towerFootprintTarget = towerFloors > 0 ? targetNewGfa * towerShare / towerFloors : 0;
+  const towerFootprint = towerFloors > 0 ? Math.max(120, Math.min(availableCoverage * 0.7, towerFootprintTarget || availableCoverage * 0.45)) : 0;
+  const podiumFootprintTarget = podiumFloors > 0 ? Math.max(towerFootprint, (targetNewGfa - towerFootprint * towerFloors) / podiumFloors) : towerFootprint;
+  const podiumFootprint = Math.max(0, Math.min(availableCoverage, podiumFootprintTarget));
+  const maxSeparatedPodiumLength = Math.max(1, bounds.buildableLength - retainedLength - 2);
+  const podiumLength = podiumFootprint > 0 ? Math.max(1, Math.min(maxSeparatedPodiumLength, Math.sqrt(podiumFootprint))) : 0;
+  const podiumWidth = podiumLength > 0 ? Math.max(1, Math.min(bounds.buildableWidth, podiumFootprint / podiumLength)) : 0;
+  const towerWidth = towerFootprint > 0 ? Math.max(1, Math.min(podiumWidth * 0.72, Math.sqrt(towerFootprint))) : 0;
+  const towerLength = towerWidth > 0 ? Math.max(1, Math.min(podiumLength * 0.72, towerFootprint / towerWidth)) : 0;
   const centerX = (bounds.buildableMinX + bounds.buildableMaxX) / 2;
-  const centerZ = (bounds.buildableMinY + bounds.buildableMaxY) / 2;
+  const retainedCenterZ = bounds.buildableMinY + retainedLength / 2;
+  const podiumCenterZ = bounds.buildableMaxY - podiumLength / 2;
   const masses: BuildingMass[] = [];
 
   const existingDecision = proposal.existingAssetDecision;
-  if (input.existingAsset && existingDecision !== 'REPLACE') {
-    const retainedGfa = existingDecision === 'PARTIALLY_RETAIN'
-      ? input.existingAsset.gfa * 0.5
-      : input.existingAsset.gfa;
-    const retainedFloors = input.existingAsset.floors ?? 1;
-    const retainedFootprint = Math.min(
-      bounds.netBuildableArea,
-      retainedGfa / Math.max(1, retainedFloors),
-    );
-    const retainedWidth = Math.max(1, Math.min(bounds.buildableWidth * 0.45, Math.sqrt(retainedFootprint)));
-    const retainedLength = Math.max(1, Math.min(bounds.buildableLength * 0.55, retainedFootprint / retainedWidth));
+  if (input.existingAsset && existingDecision !== 'REPLACE' && existingDecision !== 'NOT_APPLICABLE') {
     masses.push({
       id: `${proposal.id}-existing-asset`,
       name: existingDecision === 'PARTIALLY_RETAIN' ? 'Existing asset · partial retention' : 'Existing asset · retained',
@@ -75,7 +90,7 @@ function massFromProposal(
       gfa: round(retainedGfa),
       preserveGfa: true,
       program: 'MIXED_USE',
-      position: { x: bounds.buildableMinX + retainedWidth / 2, y: 0, z: centerZ },
+      position: { x: centerX, y: 0, z: retainedCenterZ },
       dimensions: { width: retainedWidth, length: retainedLength, height: retainedFloors * 4 },
     });
   }
@@ -85,21 +100,18 @@ function massFromProposal(
       id: `${proposal.id}-podium`,
       name: `${proposal.name} · podium`,
       type: 'PODIUM',
-      footprintArea: podiumFootprint,
+      footprintArea: round(podiumWidth * podiumLength),
       floors: podiumFloors,
       floorToFloorHeight: proposal.floorToFloorAssumptions.podium ?? 4,
       height: podiumHeight,
       gfa: round(podiumFootprint * podiumFloors),
       program: 'MIXED_USE',
-      position: { x: centerX, y: 0, z: centerZ },
+      position: { x: centerX, y: 0, z: podiumCenterZ },
       dimensions: { width: podiumWidth, length: podiumLength, height: podiumHeight },
     });
   }
 
   if (towerFloors > 0) {
-    const towerFootprint = round(Math.min(podiumFootprint * 0.42, bounds.netBuildableArea * 0.42));
-    const towerWidth = Math.max(1, Math.min(podiumWidth * 0.62, Math.sqrt(Math.max(1, towerFootprint))));
-    const towerLength = Math.max(1, Math.min(podiumLength * 0.62, towerFootprint / towerWidth));
     masses.push({
       id: `${proposal.id}-tower`,
       name: `${proposal.name} · tower`,
@@ -110,7 +122,7 @@ function massFromProposal(
       height: towerFloors * towerFloorHeight,
       gfa: round(towerWidth * towerLength * towerFloors),
       program: 'MIXED_USE',
-      position: { x: centerX, y: podiumHeight, z: centerZ },
+      position: { x: centerX, y: podiumHeight, z: podiumCenterZ },
       dimensions: { width: towerWidth, length: towerLength, height: towerFloors * towerFloorHeight },
     });
   }
@@ -136,12 +148,15 @@ export function calculateBuildableEnvelopeTool(input: TaskmasterInput) {
 export function simulateDevelopmentSchemeTool(input: TaskmasterInput, proposal: SchemeProposal): TaskmasterSimulation {
   const bounds = siteBounds(input);
   const masses = massFromProposal(input, proposal, bounds);
+  const landscapedPermeableAreaM2 = input.landscapedPermeableAreaM2 ?? (
+    input.landscapedPermeablePct === undefined ? undefined : input.siteAreaM2 * input.landscapedPermeablePct / 100
+  );
   const metrics = calculateDevelopmentMetrics(
     input.siteAreaM2,
     masses,
     input.planningLimits.setbacks,
     input.frontageMeters,
-    input.landscapedPermeableAreaM2,
+    landscapedPermeableAreaM2,
   );
   const intersections = calculateMassPairwiseIntersections(masses);
   const checks = checkConstraintViolations(metrics, {
@@ -152,7 +167,8 @@ export function simulateDevelopmentSchemeTool(input: TaskmasterInput, proposal: 
   });
   const warnings = [...checks.warnings];
   if (intersections.hasOverlap) warnings.push(`Mass collision detected (${round(intersections.overlapVolumeM3)} m³).`);
-  if (input.planningLimits.minKDHPct !== undefined && input.landscapedPermeableAreaM2 === undefined) {
+  const kdhWarning = input.planningLimits.minKDHPct !== undefined && landscapedPermeableAreaM2 === undefined;
+  if (kdhWarning) {
     warnings.push('KDH not demonstrated: explicit landscaped/permeable area is still required.');
   }
   return {
@@ -165,7 +181,7 @@ export function simulateDevelopmentSchemeTool(input: TaskmasterInput, proposal: 
     buildableAreaM2: metrics.netBuildableArea,
     landscapedPermeableAreaM2: metrics.landscapedPermeableAreaM2,
     kdhDemonstrated: metrics.kdhDemonstrated ?? false,
-    planningStatus: warnings.length === 0 ? 'WITHIN_SUPPLIED_LIMITS' : 'OUTSIDE_SUPPLIED_LIMITS',
+    planningStatus: checks.hasViolations || intersections.hasOverlap ? 'OUTSIDE_SUPPLIED_LIMITS' : 'WITHIN_SUPPLIED_LIMITS',
     warnings,
     assumptions: [
       'Figures are calculated from the rectangular study parcel and supplied setbacks.',

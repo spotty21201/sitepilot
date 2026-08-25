@@ -225,11 +225,13 @@ export interface DevelopmentMetrics {
   kdhDemonstrated?: boolean;
 }
 
-export type ExistingAssetStrategy = 'RETAIN' | 'PARTIALLY_RETAIN' | 'ADAPT' | 'REPLACE';
+export type ExistingAssetStrategy = 'RETAIN' | 'PARTIALLY_RETAIN' | 'ADAPT' | 'REPLACE' | 'NOT_APPLICABLE';
+export type SchemeStrategy = 'CONSERVATIVE' | 'BALANCED' | 'BOUNDARY';
 
 export interface SchemeProposal {
   id: string;
   name: string;
+  strategy: SchemeStrategy;
   thesis: string;
   existingAssetDecision: ExistingAssetStrategy;
   existingAssetScope: string;
@@ -238,6 +240,8 @@ export interface SchemeProposal {
   towerStoreys?: number;
   floorToFloorAssumptions: { podium?: number; tower?: number };
   programGFAByUse: Record<string, number>;
+  programSharePct: Record<string, number>;
+  setbacks: Setbacks;
   footprintIntent: string;
   publicRealmIntent: string;
   landscapedPermeableKDHIntent: string;

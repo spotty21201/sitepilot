@@ -51,7 +51,7 @@ One post-packaging synthetic run used the existing runtime identity and no API k
 
 The application-level counter is not a transport-level inference meter. Cloud Run logs contained seven ADK `Sending out request` events during this run, so the configured two logical model phases did **not** prove a hard two-request transport cap. Token usage and estimated cost were not returned or persisted by the current adapter and are therefore **unavailable**, not estimated. No repair, fallback or approval occurred.
 
-The live run exposed two follow-up engineering items: the ADK runtime currently emits a deprecation warning for `GOOGLE_GENAI_USE_VERTEXAI` (future runs should adopt the supported enterprise marker after source review), and the request budget needs enforcement at the provider boundary rather than only at the logical phase counter.
+The live run exposed two follow-up engineering items: the ADK runtime currently emits a deprecation warning for `GOOGLE_GENAI_USE_VERTEXAI` (the deployed configuration now uses explicit Vertex client configuration with `VERTEX_AI_LOCATION`), and the request budget needs enforcement at the provider boundary rather than only at the logical phase counter. Provider transport budgeting is now persisted per run and applies to every Vertex request, including ADK turns and one repair request.
 
 ## Local behavior
 
@@ -86,9 +86,16 @@ Set these only in an owner-approved non-production environment:
 - `TASKMASTER_WORKER_SECRET=<server-side-only-secret>`
 - `TASKMASTER_MAX_TOOL_CALLS=16`
 - `TASKMASTER_MAX_RETRIES=2`
-- `TASKMASTER_MAX_MODEL_CALLS=2` for the bounded first live test (the application counter covers logical ADK planning and structured proposal phases; transport-level enforcement remains a follow-up)
+- `TASKMASTER_MAX_MODEL_CALLS=2` for the bounded planning/proposal phases; the transport guard independently enforces `TASKMASTER_MAX_PROVIDER_REQUESTS=8` and `TASKMASTER_MAX_TOTAL_TOKENS=32768`.
 - `TASKMASTER_MAX_DURATION_MS=30000`
 - `TASKMASTER_MAX_OUTPUT_TOKENS=4096`
+- `TASKMASTER_DAILY_RUN_LIMIT=20` and `TASKMASTER_SESSION_RUN_LIMIT=2` provide conservative public-demo allowances. Exhaustion selects explicitly labelled study templates without calling Vertex AI.
+
+## Vercel-to-Google boundary
+
+The browser remains a same-origin client. When `TASKMASTER_API_URL` is configured on the Vercel server runtime, the Next route exchanges the Vercel OIDC subject token through Google Workload Identity Federation and calls the private `sitepilot-taskmaster-api` Cloud Run service. The API creates the Firestore run and enqueues an identifier-only Cloud Task; only the dedicated Cloud Tasks identity can invoke `sitepilot-taskmaster`. No service-account key is used in Vercel and the API identity cannot invoke Vertex AI.
+
+The Vercel provider must restrict the verified team, project and Preview environment claims. The Cloud Run API uses `TASKMASTER_API_MODE=true`, `TASKMASTER_ALLOW_LIVE_MODEL=false`, Firestore Native mode and the existing queue. The worker separately enables Vertex only during an explicitly authorized synthetic run.
 
 Firestore stores `taskmasterRuns/{runId}`, `events/{eventId}`, `proposals/{proposalId}`, and `taskmasterIdempotency/{keyHash}`. Run writes use optimistic transactions, a monotonic revision, a lease owner/expiry, and deterministic idempotency documents. Each run document stores the run ID, correlation ID, opportunity ID, source study version, input hash, goal, validated plan, state transitions, concise tool activities, proposal set, deterministic simulations, approval decision, completion report, and provider/model metadata. Cloud Run emits correlation-only JSON events without private opportunity documents, unrestricted prompts, or secrets. Hidden chain-of-thought is never persisted.
 

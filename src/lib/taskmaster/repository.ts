@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { TaskmasterRunRecord } from './schemas';
+import type { TaskmasterProviderUsage, TaskmasterRunRecord } from './schemas';
 
 function idempotencyKeyHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');
@@ -12,11 +12,15 @@ export interface TaskmasterRunRepository {
   save(run: TaskmasterRunRecord): Promise<TaskmasterRunRecord>;
   acquireLease(runId: string, owner: string, leaseMs: number): Promise<TaskmasterRunRecord | undefined>;
   releaseLease(runId: string, owner: string): Promise<void>;
+  reserveProviderRequest(runId: string, limit: number): Promise<{ allowed: boolean; requestNumber: number; reason?: string }>;
+  recordProviderUsage(runId: string, usage: Partial<TaskmasterProviderUsage>): Promise<void>;
+  getProviderUsage(runId: string): Promise<TaskmasterProviderUsage | undefined>;
 }
 
 /** Local Firestore substitute with the same optimistic-concurrency contract. */
 export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository {
   private readonly runs = new Map<string, TaskmasterRunRecord>();
+  private readonly providerUsage = new Map<string, TaskmasterProviderUsage>();
 
   async create(run: TaskmasterRunRecord): Promise<TaskmasterRunRecord> {
     if (this.runs.has(run.runId) || [...this.runs.values()].some((candidate) => candidate.idempotencyKey === run.idempotencyKey)) {
@@ -60,6 +64,25 @@ export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository 
     const current = this.runs.get(runId);
     if (current?.leaseOwner === owner) this.runs.set(runId, structuredClone({ ...current, leaseOwner: undefined, leaseExpiresAt: undefined }));
   }
+
+  async reserveProviderRequest(runId: string, limit: number) {
+    const current = this.providerUsage.get(runId) || { providerRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    if (current.providerRequests >= limit) {
+      current.budgetStopReason = `Provider request ceiling of ${limit} reached.`;
+      this.providerUsage.set(runId, structuredClone(current));
+      return { allowed: false, requestNumber: current.providerRequests, reason: current.budgetStopReason };
+    }
+    current.providerRequests += 1;
+    this.providerUsage.set(runId, structuredClone(current));
+    return { allowed: true, requestNumber: current.providerRequests };
+  }
+
+  async recordProviderUsage(runId: string, usage: Partial<TaskmasterProviderUsage>) {
+    const current = this.providerUsage.get(runId) || { providerRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    this.providerUsage.set(runId, structuredClone({ ...current, ...usage }));
+  }
+
+  async getProviderUsage(runId: string) { return this.providerUsage.get(runId) ? structuredClone(this.providerUsage.get(runId)) : undefined; }
 }
 
 type FirestoreLike = import('@google-cloud/firestore').Firestore;
@@ -67,6 +90,7 @@ type FirestoreLike = import('@google-cloud/firestore').Firestore;
 class FirestoreTaskmasterRunRepository implements TaskmasterRunRepository {
   private readonly runsCollection = process.env.TASKMASTER_FIRESTORE_COLLECTION || 'taskmasterRuns';
   private readonly idempotencyCollection = process.env.TASKMASTER_FIRESTORE_IDEMPOTENCY_COLLECTION || 'taskmasterIdempotency';
+  private readonly providerUsageCollection = process.env.TASKMASTER_FIRESTORE_USAGE_COLLECTION || 'taskmasterProviderUsage';
 
   constructor(private readonly db: FirestoreLike) {}
 
@@ -142,6 +166,37 @@ class FirestoreTaskmasterRunRepository implements TaskmasterRunRepository {
       if (current.leaseOwner !== owner) return;
       transaction.set(ref, { ...current, leaseOwner: null, leaseExpiresAt: null, revision: (current.revision ?? 0) + 1 }, { merge: false });
     });
+  }
+
+  async reserveProviderRequest(runId: string, limit: number) {
+    let result = { allowed: false, requestNumber: 0, reason: undefined as string | undefined };
+    await this.db.runTransaction(async (transaction) => {
+      const ref = this.db.collection(this.providerUsageCollection).doc(runId);
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists ? snapshot.data() as Partial<TaskmasterProviderUsage> : {};
+      const count = Number(current.providerRequests || 0);
+      if (count >= limit) {
+        const reason = `Provider request ceiling of ${limit} reached.`;
+        transaction.set(ref, { ...current, providerRequests: count, budgetStopReason: reason, updatedAt: new Date().toISOString() }, { merge: true });
+        result = { allowed: false, requestNumber: count, reason };
+        return;
+      }
+      const next = count + 1;
+      transaction.set(ref, { ...current, providerRequests: next, updatedAt: new Date().toISOString(), costConfigVersion: current.costConfigVersion || process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' }, { merge: true });
+      transaction.create(ref.collection('requests').doc(String(next).padStart(4, '0')), { requestNumber: next, startedAt: new Date().toISOString() });
+      result = { allowed: true, requestNumber: next, reason: undefined };
+    });
+    return result;
+  }
+
+  async recordProviderUsage(runId: string, usage: Partial<TaskmasterProviderUsage>) {
+    const ref = this.db.collection(this.providerUsageCollection).doc(runId);
+    await ref.set({ ...usage, updatedAt: new Date().toISOString() }, { merge: true });
+  }
+
+  async getProviderUsage(runId: string) {
+    const snapshot = await this.db.collection(this.providerUsageCollection).doc(runId).get();
+    return snapshot.exists ? snapshot.data() as TaskmasterProviderUsage : undefined;
   }
 }
 

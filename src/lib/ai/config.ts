@@ -21,7 +21,7 @@ export function getAiConfig(): AiConfig {
   const isProduction = process.env.NODE_ENV === 'production';
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
   const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT || '';
-  const location = process.env.GOOGLE_CLOUD_LOCATION || process.env.GCP_REGION || 'asia-southeast2';
+  const location = process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || process.env.GCP_REGION || 'asia-southeast2';
   
   // Repository-wide configured model; live authenticated inference is verified separately.
   const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { generateSchemeProposals, validateSchemeProposals, type SchemeGenerationResult } from '@/lib/schemes/proposal-contract';
+import { createStudyTemplateProposals, generateSchemeProposals, validateSchemeProposals, type SchemeGenerationResult } from '@/lib/schemes/proposal-contract';
 import { getAiConfig } from '@/lib/ai/config';
 import {
   allowedTaskmasterTransitions,
@@ -17,6 +17,7 @@ import {
 import { getTaskmasterRunRepository, type TaskmasterRunRepository } from './repository';
 import { buildDeterministicTaskmasterPlan, runAdkPlan, taskmasterModelDisclosure } from './adk-agent';
 import { executeTaskmasterTool, type TaskmasterToolContext } from './tools';
+import { withProviderBudget } from './provider-budget';
 
 const activeExecutions = new Set<string>();
 
@@ -40,7 +41,7 @@ function progressFor(state: TaskmasterRunState, stepIndex = 0, stepCount = 1): n
   return ['COMPLETED', 'REJECTED', 'CANCELLED'].includes(state) ? 100 : 0;
 }
 
-export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempotencyKey: string = randomUUID()): TaskmasterRunRecord {
+export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempotencyKey: string = randomUUID(), forceFallback = false): TaskmasterRunRecord {
   const validated = taskmasterInputSchema.parse(input);
   const disclosure = taskmasterModelDisclosure();
   const timestamp = now();
@@ -65,6 +66,18 @@ export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempo
     modelCalled: disclosure.modelCalled,
     modelCallCount: 0,
     disclosure: disclosure.disclosure,
+    forceFallback,
+    providerUsage: {
+      providerRequests: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      toolUsePromptTokens: 0,
+      thoughtTokens: 0,
+      totalTokens: 0,
+      modelLatencyMs: 0,
+      repairCount: 0,
+      costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1',
+    },
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
   };
 }
@@ -131,13 +144,15 @@ export async function executeTaskmasterRun(
       }
 
       const context: TaskmasterToolContext = { input: run.input, proposals: [], simulations: [] };
+      const executionRun = run;
       let plan = run.plan;
       let modelGeneration: SchemeGenerationResult | undefined;
+      const liveAllowed = !run.forceFallback && process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true' && getAiConfig().provider !== 'LOCAL_DEVELOPMENT';
       if (!plan) {
         try {
-          if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') {
+          if (liveAllowed) {
             if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
-            plan = await runAdkPlan(run.input, context);
+            plan = await withProviderBudget(executionRun.runId, repository, () => runAdkPlan(executionRun.input, context));
             modelCalls += 1;
           } else {
             plan = buildDeterministicTaskmasterPlan(run.goal);
@@ -145,20 +160,22 @@ export async function executeTaskmasterRun(
           taskmasterPlanSchema.parse(plan);
         } catch (error) {
           // A model planning error is retryable, but local development remains honest and usable.
-          if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') throw error;
+          if (liveAllowed) throw error;
           plan = buildDeterministicTaskmasterPlan(run.goal);
         }
         run = { ...run, plan, modelCallCount: modelCalls, currentStep: 'Executing bounded read-only tools', provider: taskmasterModelDisclosure().provider, model: taskmasterModelDisclosure().model, modelCalled: modelCalls > 0, disclosure: taskmasterModelDisclosure().disclosure };
         run = await repository.save(run);
       }
 
-      if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true' && getAiConfig().provider !== 'LOCAL_DEVELOPMENT') {
+      if (liveAllowed) {
         if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
-        modelGeneration = await generateSchemeProposals(run.input);
+        modelGeneration = await withProviderBudget(executionRun.runId, repository, () => generateSchemeProposals(executionRun.input));
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
         run = { ...run, modelCallCount: modelCalls };
         run = await repository.save(run);
+      } else if (run.forceFallback) {
+        context.proposals = createStudyTemplateProposals(run.input);
       }
 
       run = transition(run, 'EXECUTING_TOOLS', 'Executing bounded read-only tools');
@@ -201,6 +218,9 @@ export async function executeTaskmasterRun(
       if (context.simulations.length !== 3) {
         for (const proposal of context.proposals) executeTaskmasterTool('simulate_development_scheme', context, { proposalId: proposal.id });
       }
+      if (context.simulations.some((simulation) => simulation.planningStatus !== 'WITHIN_SUPPLIED_LIMITS')) {
+        throw new Error('One or more proposals failed deterministic planning checks; no studies were made ready for approval.');
+      }
 
       run = transition(run, 'VALIDATING', 'Checking geometry and planning limits');
       const disclosure = taskmasterModelDisclosure();
@@ -218,7 +238,7 @@ export async function executeTaskmasterRun(
         proposals: validation.proposals,
         validation: { valid: true, errors: [] },
       };
-      run = { ...run, generation, simulations: context.simulations };
+      run = { ...run, generation, simulations: context.simulations, providerUsage: (await repository.getProviderUsage(run.runId)) || run.providerUsage };
       run = transition(run, 'AWAITING_APPROVAL', 'Ready for human review');
       run = { ...run, progress: progressFor(run.state) };
       run = await repository.save(run);
