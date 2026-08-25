@@ -11,6 +11,7 @@ import {
 } from '@/lib/spatial/canonical-command-service';
 import { exportToColladaDAE } from '@/lib/geometry/engine';
 import { BuildingMass, Project } from '@/types';
+import { createStudyTemplateProposals, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
 
 const successfulPersist = () => true;
 
@@ -90,6 +91,71 @@ describe('Production canonical spatial command reducer', () => {
         intent.type === 'DUPLICATE_SCENARIO' ? 0 : (scenario.canonicalRevision?.sequence ?? 0) + 1
       );
     }
+  });
+
+  it('accepts a generated proposal through the canonical command boundary', () => {
+    const project = freshProject();
+    const generationInput: SchemeGenerationInput = {
+      opportunityId: project.id,
+      name: project.name,
+      address: project.location.address,
+      objective: 'Compare three study options',
+      siteAreaM2: project.site.grossSiteArea,
+      frontageMeters: project.site.frontageLength ?? 1,
+      depthMeters: project.site.lotDepth ?? 1,
+      existingAsset: project.existingAsset
+        ? { gfa: project.existingAsset.gfa, floors: project.existingAsset.floors }
+        : undefined,
+      planningLimits: {
+        ...(project.zoningLimits?.maxFAR !== undefined ? { maxFAR: project.zoningLimits.maxFAR } : {}),
+        ...(project.zoningLimits?.maxCoveragePct !== undefined ? { maxCoveragePct: project.zoningLimits.maxCoveragePct } : {}),
+        ...(project.zoningLimits?.minKDHPct !== undefined ? { minKDHPct: project.zoningLimits.minKDHPct } : {}),
+        ...(project.zoningLimits?.maxHeightMeters !== undefined ? { maxHeightMeters: project.zoningLimits.maxHeightMeters } : {}),
+        setbacks: project.site.setbacks,
+      },
+      studyVersion: 'v1',
+      inputHash: 'hash-v1',
+      priorities: {
+        existingBuildingRetention: 'adapt',
+        developmentYield: 'balanced',
+        publicRealm: 'strong',
+        programMix: 'Mixed use',
+        phasing: 'phased',
+        planningRiskTolerance: 'medium',
+        investmentHorizon: 'long',
+        allowNonCompliantStretch: false,
+      },
+    };
+    const proposals = createStudyTemplateProposals(generationInput);
+    project.schemeGeneration = {
+      status: 'READY',
+      provider: 'LOCAL_DEVELOPMENT',
+      model: 'Not called',
+      modelCalled: false,
+      disclosure: 'Study templates',
+      generatedAt: '2026-08-22T01:00:00.000Z',
+      opportunityId: project.id,
+      sourceStudyVersion: 'v1',
+      inputHash: 'hash-v1',
+      userPriorities: {},
+      assumptions: [],
+      validation: { valid: true, errors: [] },
+      proposals,
+    };
+    project.scenarios = project.scenarios.map((scenario, index) => ({ ...scenario, proposal: proposals[index] }));
+    const revisedProject = ensureCanonicalProjectRevisions(project);
+    const scenario = revisedProject.scenarios[0];
+    const result = executeCanonicalSpatialCommand(revisedProject, command(revisedProject, scenario.id, {
+      type: 'ACCEPT_SCHEME_PROPOSAL',
+      targetId: scenario.id,
+      payload: { proposalId: proposals[0].id },
+      description: 'Accept generated proposal',
+    }, 'cmd:accept-proposal'));
+    expect(result.accepted).toBe(true);
+    if (!result.accepted) return;
+    expect(result.project.schemeGeneration?.acceptedProposalId).toBe(proposals[0].id);
+    expect(result.project.scenarios.find((item) => item.id === scenario.id)?.isPreferred).toBe(true);
+    expect(result.project.scenarios.filter((item) => item.isPreferred)).toHaveLength(1);
   });
 
   it('rejects wrong case, scenario, target, invalid payload, and stale revisions without mutation', () => {
