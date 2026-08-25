@@ -1,4 +1,9 @@
+import { createHash } from 'node:crypto';
 import type { TaskmasterRunRecord } from './schemas';
+
+function idempotencyKeyHash(key: string): string {
+  return createHash('sha256').update(key).digest('hex');
+}
 
 export interface TaskmasterRunRepository {
   create(run: TaskmasterRunRecord): Promise<TaskmasterRunRecord>;
@@ -71,7 +76,7 @@ class FirestoreTaskmasterRunRepository implements TaskmasterRunRepository {
     const created = { ...run, revision: run.revision ?? 0 };
     await this.db.runTransaction(async (transaction) => {
       const runRef = this.runRef(created.runId);
-      const idempotencyRef = this.db.collection(this.idempotencyCollection).doc(created.idempotencyKey);
+      const idempotencyRef = this.db.collection(this.idempotencyCollection).doc(idempotencyKeyHash(created.idempotencyKey));
       const [runSnapshot, idempotencySnapshot] = await Promise.all([transaction.get(runRef), transaction.get(idempotencyRef)]);
       if (runSnapshot.exists || idempotencySnapshot.exists) throw new Error(`Taskmaster idempotency key already exists: ${created.idempotencyKey}`);
       transaction.create(runRef, created);
@@ -88,7 +93,7 @@ class FirestoreTaskmasterRunRepository implements TaskmasterRunRepository {
   }
 
   async findByIdempotencyKey(key: string): Promise<TaskmasterRunRecord | undefined> {
-    const idempotency = await this.db.collection(this.idempotencyCollection).doc(key).get();
+    const idempotency = await this.db.collection(this.idempotencyCollection).doc(idempotencyKeyHash(key)).get();
     if (!idempotency.exists) return undefined;
     const runId = (idempotency.data() as { runId?: string }).runId;
     return runId ? this.get(runId) : undefined;
