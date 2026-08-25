@@ -277,6 +277,7 @@ export async function generateSchemeProposals(input: SchemeGenerationInput): Pro
       userPriorities: input.priorities, assumptions: validation.proposals.flatMap((proposal) => proposal.assumptionsIntroduced), proposals: validation.proposals, validation: { valid: true, errors: [] },
     };
   } catch (error) {
+    if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') throw error;
     const fallback = createStudyTemplateProposals(input);
     return {
       provider: config.provider, model: 'Not called; deterministic fallback used', modelCalled: false,
