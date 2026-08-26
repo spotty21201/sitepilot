@@ -12,3 +12,13 @@ coverage
 .env*
 !.env.example
 *.md
+prototypes
+src/app/lab
+test_image
+artifacts
+.vercel
+scripts/acceptance-spatial-console.mjs
+scripts/verify-corrections.mjs
+scripts/verify-spatial-lab-trial.ts
+scripts/visual-dom-crawl.cjs
+scripts/visual-metrics.py

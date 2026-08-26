@@ -1,6 +1,6 @@
 import { getAiConfig } from '@/lib/ai/config';
 import { taskmasterPlanSchema, type TaskmasterInput, type TaskmasterPlan } from './schemas';
-import { executeTaskmasterTool, type TaskmasterToolContext } from './tools';
+import type { TaskmasterToolContext } from './tools';
 import type { Schema } from '@google/genai';
 import path from 'node:path';
 
@@ -100,32 +100,19 @@ function adkPlanSchema(): Record<string, unknown> {
  * TASKMASTER_ALLOW_LIVE_MODEL=true; importing this module never calls Gemini.
  */
 export async function buildAdkTaskmasterAgent(input: TaskmasterInput, context: TaskmasterToolContext) {
-  const [{ LlmAgent }, { FunctionTool }] = await Promise.all([
+  const [{ LlmAgent }] = await Promise.all([
     loadAdkModule<{ LlmAgent: new (options: Record<string, unknown>) => TaskmasterAdkAgent }>('agents/llm_agent.js'),
-    loadAdkModule<{ FunctionTool: new (options: Record<string, unknown>) => unknown }>('tools/function_tool.js'),
   ]);
-  const { z } = await import('zod');
-  const toolNames = [
-    'get_opportunity_context',
-    'get_site_and_planning_inputs',
-    'list_assumptions_and_missing_information',
-    'calculate_buildable_envelope',
-    'prepare_scheme_proposals',
-    'compare_development_schemes',
-  ] as const;
-  const tools = toolNames.map((name) => new FunctionTool({
-    name,
-    description: `Read-only SitePilot planning tool ${name}. It cannot mutate the accepted study.`,
-    parameters: z.object({}),
-    execute: () => executeTaskmasterTool(name, context).result,
-  }));
   return new LlmAgent({
     name: 'sitepilot_taskmaster',
     model: getAiConfig().model,
     includeContents: 'none',
     mode: 'single_turn',
     instruction: `Create a bounded, schema-valid execution plan for this SitePilot goal: ${input.objective || FALLBACK_GOAL}. Use only the listed read-only tools. Never calculate authoritative planning totals, never request mutation, and keep the plan to the supplied workflow. Site inputs: ${JSON.stringify({ siteAreaM2: input.siteAreaM2, frontageMeters: input.frontageMeters, depthMeters: input.depthMeters, planningLimits: input.planningLimits, priorities: input.priorities })}`,
-    tools,
+    // The ADK agent returns a schema-validated plan. SitePilot executes the
+    // allowlisted tools itself after the plan is persisted, which keeps model
+    // tool turns from bypassing the provider budget or mutating study state.
+    tools: [],
     generateContentConfig: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
       ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
       : undefined,

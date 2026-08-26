@@ -1,7 +1,11 @@
 import type { TaskmasterProviderUsage } from './schemas';
 import type { TaskmasterRunRepository } from './repository';
 
-const VERTEX_HOST = /(^|\.)aiplatform\.googleapis\.com$/i;
+// Vertex can use the global endpoint (`aiplatform.googleapis.com`), a
+// regional endpoint (`asia-southeast2-aiplatform.googleapis.com`) or a
+// regional replica endpoint. Keep the guard broad enough to cover all SDK
+// transport variants while still excluding unrelated Google APIs.
+const VERTEX_HOST = /(^|[.-])aiplatform\.googleapis\.com$|\.rep\.googleapis\.com$/i;
 
 function requestUrl(input: RequestInfo | URL): string {
   return typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
