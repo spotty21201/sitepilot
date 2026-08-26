@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
     "@pascal-app/viewer",
     "@pascal-app/nodes"
   ],
-  serverExternalPackages: ["@google/adk"],
+  serverExternalPackages: ["@google/adk", "@google-cloud/firestore", "@google-cloud/tasks", "@google/genai"],
   allowedDevOrigins: [
     "100.97.49.76",
     "100.97.49.76:3005",
