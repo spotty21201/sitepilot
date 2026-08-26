@@ -14,17 +14,17 @@ function cloudTasksConfigured(): boolean {
   );
 }
 
-async function enqueueCloudTask(runId: string, correlationId?: string): Promise<TaskmasterEnqueueResult> {
+async function enqueueCloudTask(runId: string, correlationId?: string, deliverySuffix = 'initial'): Promise<TaskmasterEnqueueResult> {
   const { CloudTasksClient } = await import('@google-cloud/tasks');
   const client = new CloudTasksClient();
   const project = process.env.GOOGLE_CLOUD_PROJECT!;
   const location = process.env.GOOGLE_CLOUD_LOCATION || 'asia-southeast2';
   const queue = process.env.TASKMASTER_CLOUD_TASKS_QUEUE!;
   const parent = client.queuePath(project, location, queue);
-  const deliveryId = `delivery-${runId}`;
+  const deliveryId = `delivery-${runId}-${deliverySuffix}`;
   const payload = Buffer.from(JSON.stringify({ runId, deliveryId, correlationId })).toString('base64');
   const task: Record<string, unknown> = {
-    name: client.taskPath(project, location, queue, `taskmaster-${runId}`),
+    name: client.taskPath(project, location, queue, `taskmaster-${runId}-${deliverySuffix}`),
     httpRequest: {
       httpMethod: 'POST',
       url: process.env.TASKMASTER_WORKER_URL!,
@@ -53,8 +53,8 @@ async function enqueueCloudTask(runId: string, correlationId?: string): Promise<
  * delivery so tests and the browser can exercise the same checkpointed worker
  * without creating cloud resources or invoking paid services.
  */
-export async function enqueueTaskmasterRun(runId: string, correlationId?: string): Promise<TaskmasterEnqueueResult> {
-  if (cloudTasksConfigured()) return enqueueCloudTask(runId, correlationId);
+export async function enqueueTaskmasterRun(runId: string, correlationId?: string, deliverySuffix = 'initial'): Promise<TaskmasterEnqueueResult> {
+  if (cloudTasksConfigured()) return enqueueCloudTask(runId, correlationId, deliverySuffix);
 
   const repository = await getTaskmasterRunRepository();
   setTimeout(() => {

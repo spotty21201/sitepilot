@@ -18,7 +18,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ru
     if (!current || current.state !== 'FAILED_RETRYABLE') return NextResponse.json({ ok: false, error: 'Only retryable Taskmaster failures can be retried.' }, { status: 409 });
     const queued = { ...current, state: 'QUEUED' as const, currentStep: 'Queued for retry', error: undefined, updatedAt: new Date().toISOString() };
     await repository.save(queued);
-    const mode = await enqueueTaskmasterRun(runId);
+    const mode = await enqueueTaskmasterRun(runId, current.correlationId, `retry-${current.retryCount + 1}`);
     return NextResponse.json({ ok: true, run: toPublicTaskmasterRun(queued), mode: mode.mode }, { status: 202 });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Taskmaster retry failed.' }, { status: 400 });
