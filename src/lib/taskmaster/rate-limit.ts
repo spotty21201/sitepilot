@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Firestore } from '@google-cloud/firestore';
 
 export interface TaskmasterAllowance {
   allowed: boolean;
@@ -41,7 +42,6 @@ export async function consumeTaskmasterAllowance(sessionKey: string): Promise<Ta
     localCounters.set(sessionKeyValue, currentSession);
     return { allowed: true, forceFallback: false, dayCount: currentDay.count, sessionCount: currentSession.count };
   }
-  const { Firestore } = await import('@google-cloud/firestore');
   const db = new Firestore({ projectId: process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT });
   const collection = process.env.TASKMASTER_RATE_LIMIT_COLLECTION || 'taskmasterRateLimits';
   const dayRef = db.collection(collection).doc(`day-${day}`);
