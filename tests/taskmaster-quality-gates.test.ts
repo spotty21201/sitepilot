@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createStudyTemplateProposals, validateSchemeProposals } from '@/lib/schemes/proposal-contract';
+import type { TaskmasterInput } from '@/lib/taskmaster/schemas';
 import { simulateDevelopmentSchemeTool } from '@/lib/taskmaster/tools';
 
-const input: any = {
+const input: TaskmasterInput = {
   opportunityId: 'quality-case', name: 'Quality case', address: 'Central Jakarta', objective: 'Three studies',
   siteAreaM2: 12000, frontageMeters: 80, depthMeters: 150, landscapedPermeablePct: 20,
   planningLimits: { maxFAR: 6.5, maxCoveragePct: 55, minKDHPct: 20, maxHeightMeters: 180, setbacks: { front: 10, rear: 6, sideLeft: 4, sideRight: 4 } },

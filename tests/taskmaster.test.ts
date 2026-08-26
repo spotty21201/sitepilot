@@ -92,11 +92,11 @@ describe('Taskmaster bounded workflow', () => {
     expect(buildDeterministicTaskmasterPlan(input.objective).steps).toHaveLength(9);
   });
 
-  it('constructs the official ADK agent boundary without invoking a model locally', async () => {
+  it('constructs the official ADK planning boundary without model-managed tool execution', async () => {
     const context = { input, proposals: [], simulations: [] };
     const agent = await buildAdkTaskmasterAgent(input, context);
     expect(agent.name).toBe('sitepilot_taskmaster');
-    expect(agent.tools).toHaveLength(6);
+    expect(agent.tools).toHaveLength(0);
     expect(process.env.TASKMASTER_ALLOW_LIVE_MODEL).not.toBe('true');
   });
 });
