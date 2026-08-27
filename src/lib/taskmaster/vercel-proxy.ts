@@ -95,3 +95,23 @@ export function taskmasterApiEnabled(): boolean {
 export function apiModeEnabled(): boolean {
   return process.env.TASKMASTER_API_MODE === 'true';
 }
+
+/**
+ * Allows browser-owned, read-only polling without weakening mutation routes.
+ * Browsers commonly omit Origin on same-origin GET requests, but Sec-Fetch-Site
+ * is still supplied and cannot be changed by page JavaScript.
+ */
+export function sameOriginBrowserReadAllowed(request: NextRequest): boolean {
+  const origin = request.headers.get('origin');
+  const host = request.headers.get('host') || request.nextUrl.host;
+
+  if (origin) {
+    try {
+      return new URL(origin).host === host;
+    } catch {
+      return false;
+    }
+  }
+
+  return request.headers.get('sec-fetch-site') === 'same-origin';
+}

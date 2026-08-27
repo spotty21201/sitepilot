@@ -4,8 +4,10 @@ import {
   CLOUD_RUN_SERVICE_ORIGIN,
   apiModeEnabled,
   proxyTaskmasterRequest,
+  sameOriginBrowserReadAllowed,
   taskmasterApiEnabled,
 } from '@/lib/taskmaster/vercel-proxy';
+import { GET as getTaskmasterRun } from '@/app/api/taskmaster/runs/[runId]/route';
 
 const TASKMASTER_API_ORIGIN = 'https://sitepilot-taskmaster-chad5h6gwa-et.a.run.app';
 const SUBJECT_TOKEN = 'vercel.header.payload.signature';
@@ -144,5 +146,48 @@ describe('Vercel private Cloud Run proxy', () => {
     delete process.env.TASKMASTER_API_URL;
     expect(taskmasterApiEnabled()).toBe(false);
     expect(apiModeEnabled()).toBe(false);
+  });
+
+  it('allows browser-owned same-origin GET polling when the browser omits Origin', () => {
+    const browserPoll = new NextRequest('https://sitepilot-preview.example/api/taskmaster/runs/run-123', {
+      headers: { 'sec-fetch-site': 'same-origin' },
+    });
+
+    expect(browserPoll.headers.get('origin')).toBeNull();
+    expect(sameOriginBrowserReadAllowed(browserPoll)).toBe(true);
+  });
+
+  it('proxies a browser-owned polling GET that omits Origin', async () => {
+    const fetchMock = successfulFetchMock();
+    vi.stubGlobal('fetch', fetchMock);
+    const browserPoll = new NextRequest('https://sitepilot-preview.example/api/taskmaster/runs/run-123', {
+      headers: {
+        'sec-fetch-site': 'same-origin',
+        'x-vercel-oidc-token': SUBJECT_TOKEN,
+      },
+    });
+
+    const response = await getTaskmasterRun(browserPoll, { params: Promise.resolve({ runId: 'run-123' }) });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps missing, malformed, and cross-origin polling requests outside the browser boundary', () => {
+    const missingSignals = new NextRequest('https://sitepilot-preview.example/api/taskmaster/runs/run-123');
+    const crossSite = new NextRequest('https://sitepilot-preview.example/api/taskmaster/runs/run-123', {
+      headers: { 'sec-fetch-site': 'cross-site' },
+    });
+    const mismatchedOrigin = new NextRequest('https://sitepilot-preview.example/api/taskmaster/runs/run-123', {
+      headers: {
+        origin: 'https://untrusted.example',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+
+    expect(sameOriginBrowserReadAllowed(missingSignals)).toBe(false);
+    expect(sameOriginBrowserReadAllowed(crossSite)).toBe(false);
+    expect(sameOriginBrowserReadAllowed(mismatchedOrigin)).toBe(false);
   });
 });
