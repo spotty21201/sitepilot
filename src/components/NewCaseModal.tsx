@@ -18,6 +18,7 @@ import {
   reviewOpportunityIntakeDraft,
   updateIntakeDraftField,
   updateIntakeDraftPriorities,
+  updateAdditionalStrategyInstructions,
   type IntakeFieldName,
   type OpportunityIntakeDraft,
 } from '@/lib/opportunity/intake-draft';
@@ -25,7 +26,7 @@ import {
 interface NewCaseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateCase: (params: CreateCaseParams, priorities?: SchemePriorities) => void;
+  onCreateCase: (params: CreateCaseParams, priorities?: SchemePriorities, additionalStrategyInstructions?: string) => void;
 }
 
 type IntakeTab = 'SITE' | 'EXISTING' | 'ZONING' | 'VALUATION';
@@ -33,11 +34,13 @@ type IntakeTab = 'SITE' | 'EXISTING' | 'ZONING' | 'VALUATION';
 type IntakeDraftAction =
   | { type: 'FIELD'; field: IntakeFieldName; value: string }
   | { type: 'PRIORITIES'; value: SchemePriorities }
+  | { type: 'STRATEGY_INSTRUCTIONS'; value: string }
   | { type: 'RESET' };
 
 function intakeDraftReducer(draft: OpportunityIntakeDraft, action: IntakeDraftAction): OpportunityIntakeDraft {
   if (action.type === 'FIELD') return updateIntakeDraftField(draft, action.field, action.value);
   if (action.type === 'PRIORITIES') return updateIntakeDraftPriorities(draft, action.value);
+  if (action.type === 'STRATEGY_INSTRUCTIONS') return updateAdditionalStrategyInstructions(draft, action.value);
   return createOpportunityIntakeDraft();
 }
 
@@ -67,6 +70,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
     askingPriceAmount, askingPriceCurrency, njopAmount, valuationBasisNotes,
   } = draft.values;
   const priorities = draft.priorities;
+  const additionalStrategyInstructions = draft.additionalStrategyInstructions;
   const setField = (field: IntakeFieldName) => (value: string) => dispatchDraft({ type: 'FIELD', field, value });
   const setName = setField('name');
   const setAddress = setField('address');
@@ -256,7 +260,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       valuationBasisNotes: valuationBasisNotes.trim() || undefined,
       provenanceType: 'USER_ENTERED_ASSUMPTION',
       intakeValueSources: { ...draft.sources },
-    }, priorities);
+    }, priorities, additionalStrategyInstructions.trim() || undefined);
 
     clearOpportunityIntakeDraft(typeof window === 'undefined' ? undefined : window.localStorage);
     dispatchDraft({ type: 'RESET' });
@@ -400,6 +404,18 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
               </div>
               <label className="block text-[11px] text-[var(--text-secondary)]"><span className="flex items-center gap-2"><input type="checkbox" checked={priorities.allowNonCompliantStretch} onChange={(e) => setPriorities((prev) => ({ ...prev, allowNonCompliantStretch: e.target.checked }))} /> Allow one clearly labelled non-compliant stretch study</span></label>
               <label className="block space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Program mix priority</span><textarea rows={2} className="intake-control intake-control--textarea w-full p-2" value={priorities.programMix} onChange={(e) => setPriorities((prev) => ({ ...prev, programMix: e.target.value }))} /></label>
+              <label className="block space-y-1">
+                <span className="block font-semibold text-[var(--text-secondary)]">Additional Strategy Instructions <span className="font-normal text-[var(--text-muted)]">(optional)</span></span>
+                <textarea
+                  rows={3}
+                  maxLength={2000}
+                  className="intake-control intake-control--textarea w-full p-2"
+                  value={additionalStrategyInstructions}
+                  onChange={(event) => dispatchDraft({ type: 'STRATEGY_INSTRUCTIONS', value: event.target.value })}
+                  placeholder="For example: retain service access in every option; vary the plaza location; avoid a tower-only solution."
+                />
+                <span className="block text-[10px] leading-relaxed text-[var(--text-muted)]">Tell Taskmaster what every scheme must respect, what the alternatives should explore, and what should be avoided. These instructions cannot override confirmed planning limits or SitePilot’s calculations.</span>
+              </label>
               <p className="text-[10px] text-[var(--status-assumed)]">The model may propose concepts; SitePilot calculates all geometry, figures and planning checks independently.</p>
             </section>
           )}

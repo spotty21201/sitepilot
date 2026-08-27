@@ -283,7 +283,8 @@ describe('canonical opportunity, parcel, scenario, and reporting workflow', () =
   it('labels the planning intelligence element and configured Gemini model clearly', () => {
     const controls = readFileSync('src/components/ScenarioControls.tsx', 'utf8');
     expect(controls).toContain('Planning &amp; Investment Intelligence');
-    expect(controls).toContain('Configured model · gemini-3.7-flash');
+    expect(controls).toContain('AI assessment · model shown only after accepted output');
+    expect(controls).not.toContain('Configured model · gemini-3.7-flash');
     expect(controls).not.toContain('Planning &amp; Investment Review');
   });
 

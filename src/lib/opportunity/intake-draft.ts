@@ -50,6 +50,8 @@ export interface OpportunityIntakeDraft {
   sources: Record<IntakeFieldName, IntakeValueSource>;
   priorities: SchemePriorities;
   prioritiesSource: IntakeValueSource;
+  additionalStrategyInstructions: string;
+  additionalStrategyInstructionsSource: IntakeValueSource;
 }
 
 const defaultValues: OpportunityIntakeDraftValues = {
@@ -104,6 +106,8 @@ export function createOpportunityIntakeDraft(): OpportunityIntakeDraft {
     sources: Object.fromEntries(intakeFieldNames.map((field) => [field, initialSource(field)])) as Record<IntakeFieldName, IntakeValueSource>,
     priorities: { ...defaultPriorities },
     prioritiesSource: 'DEFAULT',
+    additionalStrategyInstructions: '',
+    additionalStrategyInstructionsSource: 'MISSING',
   };
 }
 
@@ -124,6 +128,17 @@ export function updateIntakeDraftPriorities(
   priorities: SchemePriorities,
 ): OpportunityIntakeDraft {
   return { ...draft, priorities: { ...priorities }, prioritiesSource: 'USER_PROVIDED' };
+}
+
+export function updateAdditionalStrategyInstructions(
+  draft: OpportunityIntakeDraft,
+  value: string,
+): OpportunityIntakeDraft {
+  return {
+    ...draft,
+    additionalStrategyInstructions: value,
+    additionalStrategyInstructionsSource: value.trim() ? 'USER_PROVIDED' : 'USER_CLEARED',
+  };
 }
 
 export function parseDraftNumber(value: string): number | undefined {
@@ -153,7 +168,12 @@ export function loadOpportunityIntakeDraft(storage: Pick<Storage, 'getItem'> | u
     const raw = storage.getItem(OPPORTUNITY_INTAKE_DRAFT_KEY);
     if (!raw) return createOpportunityIntakeDraft();
     const parsed: unknown = JSON.parse(raw);
-    return isDraftShape(parsed) ? parsed : createOpportunityIntakeDraft();
+    if (!isDraftShape(parsed)) return createOpportunityIntakeDraft();
+    return {
+      ...parsed,
+      additionalStrategyInstructions: typeof parsed.additionalStrategyInstructions === 'string' ? parsed.additionalStrategyInstructions : '',
+      additionalStrategyInstructionsSource: parsed.additionalStrategyInstructionsSource ?? 'MISSING',
+    };
   } catch {
     return createOpportunityIntakeDraft();
   }

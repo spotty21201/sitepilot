@@ -171,6 +171,7 @@ export function SchemeGenerationReview({
                   <div><dt className="inline font-semibold">Repair: </dt><dd className="inline">{generation.preparation?.repairAttempted ? (generation.preparation.repairSucceeded ? 'One bounded repair passed' : 'One bounded repair failed') : 'Not required'}</dd></div>
                   <div><dt className="inline font-semibold">Provider usage: </dt><dd className="inline">{generation.providerUsage?.providerRequests ?? 0} attempted · {generation.providerUsage?.providerResponses ?? 0} responses · {generation.providerUsage?.modelOutputsReceived ?? 0} outputs · {generation.providerUsage?.modelOutputsSchemaAccepted ?? 0} schema accepted · {generation.providerUsage?.repairRequests ?? 0} repairs · {(generation.providerUsage?.totalTokens ?? 0).toLocaleString()} tokens{generation.providerUsage?.location ? ` · ${generation.providerUsage.location}` : ''}{generation.providerUsage?.estimatedCostUsd !== undefined ? ` · approximately $${generation.providerUsage.estimatedCostUsd.toFixed(6)}` : ''}</dd></div>
                   <div className="sm:col-span-2"><dt className="inline font-semibold">Inputs and assumptions used: </dt><dd className="inline">{generation.assumptions.join(' · ') || 'No additional assumptions recorded'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="inline font-semibold">Additional strategy instructions: </dt><dd className="inline">{generation.additionalStrategyInstructions || 'None supplied'}{!generation.modelCalled && generation.additionalStrategyInstructions ? ' · Templates did not interpret nuanced instructions.' : ''}</dd></div>
                   <div className="sm:col-span-2"><dt className="inline font-semibold">Information still required: </dt><dd className="inline">{generation.preparation?.informationStillRequired.join(' · ') || 'None recorded'}</dd></div>
                 </dl>
               </details>
@@ -188,13 +189,14 @@ export function SchemeGenerationReview({
                         </div>
                         {isAccepted && <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--status-verified)]" aria-label="Accepted study" />}
                       </div>
-                      <p className="mt-2 text-[10px] font-semibold leading-relaxed text-[var(--status-evidence)]">{proposal.thesis}</p>
+                      <p className="mt-2 text-[10px] font-semibold leading-relaxed text-[var(--status-evidence)]">{proposal.schemePoint}</p>
                       <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-secondary)]">{proposal.rationale}</p>
 
                       <dl className="mt-2.5 space-y-1.5 text-[9px] leading-relaxed text-[var(--text-muted)]">
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Existing asset: </dt><dd className="inline">{proposal.existingAssetDecision.toLowerCase().replace('_', ' ')} · {proposal.existingGfaRetainedM2.toLocaleString()} m² retained · {proposal.existingGfaRemovedM2.toLocaleString()} m² removed — {proposal.existingAssetScope}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Development figure: </dt><dd className="inline">{proposal.achievedGFA.toLocaleString()} m² achieved · {proposal.targetGFA.toLocaleString()} m² target · {proposal.varianceGFA > 0 ? '+' : ''}{proposal.varianceGFA.toLocaleString()} m² variance. {proposal.varianceExplanation}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Public realm: </dt><dd className="inline">{proposal.publicRealmIntent}</dd></div>
+                        <div><dt className="inline font-semibold text-[var(--text-secondary)]">Priorities addressed: </dt><dd className="inline">{proposal.ownerPrioritiesAddressed.join(' · ')}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Phasing: </dt><dd className="inline">{proposal.phasingConcept}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Commercial premise: </dt><dd className="inline">{proposal.commercialPremise}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Planning check: </dt><dd className="inline">{planningStatus(scenario)}</dd></div>
@@ -206,10 +208,15 @@ export function SchemeGenerationReview({
                           <p><strong>Mass roles:</strong> {proposal.proposedMassRoles.join(' · ')}</p>
                           <p><strong>Program allocation:</strong> {Object.entries(proposal.programGFAByUse).map(([use, gfa]) => `${use} ${gfa.toLocaleString()} m² (${(proposal.programSharePct[use] || 0).toFixed(1)}%)`).join(' · ')}</p>
                           <p><strong>Access and servicing:</strong> {proposal.accessServicingConcept}</p>
+                          <p><strong>Operational continuity:</strong> {proposal.operationalContinuityConcept}</p>
                           <p><strong>Landscape and KDH:</strong> {proposal.landscapedPermeableKDHIntent}</p>
                           <p><strong>Response to supplied limits:</strong> {proposal.planningResponse}</p>
-                          <p><strong>Trade-offs:</strong> {proposal.tradeOffs.join(' · ')}</p>
+                          <p><strong>Expected advantages — pre-simulation hypotheses:</strong> {proposal.expectedAdvantagesHypotheses.join(' · ')}</p>
+                          <p><strong>Expected trade-offs — pre-simulation hypotheses:</strong> {proposal.expectedTradeOffHypotheses.join(' · ')}</p>
+                          <p><strong>Assumptions:</strong> {proposal.assumptionsIntroduced.join(' · ') || 'None recorded'}</p>
+                          <p><strong>Rejection conditions:</strong> {proposal.rejectionConditions.join(' · ')}</p>
                           <p><strong>Information still required:</strong> {proposal.informationStillRequired.join(' · ') || 'None recorded'}</p>
+                          <p><strong>Provenance:</strong> {generation.modelCalled ? `Model-generated with ${generation.model}; deterministic checks remain authoritative.` : 'Template schemes used; nuanced design instructions were not interpreted by a model.'}</p>
                         </div>
                       </details>
 

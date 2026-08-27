@@ -71,7 +71,7 @@ describe('Taskmaster proposal quality gates', () => {
       floorToFloorAssumptions: proposals[0].floorToFloorAssumptions,
       targetGFA: proposals[0].targetGFA,
     } : proposal);
-    expect(validateSchemeProposals(superficial, input).errors.join(' ')).toContain('at least two development-strategy areas');
+    expect(validateSchemeProposals(superficial, input).errors.join(' ')).toContain('at least three development-strategy areas');
 
     const inconsistent = createStudyTemplateProposals(input);
     inconsistent[1] = { ...inconsistent[1], podiumStoreys: undefined, towerStoreys: undefined, alternativeStoreys: 8 };

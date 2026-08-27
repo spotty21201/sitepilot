@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { 
-  calculateDevelopmentMetrics, 
-  calculateMassPairwiseIntersections, 
-  checkSetbackEncroachments, 
-  evaluateScenarioCompliance 
+import {
+  calculateDevelopmentMetrics,
+  calculateMassPairwiseIntersections,
+  checkSetbackEncroachments,
+  evaluateScenarioCompliance,
 } from '@/lib/geometry/engine';
-import { BuildingMass, PlanningAssessment, Setbacks } from '@/types';
+import type { BuildingMass, DeterministicSchemeAssessment, PlanningAssessment, Setbacks } from '@/types';
 import { deriveScenarioFloorLimit } from '@/lib/opportunity/canonical-opportunity';
+import {
+  assessmentPrompt,
+  buildSimulationResultHash,
+  createDeterministicAiSummary,
+  planningAssessmentResponseSchema,
+  validateAiPlanningAssessment,
+} from '@/lib/assessment/planning-assessment';
+import { apiModeEnabled, proxyTaskmasterRequest, taskmasterApiEnabled } from '@/lib/taskmaster/vercel-proxy';
+import { createAiClient } from '@/lib/ai/gemini';
+import { getAiConfig } from '@/lib/ai/config';
+import type { Schema } from '@google/genai';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,451 +26,346 @@ const REQUIRED_CLOUD_RUN_MODEL = 'gemini-3.7-flash';
 const REQUIRED_CLOUD_RUN_PROJECT = 'project-528f858c-325a-45aa-ac0';
 const REQUIRED_CLOUD_RUN_LOCATION = 'global';
 
-interface AssessmentRequestBody {
+interface AssessmentScenarioInput {
   scenarioId: string;
   scenarioName: string;
-  grossSiteArea: number;
-  frontageLength?: number;
   setbacks: Setbacks;
   masses: BuildingMass[];
+  sourceRevisionId?: string;
+  proposal?: {
+    targetGFA?: number;
+    varianceExplanation?: string;
+    schemePoint?: string;
+    existingGfaRetainedM2?: number;
+    existingGfaRemovedM2?: number;
+    programGFAByUse?: Record<string, number>;
+    existingAssetDecision?: string;
+    publicRealmIntent?: string;
+    accessServicingConcept?: string;
+    phasingConcept?: string;
+    commercialPremise?: string;
+    ownerPrioritiesAddressed?: string[];
+  };
+}
+
+interface AssessmentRequestBody extends AssessmentScenarioInput {
+  grossSiteArea: number;
+  frontageLength?: number;
+  landscapedPermeableAreaM2?: number;
+  scenarios?: AssessmentScenarioInput[];
+  activeSchemeId?: string;
+  opportunityInputHash?: string;
+  sourceStudyVersion?: string;
+  ownerPriorities?: Record<string, string | boolean>;
+  additionalStrategyInstructions?: string;
+  generationProvenance?: { provider?: string; model?: string; modelCalled?: boolean };
   hasZoningEvidence?: boolean;
   projectName?: string;
   caseName?: string;
   address?: string;
   userQuery?: string;
-  zoningLimits?: {
-    zoneCode?: string;
-    zoneName?: string;
-    maxFAR?: number;
-    maxCoveragePct?: number;
-    minKDHPct?: number;
-    maxHeightMeters?: number;
-    maxFloors?: number;
-  };
-  existingAsset?: {
-    gfa?: number;
-    floors?: number;
-    description?: string;
-    currentStatus?: string;
-  };
-  valuation?: {
-    askingPriceAmount?: number;
-    askingPriceCurrency?: string;
-    njopAmount?: number;
-    pricePerM2?: number;
-    valuationBasisNotes?: string;
-  };
-  expansionHeadroomGFA?: number;
+  zoningLimits?: { zoneCode?: string; zoneName?: string; maxFAR?: number; maxCoveragePct?: number; minKDHPct?: number; maxHeightMeters?: number; maxFloors?: number };
+  existingAsset?: { gfa?: number; floors?: number; description?: string; currentStatus?: string };
+  valuation?: { askingPriceAmount?: number; askingPriceCurrency?: string; njopAmount?: number; pricePerM2?: number; valuationBasisNotes?: string };
 }
 
-/**
- * Validates numeric properties strictly to prevent NaN, Infinity, or negative inputs.
- */
-function isValidPositiveNumber(val: unknown): val is number {
-  return typeof val === 'number' && Number.isFinite(val) && val > 0;
+function positive(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value > 0; }
+function nonnegative(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0; }
+function finite(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value); }
+
+function validateScenario(scenario: AssessmentScenarioInput): string | null {
+  if (!scenario?.scenarioId || !scenario.scenarioName) return 'scenarioId and scenarioName must be non-empty strings.';
+  if (!scenario.setbacks || ![scenario.setbacks.front, scenario.setbacks.rear, scenario.setbacks.sideLeft, scenario.setbacks.sideRight].every(nonnegative)) return 'All setback dimensions must be finite non-negative numbers.';
+  if (!Array.isArray(scenario.masses) || scenario.masses.length === 0) return 'masses must be a non-empty array of building masses.';
+  for (const mass of scenario.masses) {
+    if (!mass?.id || !mass.name || !positive(mass.footprintArea) || !positive(mass.floors)
+      || !positive(mass.height) || !positive(mass.floorToFloorHeight)
+      || !mass.position || !finite(mass.position.x) || !finite(mass.position.y) || !finite(mass.position.z)
+      || !mass.dimensions || !positive(mass.dimensions.width) || !positive(mass.dimensions.length) || !positive(mass.dimensions.height)) {
+      return `Mass ${mass?.id || 'unknown'} contains missing, non-finite, or negative geometry fields.`;
+    }
+  }
+  return null;
 }
 
-function isValidNonNegativeNumber(val: unknown): val is number {
-  return typeof val === 'number' && Number.isFinite(val) && val >= 0;
+function evidence(key: string, label: string, value: string) { return { key, label, value }; }
+
+function recomputeScheme(body: AssessmentRequestBody, scenario: AssessmentScenarioInput): DeterministicSchemeAssessment {
+  const metrics = calculateDevelopmentMetrics(body.grossSiteArea, scenario.masses, scenario.setbacks, body.frontageLength, body.landscapedPermeableAreaM2);
+  const overlaps = calculateMassPairwiseIntersections(scenario.masses);
+  const encroachments = checkSetbackEncroachments(body.grossSiteArea, scenario.setbacks, scenario.masses, body.frontageLength);
+  const referenceMass = scenario.masses.reduce((highest, mass) => !highest || mass.height > highest.height ? mass : highest, scenario.masses[0]);
+  const floorLimit = deriveScenarioFloorLimit({
+    maximumHeightMeters: body.zoningLimits?.maxHeightMeters,
+    maximumFAR: body.zoningLimits?.maxFAR,
+    maximumCoveragePct: body.zoningLimits?.maxCoveragePct,
+    floorToFloorHeight: referenceMass?.floorToFloorHeight || 3.5,
+  });
+  const compliance = evaluateScenarioCompliance(body.grossSiteArea, scenario.setbacks, scenario.masses, metrics, overlaps, {
+    scenarioName: scenario.scenarioName,
+    hasZoningEvidence: Boolean(body.hasZoningEvidence),
+    maxFAR: body.zoningLimits?.maxFAR,
+    maxCoveragePct: body.zoningLimits?.maxCoveragePct,
+    minKDHPct: body.zoningLimits?.minKDHPct,
+    maxHeightMeters: body.zoningLimits?.maxHeightMeters,
+    maxFloors: floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorLimit.floorCount ?? undefined : undefined,
+    zoningName: body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode,
+  });
+  const targetGFA = scenario.proposal?.targetGFA ?? metrics.totalGFA;
+  const varianceGFA = Math.round((metrics.totalGFA - targetGFA) * 100) / 100;
+  const varianceExplanation = scenario.proposal?.varianceExplanation || (Math.abs(varianceGFA) <= 1
+    ? 'Deterministic massing achieved the strategic target within 1 m².'
+    : `SitePilot achieved ${metrics.totalGFA.toLocaleString()} m² against the ${targetGFA.toLocaleString()} m² strategic target; whole-storey geometry and supplied physical limits account for the variance.`);
+  const sourceRevisionId = scenario.sourceRevisionId || `unversioned-${scenario.scenarioId}`;
+  return {
+    schemeId: scenario.scenarioId,
+    schemeName: scenario.scenarioName,
+    sourceRevisionId,
+    status: compliance.assessmentStatus,
+    decision: compliance.decisionText,
+    targetGFA,
+    achievedGFA: metrics.totalGFA,
+    varianceGFA,
+    varianceExplanation,
+    proposalStrategy: {
+      schemePoint: scenario.proposal?.schemePoint,
+      existingAssetDecision: scenario.proposal?.existingAssetDecision,
+      publicRealmIntent: scenario.proposal?.publicRealmIntent,
+      accessServicingConcept: scenario.proposal?.accessServicingConcept,
+      phasingConcept: scenario.proposal?.phasingConcept,
+      commercialPremise: scenario.proposal?.commercialPremise,
+      ownerPrioritiesAddressed: scenario.proposal?.ownerPrioritiesAddressed,
+    },
+    masses: scenario.masses.map((mass) => ({ name: mass.name, role: mass.type, storeys: mass.floors, heightMeters: mass.height, gfaM2: mass.gfa })),
+    existingAsset: {
+      retainedGfaM2: scenario.proposal?.existingGfaRetainedM2 ?? 0,
+      removedGfaM2: scenario.proposal?.existingGfaRemovedM2 ?? 0,
+      reconciled: Math.abs((scenario.proposal?.existingGfaRetainedM2 ?? 0) + (scenario.proposal?.existingGfaRemovedM2 ?? 0) - (body.existingAsset?.gfa ?? 0)) <= 0.01,
+    },
+    achievedProgramGfaByUse: scenario.proposal?.programGFAByUse || {},
+    programReconciled: Math.abs(Object.values(scenario.proposal?.programGFAByUse || {}).reduce((sum, value) => sum + value, 0) - metrics.totalGFA) <= 1,
+    farKLB: metrics.farKLB,
+    coverageKDB: metrics.siteCoveragePercentage,
+    heightMeters: metrics.totalHeightMeters,
+    kdhDemonstrated: Boolean(metrics.kdhDemonstrated),
+    landscapedPermeableAreaM2: metrics.landscapedPermeableAreaM2,
+    collisions: overlaps.hasOverlap,
+    outOfBoundsAreaM2: metrics.outOfBoundsAreaM2 || 0,
+    risks: compliance.identifiedRisks,
+    recommendedAction: compliance.recommendedAction,
+    evidence: [
+      evidence(`${scenario.scenarioId}.achievedGFA`, 'Achieved GFA', `${metrics.totalGFA.toLocaleString()} m²`),
+      evidence(`${scenario.scenarioId}.targetGFA`, 'Target GFA', `${targetGFA.toLocaleString()} m²`),
+      evidence(`${scenario.scenarioId}.varianceGFA`, 'Target variance', `${varianceGFA > 0 ? '+' : ''}${varianceGFA.toLocaleString()} m²`),
+      evidence(`${scenario.scenarioId}.far`, 'Calculated FAR/KLB', `${metrics.farKLB.toFixed(2)}x`),
+      evidence(`${scenario.scenarioId}.coverage`, 'Calculated KDB', `${metrics.siteCoveragePercentage.toFixed(1)}%`),
+      evidence(`${scenario.scenarioId}.height`, 'Calculated height', `${metrics.totalHeightMeters.toFixed(1)} m`),
+      evidence(`${scenario.scenarioId}.kdh`, 'KDH evidence', metrics.kdhDemonstrated ? `${metrics.landscapedPermeableAreaM2?.toLocaleString()} m² landscaped/permeable` : 'KDH not demonstrated'),
+      evidence(`${scenario.scenarioId}.collisions`, 'Collisions', overlaps.hasOverlap ? `${overlaps.overlapVolumeM3.toLocaleString()} m³ overlap` : 'None'),
+      evidence(`${scenario.scenarioId}.outOfBounds`, 'Out-of-bounds footprint', `${(metrics.outOfBoundsAreaM2 || 0).toLocaleString()} m²`),
+      evidence(`${scenario.scenarioId}.setbacks`, 'Setback result', encroachments.length ? encroachments.map((item) => item.description).join('; ') : 'No encroachment'),
+    ],
+  };
 }
 
-function isValidFiniteNumber(val: unknown): val is number {
-  return typeof val === 'number' && Number.isFinite(val);
+function safeJsonCandidate(value: unknown): unknown {
+  if (value && typeof value === 'object') return value;
+  if (typeof value !== 'string' || !value.trim()) throw new Error('ASSESSMENT_EMPTY_MODEL_OUTPUT');
+  try { return JSON.parse(value); } catch { throw new Error('ASSESSMENT_INVALID_MODEL_JSON'); }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Security & Two-Path Access Boundary
+    const apiMode = apiModeEnabled();
     const authHeader = request.headers.get('authorization');
     const serverSecret = process.env.SITEPILOT_SERVER_SECRET;
-    const isProduction = process.env.NODE_ENV === 'production';
     const cloudRunUrl = process.env.CLOUDRUN_SERVICE_URL;
+    const isServerAuthorized = apiMode || Boolean(serverSecret && authHeader === `Bearer ${serverSecret}`);
+    if (!apiMode && authHeader && !isServerAuthorized) return NextResponse.json({ error: 'Unauthorized: Invalid authentication credentials.', ok: false }, { status: 401 });
 
-    // Check Server-to-Server Path (requires valid Bearer secret)
-    const isServerAuthorized = Boolean(serverSecret && authHeader === `Bearer ${serverSecret}`);
-
-    // If an authorization header was supplied but is invalid, reject immediately (401)
-    if (authHeader && !isServerAuthorized) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Invalid authentication credentials.', ok: false },
-        { status: 401 }
-      );
-    }
-
-    // Check Browser Path (requires exact same-origin Origin & Host matching)
-    const origin = request.headers.get('origin');
-    const referer = request.headers.get('referer');
-    const host = request.headers.get('host') || request.nextUrl?.host || '';
-    const secFetchSite = request.headers.get('sec-fetch-site');
-
-    let accessPath: 'same_origin_browser' | 'authorized_server';
-
-    if (isServerAuthorized) {
-      accessPath = 'authorized_server';
-    } else {
-      // Browser path requires explicit valid Origin matching the request host
-      if (!origin) {
-        return NextResponse.json(
-          { error: 'Unauthorized: Missing Origin header for browser request path.', ok: false },
-          { status: 401 }
-        );
-      }
-
-      try {
-        const originUrl = new URL(origin);
-        if (originUrl.host !== host) {
-          return NextResponse.json(
-            { error: 'Unauthorized: Cross-origin access denied.', ok: false },
-            { status: 401 }
-          );
-        }
-      } catch {
-        return NextResponse.json(
-          { error: 'Unauthorized: Malformed Origin header.', ok: false },
-          { status: 401 }
-        );
-      }
-
-      // Check referer if present
+    let accessPath: PlanningAssessment['accessPath'];
+    if (isServerAuthorized) accessPath = 'authorized_server';
+    else {
+      const origin = request.headers.get('origin');
+      const referer = request.headers.get('referer');
+      const host = request.headers.get('host') || request.nextUrl?.host || '';
+      const secFetchSite = request.headers.get('sec-fetch-site');
+      if (!origin) return NextResponse.json({ error: 'Unauthorized: Missing Origin header for browser request path.', ok: false }, { status: 401 });
+      try { if (new URL(origin).host !== host) return NextResponse.json({ error: 'Unauthorized: Cross-origin access denied.', ok: false }, { status: 401 }); }
+      catch { return NextResponse.json({ error: 'Unauthorized: Malformed Origin header.', ok: false }, { status: 401 }); }
       if (referer) {
-        try {
-          const refererUrl = new URL(referer);
-          if (refererUrl.host !== host) {
-            return NextResponse.json(
-              { error: 'Unauthorized: Mismatched Referer header.', ok: false },
-              { status: 401 }
-            );
-          }
-        } catch {
-          return NextResponse.json(
-            { error: 'Unauthorized: Malformed Referer header.', ok: false },
-            { status: 401 }
-          );
-        }
+        try { if (new URL(referer).host !== host) return NextResponse.json({ error: 'Unauthorized: Mismatched Referer header.', ok: false }, { status: 401 }); }
+        catch { return NextResponse.json({ error: 'Unauthorized: Malformed Referer header.', ok: false }, { status: 401 }); }
       }
-
-      // Check Sec-Fetch-Site if provided
-      if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
-        return NextResponse.json(
-          { error: 'Unauthorized: Cross-site fetch prohibited.', ok: false },
-          { status: 401 }
-        );
-      }
-
+      if (secFetchSite && !['same-origin', 'same-site', 'none'].includes(secFetchSite)) return NextResponse.json({ error: 'Unauthorized: Cross-site fetch prohibited.', ok: false }, { status: 401 });
       accessPath = 'same_origin_browser';
     }
 
-    // In production, if server secret is missing and Cloud Run is configured, fail closed
-    if (isProduction && !serverSecret && cloudRunUrl) {
-      console.error('[SitePilot Assessment API] Server configuration error: SITEPILOT_SERVER_SECRET is missing in production.');
-      return NextResponse.json(
-        { error: 'Server configuration error: Secure backend authentication is unconfigured.', ok: false },
-        { status: 500 }
-      );
+    if (!apiMode && process.env.NODE_ENV === 'production' && !serverSecret && cloudRunUrl && !taskmasterApiEnabled()) {
+      console.error('[SitePilot Assessment API] Missing server authentication configuration.');
+      return NextResponse.json({ error: 'Server configuration error: Secure backend authentication is unconfigured.', ok: false }, { status: 500 });
     }
 
-    // 2. Strict Input Schema Validation (Validates Every Geometry Field)
-    let body: AssessmentRequestBody;
-    try {
-      body = await request.json();
-    } catch {
-      return NextResponse.json(
-        { error: 'Malformed request: Invalid JSON body.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    if (!body || typeof body !== 'object') {
-      return NextResponse.json(
-        { error: 'Invalid request: Request body must be an object.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    if (!body.scenarioId || typeof body.scenarioId !== 'string' || !body.scenarioName || typeof body.scenarioName !== 'string') {
-      return NextResponse.json(
-        { error: 'Validation error: scenarioId and scenarioName must be non-empty strings.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    if (!isValidPositiveNumber(body.grossSiteArea)) {
-      return NextResponse.json(
-        { error: 'Validation error: grossSiteArea must be a finite positive number.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    if (!body.setbacks || typeof body.setbacks !== 'object') {
-      return NextResponse.json(
-        { error: 'Validation error: setbacks must be an object.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    const { front, rear, sideLeft, sideRight } = body.setbacks;
-    if (
-      !isValidNonNegativeNumber(front) ||
-      !isValidNonNegativeNumber(rear) ||
-      !isValidNonNegativeNumber(sideLeft) ||
-      !isValidNonNegativeNumber(sideRight)
-    ) {
-      return NextResponse.json(
-        { error: 'Validation error: All setback dimensions must be finite non-negative numbers.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    if (!Array.isArray(body.masses) || body.masses.length === 0) {
-      return NextResponse.json(
-        { error: 'Validation error: masses must be a non-empty array of building masses.', ok: false },
-        { status: 400 }
-      );
-    }
-
-    for (const mass of body.masses) {
-      if (
-        !mass ||
-        typeof mass !== 'object' ||
-        !mass.id ||
-        !mass.name ||
-        !isValidPositiveNumber(mass.footprintArea) ||
-        !isValidPositiveNumber(mass.floors) ||
-        !isValidPositiveNumber(mass.height) ||
-        !isValidPositiveNumber(mass.floorToFloorHeight) ||
-        !mass.position ||
-        !isValidFiniteNumber(mass.position.x) ||
-        !isValidFiniteNumber(mass.position.y) ||
-        !isValidFiniteNumber(mass.position.z) ||
-        !mass.dimensions ||
-        !isValidPositiveNumber(mass.dimensions.width) ||
-        !isValidPositiveNumber(mass.dimensions.length) ||
-        !isValidPositiveNumber(mass.dimensions.height)
-      ) {
-        return NextResponse.json(
-          { error: `Validation error: Mass ${mass?.id || 'unknown'} contains missing, non-finite, or negative geometry fields.`, ok: false },
-          { status: 400 }
-        );
-      }
-    }
-
-    // 3. Deterministic Authority (Recomputed on Server using Single Authoritative Geometry Engine)
-    const canonicalSetbacks: Setbacks = { front, rear, sideLeft, sideRight };
-    const grossSiteArea = body.grossSiteArea;
-    const masses = body.masses;
-    const hasZoningEvidence = body.hasZoningEvidence !== undefined
-      ? Boolean(body.hasZoningEvidence)
-      : false;
-    const targetProjectName = body.projectName || body.caseName || 'Development Opportunity';
-    const targetAddress = body.address || 'Site Location';
-
-    const statMaxFAR = body.zoningLimits?.maxFAR;
-    const statMaxCoveragePct = body.zoningLimits?.maxCoveragePct;
-    const statMinKDHPct = body.zoningLimits?.minKDHPct;
-    const statMaxHeightM = body.zoningLimits?.maxHeightMeters;
-    const scenarioFloorToFloor = masses.reduce((referenceMass, mass) => (
-      !referenceMass || mass.height > referenceMass.height ? mass : referenceMass
-    ), masses[0])?.floorToFloorHeight || 3.5;
-    const floorLimit = deriveScenarioFloorLimit({
-      maximumHeightMeters: statMaxHeightM,
-      maximumFAR: statMaxFAR,
-      maximumCoveragePct: statMaxCoveragePct,
-      floorToFloorHeight: scenarioFloorToFloor,
-    });
-    const statMaxFloors = floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
-      ? floorLimit.floorCount ?? undefined
-      : undefined;
-    const statZoneName = body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode;
-
-    const metrics = calculateDevelopmentMetrics(grossSiteArea, masses, canonicalSetbacks, body.frontageLength);
-    const overlaps = calculateMassPairwiseIntersections(masses);
-    const encroachments = checkSetbackEncroachments(grossSiteArea, canonicalSetbacks, masses, body.frontageLength);
-    const complianceReport = evaluateScenarioCompliance(
-      grossSiteArea, 
-      canonicalSetbacks, 
-      masses, 
-      metrics, 
-      overlaps, 
-      {
-        scenarioName: body.scenarioName,
-        hasZoningEvidence,
-        maxFAR: statMaxFAR,
-        maxCoveragePct: statMaxCoveragePct,
-        minKDHPct: statMinKDHPct,
-        maxHeightMeters: statMaxHeightM,
-        maxFloors: statMaxFloors,
-        zoningName: statZoneName
-      }
-    );
-
-    // 4. Construct Grounded Prompt for Vertex AI
-    const deterministicFacts = [
-      `- Project: "${targetProjectName}" (${targetAddress})`,
-      `- Scenario: "${body.scenarioName}" (ID: ${body.scenarioId})`,
-      `- Planning Evidence Status: ${hasZoningEvidence ? 'VERIFIED (Municipal Certificate on File)' : 'UNVERIFIED (No RDTR/KRK Certificate on file)'}`,
-      body.zoningLimits ? `- Zoning Classification: ${body.zoningLimits.zoneCode || 'K.1'} (${body.zoningLimits.zoneName || 'Commercial'})` : '',
-      `- Total Building Height: ${metrics.totalHeightMeters.toFixed(1)}m (${metrics.totalFloors} Storeys)`,
-      `- Floor Limit Basis: ${floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? 'HEIGHT DERIVED WHOLE FLOOR LIMIT FROM SUPPLIED MAXIMUM' : floorLimit.kind.replace(/_/g, ' ')}; ${floorLimit.formula}; ${floorLimit.explanation}`,
-      `- Height Limit: ${statMaxHeightM === undefined ? 'Not provided' : `${statMaxHeightM.toFixed(1)}m (${statMaxFloors} whole storeys at ${scenarioFloorToFloor}m floor-to-floor)`}`,
-      `- Height Overrun: ${complianceReport.metrics.heightOverrunMeters > 0 ? `+${complianceReport.metrics.heightOverrunMeters.toFixed(1)}m VIOLATION` : '0.0m (Within Envelope)'}`,
-      `- Floor Area Ratio (FAR): ${metrics.farKLB.toFixed(2)}x (Allowable Max: ${statMaxFAR === undefined ? 'Not provided' : `${statMaxFAR.toFixed(2)}x`})`,
-      `- Total Gross Floor Area (GFA): ${metrics.totalGFA.toLocaleString()} m²`,
-      body.existingAsset?.gfa ? `- Existing Structure: ${body.existingAsset.gfa.toLocaleString()} m² (${body.existingAsset.floors || 4} floors, status: ${body.existingAsset.currentStatus || 'Operational'})` : '',
-      body.expansionHeadroomGFA !== undefined ? `- Permissible Expansion Headroom: ${body.expansionHeadroomGFA.toLocaleString()} m²` : '',
-      `- Building Coverage (KDB): ${metrics.siteCoveragePercentage}% (Max: ${statMaxCoveragePct === undefined ? 'Not provided' : `${statMaxCoveragePct}%`})`,
-      `- Unbuilt site area: ${metrics.openSpaceArea.toLocaleString()} m² (${metrics.openSpacePercentage}%). KDH: ${metrics.kdhDemonstrated ? `${metrics.landscapedPermeableAreaM2?.toLocaleString()} m² explicit landscaped/permeable area` : 'not demonstrated'}. Minimum supplied requirement: ${statMinKDHPct === undefined ? 'Not provided' : `${statMinKDHPct}%`}`,
-      body.valuation?.askingPriceAmount ? `- Commercial Terms: Asking Rp ${(body.valuation.askingPriceAmount / 1e9).toFixed(1)}B (~Rp ${(body.valuation.pricePerM2 ? (body.valuation.pricePerM2 / 1e6).toFixed(1) : (body.valuation.askingPriceAmount / grossSiteArea / 1e6).toFixed(1))}M/m² land)` : '',
-      body.valuation?.njopAmount ? `- Tax Benchmark (NJOP): Rp ${(body.valuation.njopAmount / 1e9).toFixed(1)}B` : '',
-      `- Setbacks: Front ${canonicalSetbacks.front}m, Rear ${canonicalSetbacks.rear}m, Left ${canonicalSetbacks.sideLeft}m, Right ${canonicalSetbacks.sideRight}m`,
-      `- Setback Encroachments: ${encroachments.length > 0 ? encroachments.map(e => e.description).join('; ') : 'None (Fully Contained)'}`,
-      `- 3D Mass Overlaps: ${overlaps.hasOverlap ? `ACTIVE COLLISION (${overlaps.overlapVolumeM3} m³ overlap)` : 'Zero Collisions'}`,
-      `- Out of Bounds Footprint: ${(metrics.outOfBoundsAreaM2 || 0) > 0.5 ? `${metrics.outOfBoundsAreaM2} m² beyond parcel` : 'None'}`,
-      `- Study planning check: ${complianceReport.status} (${complianceReport.assessmentStatus}); statutory compliance is not verified unless confirmed planning evidence is present`,
-      `- Primary Summary: ${complianceReport.summaryText}`
-    ].filter(Boolean).join('\n');
-
-    const prompt = `You are the Senior Planning & Real Estate Investment Advisor for SitePilot (intelligent site due diligence workspace).
-Analyze the active scenario's deterministic planning and investment facts for "${targetProjectName}" at ${targetAddress}:
-
-${deterministicFacts}
-
-${body.userQuery ? `SPECIFIC INVESTOR INQUIRY TO ADDRESS: "${body.userQuery}"` : ''}
-
-TASK & GUARDRAILS:
-1. All narrative conclusions must strictly align with the deterministic planning facts above.
-2. The numeric calculations and compliance status above are immutable and authoritative.
-3. If Planning Evidence Status is UNVERIFIED, do NOT assert statutory municipal compliance. State that statutory compliance is unverified pending official zoning certificate (RDTR/KRK).
-4. Address yield potential, operational asset preservation, expansion headroom, and valuation implications.
-5. Structure your response into:
-   - Decision: One clear executive verdict reflecting the Authoritative Deterministic Status.
-   - Supporting Evidence: 3-4 concise bullet points citing exact numerical metrics above.
-   - Identified Risks: 1-3 specific planning or physical/commercial risks.
-   - Recommended Next Action: One actionable professional recommendation.
-
-Provide a professional, clear assessment.`;
-
-    let assessment: PlanningAssessment;
-
-    // 5. Invoke Cloud Run Backend with Strict Provenance Validation
-    if (cloudRunUrl) {
-      const cloudRunHeaders: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-      if (serverSecret) {
-        cloudRunHeaders['Authorization'] = `Bearer ${serverSecret}`;
-      }
-
-      const cloudRunRes = await fetch(`${cloudRunUrl.replace(/\/$/, '')}/analyze`, {
-        method: 'POST',
-        headers: cloudRunHeaders,
-        body: JSON.stringify({
-          prompt,
-          scenarioId: body.scenarioId
-        })
+    const bodyText = await request.text();
+    if (taskmasterApiEnabled()) {
+      const response = await proxyTaskmasterRequest(request, '/api/assessment', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: bodyText,
       });
-
-      if (!cloudRunRes.ok) {
-        const errText = await cloudRunRes.text();
-        console.error(`[SitePilot Assessment API] Cloud Run invocation failed (HTTP ${cloudRunRes.status}):`, errText);
-        return NextResponse.json(
-          { error: `Cloud Run Vertex AI service error (HTTP ${cloudRunRes.status}).`, ok: false },
-          { status: cloudRunRes.status }
-        );
-      }
-
-      const cloudRunData = await cloudRunRes.json();
-
-      // Strict Provenance Validation: require exact model, project, location, and non-empty revision/correlationId
-      if (
-        !cloudRunData ||
-        typeof cloudRunData !== 'object' ||
-        cloudRunData.ok !== true ||
-        cloudRunData.authenticated !== true ||
-        cloudRunData.model !== REQUIRED_CLOUD_RUN_MODEL ||
-        cloudRunData.project !== REQUIRED_CLOUD_RUN_PROJECT ||
-        cloudRunData.vertexLocation !== REQUIRED_CLOUD_RUN_LOCATION ||
-        typeof cloudRunData.revision !== 'string' ||
-        cloudRunData.revision.length === 0 ||
-        typeof cloudRunData.correlationId !== 'string' ||
-        cloudRunData.correlationId.length === 0
-      ) {
-        console.error('[SitePilot Assessment API] Invalid or inconsistent provenance from Cloud Run:', cloudRunData);
-        return NextResponse.json(
-          { error: 'Invalid or inconsistent provenance received from Cloud Run service.', ok: false },
-          { status: 502 }
-        );
-      }
-
-      const rawText = cloudRunData.response || '';
-      const lines = rawText.split('\n').map((l: string) => l.trim()).filter(Boolean);
-      const evidenceLines = lines.filter((l: string) => l.startsWith('*') || l.startsWith('-')).slice(0, 4).map((l: string) => l.replace(/^[-*]\s*/, ''));
-
-      assessment = {
-        scenarioId: body.scenarioId,
-        scenarioName: body.scenarioName,
-        status: complianceReport.assessmentStatus,
-        decision: complianceReport.decisionText,
-        supportingEvidence: evidenceLines.length > 0 ? evidenceLines : [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${statMaxHeightM === undefined ? 'Limit not provided' : `Cap: ${statMaxHeightM.toFixed(1)}m`})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${statMaxFAR === undefined ? 'Limit not provided' : `Max: ${statMaxFAR.toFixed(2)}x`})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${statMaxCoveragePct === undefined ? 'Limit not provided' : `Max: ${statMaxCoveragePct}%`})`,
-          `Setbacks: Front ${canonicalSetbacks.front}m`
-        ],
-        identifiedRisks: complianceReport.identifiedRisks,
-        recommendedAction: complianceReport.recommendedAction,
-        model: `${cloudRunData.model} (Cloud Run / Vertex AI)`,
-        generatedAt: new Date().toISOString(),
-        accessPath,
-        userAuthenticated: false,
-        backendAuthenticated: true,
-        provenance: {
-          model: cloudRunData.model,
-          project: cloudRunData.project,
-          vertexLocation: cloudRunData.vertexLocation,
-          revision: cloudRunData.revision,
-          correlationId: cloudRunData.correlationId
-        }
-      };
-    } else {
-      // Non-production development fallback
-      if (isProduction) {
-        return NextResponse.json(
-          { error: 'Production deployment requires CLOUDRUN_SERVICE_URL.', ok: false },
-          { status: 500 }
-        );
-      }
-
-      assessment = {
-        scenarioId: body.scenarioId,
-        scenarioName: body.scenarioName,
-        status: complianceReport.assessmentStatus,
-        decision: complianceReport.decisionText,
-        supportingEvidence: [
-          `Total Height: ${metrics.totalHeightMeters.toFixed(1)}m (${statMaxHeightM === undefined ? 'Limit not provided' : `Cap: ${statMaxHeightM.toFixed(1)}m`})`,
-          `Floor Area Ratio: ${metrics.farKLB.toFixed(2)}x (${statMaxFAR === undefined ? 'Limit not provided' : `Max: ${statMaxFAR.toFixed(2)}x`})`,
-          `Site Coverage: ${metrics.siteCoveragePercentage}% (${statMaxCoveragePct === undefined ? 'Limit not provided' : `Max: ${statMaxCoveragePct}%`})`,
-          `Setbacks: Front ${canonicalSetbacks.front}m`
-        ],
-        identifiedRisks: complianceReport.identifiedRisks,
-        recommendedAction: complianceReport.recommendedAction,
-        model: 'gemini-3.7-flash (DEV_HEURISTIC)',
-        generatedAt: new Date().toISOString(),
-        accessPath,
-        userAuthenticated: false,
-        backendAuthenticated: false
-      };
+      return new NextResponse(await response.text(), {
+        status: response.status,
+        headers: { 'content-type': response.headers.get('content-type') || 'application/json' },
+      });
     }
 
+    let body: AssessmentRequestBody;
+    try { body = JSON.parse(bodyText) as AssessmentRequestBody; } catch { return NextResponse.json({ error: 'Malformed request: Invalid JSON body.', ok: false }, { status: 400 }); }
+    if (!body || typeof body !== 'object' || !positive(body.grossSiteArea)) return NextResponse.json({ error: 'Validation error: grossSiteArea must be a finite positive number.', ok: false }, { status: 400 });
+    const scenarios = body.scenarios?.length ? body.scenarios : [{ scenarioId: body.scenarioId, scenarioName: body.scenarioName, setbacks: body.setbacks, masses: body.masses, sourceRevisionId: body.sourceRevisionId, proposal: body.proposal }];
+    for (const scenario of scenarios) {
+      const issue = validateScenario(scenario);
+      if (issue) return NextResponse.json({ error: `Validation error: ${issue}`, ok: false }, { status: 400 });
+    }
+
+    const deterministicSchemes = scenarios.map((scenario) => recomputeScheme(body, scenario));
+    const activeSchemeId = body.activeSchemeId || body.scenarioId;
+    const active = deterministicSchemes.find((scheme) => scheme.schemeId === activeSchemeId) || deterministicSchemes[0];
+    const generatedAt = new Date().toISOString();
+    const simulationResultHash = buildSimulationResultHash(deterministicSchemes);
+    const fallback = createDeterministicAiSummary(deterministicSchemes, active.schemeId);
+    let acceptedAi = fallback;
+    let modelCalled = false;
+    let providerRequests = 0;
+    let providerResponses = 0;
+    let modelOutputsReceived = 0;
+    let modelOutputsSchemaAccepted = 0;
+    const repairRequests = 0;
+    let promptTokens = 0;
+    let candidateTokens = 0;
+    let totalTokens = 0;
+    let disclosure = 'Deterministic study summary — no model request made';
+    let model = 'Template deterministic summary';
+    let backendAuthenticated = false;
+    let provenance: PlanningAssessment['provenance'];
+    const evidencePackage = {
+      confirmedOpportunity: {
+        name: body.projectName || body.caseName || 'Development Opportunity', address: body.address || 'Site location',
+        inputHash: body.opportunityInputHash || 'not-recorded', studyVersion: body.sourceStudyVersion || 'not-recorded',
+        ownerPriorities: body.ownerPriorities || {}, additionalStrategyInstructions: body.additionalStrategyInstructions || '',
+        planningInputs: body.zoningLimits || {}, existingAsset: body.existingAsset || null, valuationAssumptions: body.valuation || null,
+      },
+      generationProvenance: body.generationProvenance || null,
+      activeSchemeId: active.schemeId,
+      schemes: deterministicSchemes,
+    };
+
+    const liveAssessmentAllowed = apiMode
+      && process.env.ASSESSMENT_FORCE_FALLBACK !== 'true'
+      && process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true'
+      && Number(process.env.TASKMASTER_MAX_MODEL_CALLS || 0) > 0
+      && getAiConfig().provider !== 'LOCAL_DEVELOPMENT';
+
+    if (liveAssessmentAllowed) {
+      providerRequests = 1;
+      const { ai, model: configuredModel, provider } = createAiClient();
+      try {
+        const response = await ai.models.generateContent({
+          model: configuredModel,
+          contents: assessmentPrompt(evidencePackage, body.userQuery),
+          config: {
+            httpOptions: { apiVersion: 'v1' },
+            responseMimeType: 'application/json',
+            responseSchema: planningAssessmentResponseSchema as unknown as Schema,
+            ...(Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
+              ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
+              : {}),
+          },
+        });
+        providerResponses = 1;
+        const text = response.text;
+        if (text?.trim()) modelOutputsReceived = 1;
+        const candidate = safeJsonCandidate(text);
+        acceptedAi = validateAiPlanningAssessment(candidate, deterministicSchemes, active.schemeId);
+        modelOutputsSchemaAccepted = 1;
+        modelCalled = true;
+        disclosure = 'AI assessment grounded in SitePilot results';
+        model = configuredModel;
+        backendAuthenticated = provider === 'VERTEX_AI';
+        provenance = {
+          model: configuredModel,
+          project: getAiConfig().projectId || 'not-recorded',
+          vertexLocation: getAiConfig().location || 'not-recorded',
+          revision: process.env.K_REVISION,
+          correlationId: request.headers.get('x-sitepilot-correlation-id') || undefined,
+        };
+        promptTokens = response.usageMetadata?.promptTokenCount || 0;
+        candidateTokens = response.usageMetadata?.candidatesTokenCount || 0;
+        totalTokens = response.usageMetadata?.totalTokenCount || promptTokens + candidateTokens;
+      } catch (error) {
+        console.error('[SitePilot Assessment API] Model assessment was not accepted.', { code: error instanceof Error ? error.name : 'ASSESSMENT_PROVIDER_FAILURE' });
+        disclosure = providerResponses > 0
+          ? 'Deterministic study summary — model response not accepted'
+          : 'Deterministic study summary — Gemini request failed before a usable response';
+      }
+    } else if (cloudRunUrl && process.env.ASSESSMENT_FORCE_FALLBACK !== 'true' && !apiMode) {
+      providerRequests = 1;
+      const response = await fetch(`${cloudRunUrl.replace(/\/$/, '')}/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(serverSecret ? { Authorization: `Bearer ${serverSecret}` } : {}) },
+        // The gateway maps this versioned contract to its server-owned SDK responseSchema.
+        body: JSON.stringify({ prompt: assessmentPrompt(evidencePackage, body.userQuery), scenarioId: active.schemeId, outputContract: 'SITEPILOT_PLANNING_ASSESSMENT_V1' }),
+      });
+      if (!response.ok) {
+        console.error('[SitePilot Assessment API] Cloud Run assessment request failed.', { status: response.status });
+        return NextResponse.json({ error: `Cloud Run Vertex AI service error (HTTP ${response.status}).`, ok: false }, { status: response.status });
+      }
+      providerResponses = 1;
+      const data: Record<string, unknown> = await response.json();
+      if (data.ok !== true || data.authenticated !== true || data.model !== REQUIRED_CLOUD_RUN_MODEL || data.project !== REQUIRED_CLOUD_RUN_PROJECT
+        || data.vertexLocation !== REQUIRED_CLOUD_RUN_LOCATION || typeof data.revision !== 'string' || !data.revision
+        || typeof data.correlationId !== 'string' || !data.correlationId) {
+        console.error('[SitePilot Assessment API] Invalid Cloud Run provenance metadata.');
+        return NextResponse.json({ error: 'Invalid or inconsistent provenance received from Cloud Run service.', ok: false }, { status: 502 });
+      }
+      backendAuthenticated = true;
+      model = `${String(data.model)} (Cloud Run / Vertex AI)`;
+      provenance = { model: String(data.model), project: String(data.project), vertexLocation: String(data.vertexLocation), revision: String(data.revision), correlationId: String(data.correlationId) };
+      const usage = (data.usage && typeof data.usage === 'object' ? data.usage : {}) as Record<string, unknown>;
+      promptTokens = typeof usage.promptTokens === 'number' ? usage.promptTokens : 0;
+      candidateTokens = typeof usage.candidateTokens === 'number' ? usage.candidateTokens : 0;
+      totalTokens = typeof usage.totalTokens === 'number' ? usage.totalTokens : promptTokens + candidateTokens;
+      try {
+        const candidate = safeJsonCandidate(data.response);
+        modelOutputsReceived = 1;
+        acceptedAi = validateAiPlanningAssessment(candidate, deterministicSchemes, active.schemeId);
+        modelOutputsSchemaAccepted = 1;
+        modelCalled = true;
+        disclosure = 'AI assessment grounded in SitePilot results';
+      } catch (error) {
+        console.error('[SitePilot Assessment API] Model assessment was not accepted.', { code: error instanceof Error ? error.message : 'ASSESSMENT_OUTPUT_INVALID' });
+        disclosure = 'Deterministic study summary — model response not accepted';
+      }
+    } else if (!apiMode && !cloudRunUrl && process.env.NODE_ENV === 'production') return NextResponse.json({ error: 'Production deployment requires private Taskmaster routing.', ok: false }, { status: 500 });
+
+    const assessment: PlanningAssessment = {
+      scenarioId: active.schemeId, scenarioName: active.schemeName, status: active.status, decision: active.decision,
+      supportingEvidence: active.evidence.slice(0, 4).map((item) => `${item.label}: ${item.value}`),
+      identifiedRisks: active.risks, recommendedAction: active.recommendedAction, model, generatedAt, accessPath,
+      userAuthenticated: false, backendAuthenticated, provenance,
+      deterministicAssessment: { authoritative: true, schemes: deterministicSchemes },
+      aiAssessment: {
+        advisory: true, modelCalled, disclosure, schemeComments: acceptedAi.schemeComments,
+        activeSchemeAssessment: acceptedAi.activeSchemeAssessment, providerRequests, providerResponses,
+        modelOutputsReceived, modelOutputsSchemaAccepted, repairRequests, promptTokens, candidateTokens, totalTokens,
+      },
+      binding: {
+        opportunityInputHash: body.opportunityInputHash || 'not-recorded', sourceStudyVersion: body.sourceStudyVersion || 'not-recorded',
+        canonicalRevisionIds: Object.fromEntries(deterministicSchemes.map((scheme) => [scheme.schemeId, scheme.sourceRevisionId])),
+        simulationResultHash, activeSchemeId: active.schemeId, generatedAt,
+      },
+    };
     return NextResponse.json(assessment, { status: 200 });
   } catch (error) {
-    console.error('[SitePilot Assessment API] Error:', error);
-    return NextResponse.json(
-      { 
-        error: 'Failed to generate Planning Assessment.', 
-        details: error instanceof Error ? error.message : String(error),
-        ok: false
-      },
-      { status: 500 }
-    );
+    console.error('[SitePilot Assessment API] Safe assessment failure.', { code: error instanceof Error ? error.message : 'ASSESSMENT_UNKNOWN' });
+    return NextResponse.json({ error: 'Failed to generate Planning Assessment.', ok: false }, { status: 500 });
   }
 }

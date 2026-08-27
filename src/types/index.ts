@@ -233,6 +233,8 @@ export interface SchemeProposal {
   name: string;
   strategy: SchemeStrategy;
   thesis: string;
+  /** Why this strategic alternative exists, before deterministic simulation. */
+  schemePoint: string;
   existingAssetDecision: ExistingAssetStrategy;
   existingAssetScope: string;
   existingGfaRetainedM2: number;
@@ -250,7 +252,9 @@ export interface SchemeProposal {
   landscapedPermeableKDHIntent: string;
   accessServicingConcept: string;
   phasingConcept: string;
+  operationalContinuityConcept: string;
   commercialPremise: string;
+  planningRiskPosture: string;
   planningResponse: string;
   targetGFA: number;
   achievedGFA: number;
@@ -260,6 +264,9 @@ export interface SchemeProposal {
   assumptionsIntroduced: string[];
   rationale: string;
   tradeOffs: string[];
+  expectedAdvantagesHypotheses: string[];
+  expectedTradeOffHypotheses: string[];
+  rejectionConditions: string[];
   informationStillRequired: string[];
   allowNonCompliantStretch: boolean;
 }
@@ -275,6 +282,7 @@ export interface SchemeGenerationMetadata {
   sourceStudyVersion: string;
   inputHash: string;
   userPriorities: Record<string, string | boolean>;
+  additionalStrategyInstructions?: string;
   assumptions: string[];
   validation: { valid: boolean; errors: string[] };
   proposals: SchemeProposal[];
@@ -326,6 +334,9 @@ export interface ConfirmedSchemeInputSnapshot {
   studyVersion: string;
   inputHash: string;
   priorities: Record<string, string | boolean>;
+  /** Untrusted design-brief data; never an authority override. */
+  additionalStrategyInstructions?: string;
+  inputProvenance?: Record<string, 'DEFAULT' | 'USER_PROVIDED' | 'USER_CLEARED' | 'MISSING'>;
 }
 
 export type ScenarioEditClassification = 
@@ -494,6 +505,8 @@ export interface Project {
   schemeGeneration?: SchemeGenerationMetadata;
   /** Exact reviewed input used to create the current Taskmaster run. */
   confirmedSchemeInput?: ConfirmedSchemeInputSnapshot;
+  /** Latest server-grounded planning assessment; binding marks it stale after relevant edits. */
+  planningAssessment?: PlanningAssessment;
   /** Per-field intake origin so defaults, missing values, and user entries remain distinguishable. */
   intakeValueSources?: Record<string, 'DEFAULT' | 'USER_PROVIDED' | 'USER_CLEARED' | 'MISSING'>;
   /** Browser-local pointer used to resume/poll a server-side Taskmaster run. */
@@ -508,6 +521,78 @@ export interface Project {
   
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AssessmentEvidenceReference {
+  key: string;
+  label: string;
+  value: string;
+}
+
+export interface DeterministicSchemeAssessment {
+  schemeId: string;
+  schemeName: string;
+  sourceRevisionId: string;
+  status: PlanningAssessment['status'];
+  decision: string;
+  targetGFA: number;
+  achievedGFA: number;
+  varianceGFA: number;
+  varianceExplanation: string;
+  proposalStrategy: {
+    schemePoint?: string;
+    existingAssetDecision?: string;
+    publicRealmIntent?: string;
+    accessServicingConcept?: string;
+    phasingConcept?: string;
+    commercialPremise?: string;
+    ownerPrioritiesAddressed?: string[];
+  };
+  masses: Array<{ name: string; role: string; storeys: number; heightMeters: number; gfaM2: number }>;
+  existingAsset: { retainedGfaM2: number; removedGfaM2: number; reconciled: boolean };
+  achievedProgramGfaByUse: Record<string, number>;
+  programReconciled: boolean;
+  farKLB: number;
+  coverageKDB: number;
+  heightMeters: number;
+  kdhDemonstrated: boolean;
+  landscapedPermeableAreaM2?: number;
+  collisions: boolean;
+  outOfBoundsAreaM2: number;
+  risks: string[];
+  recommendedAction: string;
+  evidence: AssessmentEvidenceReference[];
+}
+
+export interface AiSchemeComment {
+  schemeId: string;
+  schemePoint: string;
+  principalStrength: string;
+  principalWeakness: string;
+  bestSuitedFor: string;
+  evidenceReferences: string[];
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidenceReason: string;
+  informationNeeded: string[];
+  sourceRevisionId: string;
+}
+
+export interface ActiveSchemeAiAssessment {
+  executiveInterpretation: string;
+  strengths: string[];
+  weaknesses: string[];
+  planningPhysicalRisks: string[];
+  commercialImplications: string[];
+  criticalUnknowns: string[];
+  targetAchievedExplanation: string;
+  alternativeMoves: string[];
+  recommendedNextAction: string;
+  conditionalRecommendation: string;
+  decisionCriteriaUsed: string[];
+  sensitivityStatement: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidenceReason: string;
+  evidenceReferences: string[];
 }
 
 export interface PlanningAssessment {
@@ -530,4 +615,32 @@ export interface PlanningAssessment {
     revision?: string;
     correlationId?: string;
   };
+  deterministicAssessment: {
+    authoritative: true;
+    schemes: DeterministicSchemeAssessment[];
+  };
+  aiAssessment: {
+    advisory: true;
+    modelCalled: boolean;
+    disclosure: string;
+    schemeComments: AiSchemeComment[];
+    activeSchemeAssessment: ActiveSchemeAiAssessment;
+    providerRequests: number;
+    providerResponses: number;
+    modelOutputsReceived: number;
+    modelOutputsSchemaAccepted: number;
+    repairRequests: number;
+    promptTokens: number;
+    candidateTokens: number;
+    totalTokens: number;
+  };
+  binding: {
+    opportunityInputHash: string;
+    sourceStudyVersion: string;
+    canonicalRevisionIds: Record<string, string>;
+    simulationResultHash: string;
+    activeSchemeId: string;
+    generatedAt: string;
+  };
+  stale?: boolean;
 }

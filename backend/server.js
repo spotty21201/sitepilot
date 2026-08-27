@@ -14,6 +14,43 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 const REVISION = process.env.K_REVISION || 'sitepilot-vertex-local';
 const SERVICE_NAME = process.env.K_SERVICE || 'sitepilot-vertex';
 
+const planningAssessmentResponseSchema = {
+  type: 'OBJECT',
+  properties: {
+    schemeComments: {
+      type: 'ARRAY',
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: 'OBJECT',
+        properties: {
+          schemeId: { type: 'STRING' }, schemePoint: { type: 'STRING' }, principalStrength: { type: 'STRING' },
+          principalWeakness: { type: 'STRING' }, bestSuitedFor: { type: 'STRING' },
+          evidenceReferences: { type: 'ARRAY', items: { type: 'STRING' }, minItems: 2, maxItems: 4 },
+          confidence: { type: 'STRING', enum: ['HIGH', 'MEDIUM', 'LOW'] }, confidenceReason: { type: 'STRING' },
+          informationNeeded: { type: 'ARRAY', items: { type: 'STRING' } }, sourceRevisionId: { type: 'STRING' },
+        },
+        required: ['schemeId', 'schemePoint', 'principalStrength', 'principalWeakness', 'bestSuitedFor', 'evidenceReferences', 'confidence', 'confidenceReason', 'informationNeeded', 'sourceRevisionId'],
+      },
+    },
+    activeSchemeAssessment: {
+      type: 'OBJECT',
+      properties: {
+        executiveInterpretation: { type: 'STRING' }, strengths: { type: 'ARRAY', items: { type: 'STRING' } },
+        weaknesses: { type: 'ARRAY', items: { type: 'STRING' } }, planningPhysicalRisks: { type: 'ARRAY', items: { type: 'STRING' } },
+        commercialImplications: { type: 'ARRAY', items: { type: 'STRING' } }, criticalUnknowns: { type: 'ARRAY', items: { type: 'STRING' } },
+        targetAchievedExplanation: { type: 'STRING' }, alternativeMoves: { type: 'ARRAY', items: { type: 'STRING' } },
+        recommendedNextAction: { type: 'STRING' }, conditionalRecommendation: { type: 'STRING' },
+        decisionCriteriaUsed: { type: 'ARRAY', items: { type: 'STRING' } }, sensitivityStatement: { type: 'STRING' },
+        confidence: { type: 'STRING', enum: ['HIGH', 'MEDIUM', 'LOW'] }, confidenceReason: { type: 'STRING' },
+        evidenceReferences: { type: 'ARRAY', items: { type: 'STRING' }, minItems: 2, maxItems: 8 },
+      },
+      required: ['executiveInterpretation', 'strengths', 'weaknesses', 'planningPhysicalRisks', 'commercialImplications', 'criticalUnknowns', 'targetAchievedExplanation', 'alternativeMoves', 'recommendedNextAction', 'conditionalRecommendation', 'decisionCriteriaUsed', 'sensitivityStatement', 'confidence', 'confidenceReason', 'evidenceReferences'],
+    },
+  },
+  required: ['schemeComments', 'activeSchemeAssessment'],
+};
+
 const server = http.createServer((req, res) => {
   // CORS / Security Headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -91,9 +128,11 @@ const server = http.createServer((req, res) => {
         const correlationId = crypto.randomUUID();
         const startTime = Date.now();
 
+        const controlledAssessment = body.outputContract === 'SITEPILOT_PLANNING_ASSESSMENT_V1';
         const response = await ai.models.generateContent({
           model: MODEL,
-          contents: body.prompt
+          contents: body.prompt,
+          ...(controlledAssessment ? { config: { responseMimeType: 'application/json', responseSchema: planningAssessmentResponseSchema } } : {}),
         });
 
         const durationMs = Date.now() - startTime;
@@ -109,14 +148,18 @@ const server = http.createServer((req, res) => {
           correlationId,
           durationMs,
           response: response.text || '',
+          usage: {
+            promptTokens: response.usageMetadata?.promptTokenCount || 0,
+            candidateTokens: response.usageMetadata?.candidatesTokenCount || 0,
+            totalTokens: response.usageMetadata?.totalTokenCount || 0,
+          },
           authenticated: true
         }));
       } catch (err) {
-        console.error('[SitePilot Backend] Vertex AI error:', err);
+        console.error('[SitePilot Backend] Vertex AI request failed.', { name: err instanceof Error ? err.name : 'ProviderError' });
         res.writeHead(502, { 'Content-Type': 'application/json' });
         return res.end(JSON.stringify({
           error: 'Vertex AI execution failed.',
-          details: err instanceof Error ? err.message : String(err),
           ok: false
         }));
       }

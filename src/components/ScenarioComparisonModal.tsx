@@ -43,6 +43,13 @@ export function ScenarioComparisonModal({
   const statMaxCoverage = project.zoningLimits?.maxCoveragePct;
   const statMinKDH = project.zoningLimits?.minKDHPct;
   const askingPrice = project.valuation?.askingPriceAmount || project.askingPrice?.amount;
+  const assessment = project.planningAssessment;
+  const assessmentStale = Boolean(assessment && project.scenarios.some((scenario) =>
+    assessment.binding.canonicalRevisionIds[scenario.id] !== (scenario.canonicalRevision?.revisionId || `unversioned-${scenario.id}`)));
+  const compact = (value: string, limit = 45) => {
+    const words = value.trim().split(/\s+/);
+    return words.length <= limit ? value : `${words.slice(0, limit).join(' ')}…`;
+  };
 
   return (
     <div
@@ -166,6 +173,29 @@ export function ScenarioComparisonModal({
                   </div>
                 ))}
               </div>
+
+              {assessment && (
+                <div className={`grid gap-3 p-3 bg-[var(--bg-primary)] grid-cols-${scenarios.length + 1}`}>
+                  <div className="font-semibold text-[var(--text-secondary)]">
+                    <span>AI Assessment</span>
+                    <span className={`text-[10px] block ${assessmentStale ? 'text-[var(--status-warning)]' : 'text-[var(--text-muted)]'}`}>
+                      {assessmentStale ? 'Needs updating — scheme changed since this assessment.' : assessment.aiAssessment.disclosure}
+                    </span>
+                  </div>
+                  {scenarios.map((scenario) => {
+                    const comment = assessment.aiAssessment.schemeComments.find((item) => item.schemeId === scenario.id);
+                    return (
+                      <div key={scenario.id} className="space-y-1 text-[10px] leading-snug text-[var(--text-secondary)]">
+                        {comment ? <>
+                          <p><strong>Point:</strong> {compact(comment.schemePoint)}</p>
+                          <p><strong>Strength:</strong> {compact(comment.principalStrength)}</p>
+                          <p><strong>Watch-out:</strong> {compact(comment.principalWeakness)}</p>
+                        </> : <span className="text-[var(--text-muted)]">No assessment recorded</span>}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Row 2: FAR / KLB */}
               <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>

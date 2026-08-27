@@ -109,6 +109,7 @@ interface ScenarioControlsProps {
   onOpenCompareModal?: () => void;
   onDuplicateScenario?: (scenarioId: string) => void;
   project?: Project;
+  onAssessmentPrepared?: (assessment: PlanningAssessment) => void;
 }
 
 export function ScenarioControls({
@@ -120,14 +121,15 @@ export function ScenarioControls({
   onFitMassingToEnvelope,
   onResetScenario,
   onOpenCompareModal,
-  project
+  project,
+  onAssessmentPrepared,
 }: ScenarioControlsProps) {
   const [copied, setCopied] = useState(false);
   const [downloadedToast, setDownloadedToast] = useState<string | null>(null);
   const [showXmlModal, setShowXmlModal] = useState(false);
   const [rawXml, setRawXml] = useState('');
   const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
-  const [assessment, setAssessment] = useState<PlanningAssessment | null>(null);
+  const [assessment, setAssessment] = useState<PlanningAssessment | null>(project?.planningAssessment ?? null);
   const [assessedSnapshot, setAssessedSnapshot] = useState<string | null>(null);
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
@@ -138,8 +140,6 @@ export function ScenarioControls({
 
   if (activeScenarioId !== prevScenarioId) {
     setPrevScenarioId(activeScenarioId);
-    setAssessment(null);
-    setAssessedSnapshot(null);
     setAssessmentError(null);
   }
 
@@ -296,8 +296,21 @@ export function ScenarioControls({
   }, []);
 
   const getCurrentSnapshot = useCallback(() => {
-    return `${activeScenario.id}-${metrics.totalGFA}-${metrics.totalFloors}-${metrics.totalHeightMeters}-${currentSetback}-${currentSideSetback}-${isFittedToSetback}-${(activeScenario.masses || []).map(m => `${m.id}:${m.position.x},${m.position.y},${m.position.z}:${m.dimensions.width},${m.dimensions.length}:${m.floors}`).join('|')}`;
-  }, [activeScenario.id, activeScenario.masses, currentSetback, currentSideSetback, isFittedToSetback, metrics.totalFloors, metrics.totalGFA, metrics.totalHeightMeters]);
+    return JSON.stringify({
+      activeScenarioId,
+      opportunityInputHash: project?.confirmedSchemeInput?.inputHash,
+      studyVersion: project?.confirmedSchemeInput?.studyVersion,
+      planning: project?.zoningLimits,
+      landscapedPermeableAreaM2: site.landscapedPermeableAreaM2,
+      scenarios: scenarios.map((scenario) => ({
+        id: scenario.id,
+        revision: scenario.canonicalRevision?.revisionId,
+        setbacks: scenario.assumptionsUsed.setbacks,
+        masses: scenario.masses.map((mass) => ({ id: mass.id, position: mass.position, dimensions: mass.dimensions, floors: mass.floors, gfa: mass.gfa, program: mass.program })),
+        proposal: scenario.proposal ? { targetGFA: scenario.proposal.targetGFA, asset: scenario.proposal.existingAssetDecision, program: scenario.proposal.programGFAByUse } : undefined,
+      })),
+    });
+  }, [activeScenarioId, project?.confirmedSchemeInput?.inputHash, project?.confirmedSchemeInput?.studyVersion, project?.zoningLimits, scenarios, site.landscapedPermeableAreaM2]);
 
   const baseFloors = activeScenario.originalMasses 
     ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
@@ -306,9 +319,19 @@ export function ScenarioControls({
     ? activeScenario.originalMasses.reduce((acc, m) => acc + m.gfa, 0)
     : metrics.totalGFA;
 
-  const isAssessmentStale = Boolean(assessment && assessedSnapshot && assessedSnapshot !== getCurrentSnapshot());
+  const assessmentBindingStale = Boolean(assessment && (
+    assessment.binding.activeSchemeId !== activeScenarioId
+    || assessment.binding.opportunityInputHash !== (project?.confirmedSchemeInput?.inputHash || 'not-recorded')
+    || assessment.binding.sourceStudyVersion !== (project?.confirmedSchemeInput?.studyVersion || 'not-recorded')
+    || scenarios.some((scenario) => assessment.binding.canonicalRevisionIds[scenario.id] !== (scenario.canonicalRevision?.revisionId || `unversioned-${scenario.id}`))
+  ));
+  const isAssessmentStale = Boolean(assessment && (assessmentBindingStale || (assessedSnapshot && assessedSnapshot !== getCurrentSnapshot())));
 
   const handleGenerateAssessment = async (overrideQuery?: string) => {
+    if (assessment && !isAssessmentStale) {
+      setAssessmentError(null);
+      return;
+    }
     setIsLoadingAssessment(true);
     setAssessmentError(null);
     const snapshot = getCurrentSnapshot();
@@ -325,12 +348,31 @@ export function ScenarioControls({
           frontageLength: site.frontageLength,
           setbacks: activeScenario.assumptionsUsed.setbacks,
           masses: activeScenario.masses, // CRITICAL FIX: Pass masses array
+          scenarios: scenarios.map((scenario) => ({
+            scenarioId: scenario.id,
+            scenarioName: scenario.name,
+            setbacks: scenario.assumptionsUsed.setbacks,
+            masses: scenario.masses,
+            sourceRevisionId: scenario.canonicalRevision?.revisionId,
+            proposal: scenario.proposal,
+          })),
+          activeSchemeId: activeScenario.id,
+          opportunityInputHash: project?.confirmedSchemeInput?.inputHash,
+          sourceStudyVersion: project?.confirmedSchemeInput?.studyVersion,
+          ownerPriorities: project?.confirmedSchemeInput?.priorities,
+          additionalStrategyInstructions: project?.confirmedSchemeInput?.additionalStrategyInstructions,
+          generationProvenance: project?.schemeGeneration ? {
+            provider: project.schemeGeneration.provider,
+            model: project.schemeGeneration.model,
+            modelCalled: project.schemeGeneration.modelCalled,
+          } : undefined,
           projectName: site.projectName,
           address: site.address,
           hasZoningEvidence: Boolean(site.hasZoningEvidence),
           zoningLimits: project?.zoningLimits,
           existingAsset: project?.existingAsset,
           valuation: project?.valuation,
+          landscapedPermeableAreaM2: site.landscapedPermeableAreaM2,
           expansionHeadroomGFA: project?.expansionHeadroomGFA,
           userQuery: queryToSend.trim() || undefined
         })
@@ -343,6 +385,7 @@ export function ScenarioControls({
       }
       setAssessment(data);
       setAssessedSnapshot(snapshot);
+      onAssessmentPrepared?.(data);
     } catch (err) {
       setAssessmentError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -789,9 +832,7 @@ export function ScenarioControls({
               <span>Planning &amp; Investment Intelligence</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[9px] text-[var(--text-muted)]" title="Configured model for planning assessment">
-                Configured model · gemini-3.7-flash
-              </span>
+              <span className="font-mono text-[9px] text-[var(--text-muted)]">AI assessment · model shown only after accepted output</span>
               <span className="status-badge status-badge--investigation !min-h-0 !rounded-[var(--radius-control)] !px-1.5 !py-0.5 text-[9px]">
                 On request
               </span>
@@ -920,6 +961,25 @@ export function ScenarioControls({
               <p className="text-[var(--text-primary)] font-medium leading-relaxed text-[11px]">
                 {assessment.decision}
               </p>
+
+              <div className="rounded-[var(--radius-control)] border border-[var(--status-investigation)] bg-[var(--status-investigation-surface)] p-2 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-[9px] text-[var(--text-muted)]">
+                  <strong className="text-[var(--status-investigation)]">{assessment.aiAssessment.disclosure}</strong>
+                  <span>{assessment.aiAssessment.modelCalled ? assessment.model : 'No accepted model output'} · source revision {assessment.binding.canonicalRevisionIds[activeScenario.id] || 'not recorded'}</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-[var(--text-primary)]">{assessment.aiAssessment.activeSchemeAssessment.executiveInterpretation}</p>
+                <dl className="space-y-1 text-[10px] text-[var(--text-secondary)]">
+                  <div><dt className="inline font-semibold">Strategic purpose: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.schemePoint}</dd></div>
+                  <div><dt className="inline font-semibold">Principal strength: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.principalStrength}</dd></div>
+                  <div><dt className="inline font-semibold">Principal weakness: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.principalWeakness}</dd></div>
+                  <div><dt className="inline font-semibold">Best suited for: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.bestSuitedFor}</dd></div>
+                  <div><dt className="inline font-semibold">Evidence used: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.evidenceReferences.map((reference) => assessment.deterministicAssessment.schemes.find((scheme) => scheme.schemeId === activeScenario.id)?.evidence.find((item) => item.key === reference)).filter(Boolean).map((item) => `${item?.label}: ${item?.value}`).join(' · ')}</dd></div>
+                  <div><dt className="inline font-semibold">Confidence: </dt><dd className="inline">{assessment.aiAssessment.activeSchemeAssessment.confidence} · {assessment.aiAssessment.activeSchemeAssessment.confidenceReason}</dd></div>
+                  <div><dt className="inline font-semibold">Missing information: </dt><dd className="inline">{assessment.aiAssessment.schemeComments.find((comment) => comment.schemeId === activeScenario.id)?.informationNeeded.join(' · ') || 'None recorded'}</dd></div>
+                  <div><dt className="inline font-semibold">Target vs achieved: </dt><dd className="inline">{assessment.aiAssessment.activeSchemeAssessment.targetAchievedExplanation}</dd></div>
+                  <div><dt className="inline font-semibold">Sensitivity: </dt><dd className="inline">{assessment.aiAssessment.activeSchemeAssessment.sensitivityStatement}</dd></div>
+                </dl>
+              </div>
 
               {assessment.supportingEvidence.length > 0 && (
                 <div className="space-y-1 pt-1">

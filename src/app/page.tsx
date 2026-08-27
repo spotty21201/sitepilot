@@ -77,6 +77,7 @@ function applyReadyTaskmasterRun(project: Project, run: PublicTaskmasterRun): Pr
     sourceStudyVersion: run.generation.sourceStudyVersion,
     inputHash: run.generation.inputHash,
     userPriorities: run.generation.userPriorities,
+    additionalStrategyInstructions: run.generation.additionalStrategyInstructions,
     assumptions: run.generation.assumptions,
     validation: run.generation.validation,
     proposals: run.generation.proposals,
@@ -242,7 +243,7 @@ export default function SitePilotDecisionRoom() {
   }, [refreshHistoryAvailability, replaceProject]);
 
   // New Case Creation Handler
-  const handleCreateCase = useCallback((params: CreateCaseParams, priorities?: SchemePriorities) => {
+  const handleCreateCase = useCallback((params: CreateCaseParams, priorities?: SchemePriorities, additionalStrategyInstructions?: string) => {
     const newProj = createCase(params);
     const initialized = initializeProjectScenarios(newProj);
     replaceProject(initialized, false);
@@ -254,7 +255,7 @@ export default function SitePilotDecisionRoom() {
     setCasesList(listCases());
     if (!priorities) return;
     setSchemeGenerationProgress('Reviewing confirmed inputs');
-    const confirmation = confirmSchemeGenerationInput(initialized, priorities);
+    const confirmation = confirmSchemeGenerationInput(initialized, priorities, undefined, additionalStrategyInstructions);
     const input = confirmation.input;
     const confirmedProject = { ...initialized, confirmedSchemeInput: confirmation.snapshot };
     replaceProject(confirmedProject);
@@ -834,6 +835,7 @@ export default function SitePilotDecisionRoom() {
               onResetScenario={handleResetScenario}
               onOpenCompareModal={() => setIsCompareModalOpen(true)}
               onDuplicateScenario={handleDuplicateScenario}
+              onAssessmentPrepared={(assessment) => updateProjectState((current) => ({ ...current, planningAssessment: assessment }))}
             />
           </section>
         </main>
@@ -901,6 +903,7 @@ export default function SitePilotDecisionRoom() {
             onResetScenario={handleResetScenario}
             onOpenCompareModal={() => setIsCompareModalOpen(true)}
             onDuplicateScenario={handleDuplicateScenario}
+            onAssessmentPrepared={(assessment) => updateProjectState((current) => ({ ...current, planningAssessment: assessment }))}
           />
         </section>
       </main>

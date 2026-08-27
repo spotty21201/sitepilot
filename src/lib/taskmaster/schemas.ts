@@ -72,9 +72,11 @@ export const taskmasterInputSchema = z.object({
     investmentHorizon: z.enum(['short', 'medium', 'long']),
     allowNonCompliantStretch: z.boolean(),
   }),
+  additionalStrategyInstructions: z.string().trim().max(2000).optional(),
+  inputProvenance: z.record(z.string(), z.enum(['DEFAULT', 'USER_PROVIDED', 'USER_CLEARED', 'MISSING'])).optional(),
 });
 
-export type TaskmasterInput = z.infer<typeof taskmasterInputSchema> & Pick<SchemeGenerationInput, 'priorities'>;
+export type TaskmasterInput = z.infer<typeof taskmasterInputSchema> & Pick<SchemeGenerationInput, 'priorities' | 'additionalStrategyInstructions' | 'inputProvenance'>;
 
 export const taskmasterPlanStepSchema = z.object({
   id: z.string().min(1),

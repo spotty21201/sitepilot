@@ -316,6 +316,7 @@ export async function executeTaskmasterRun(
         sourceStudyVersion: run.input.studyVersion,
         inputHash: run.input.inputHash,
         userPriorities: run.input.priorities,
+        additionalStrategyInstructions: run.input.additionalStrategyInstructions,
         assumptions: validation.proposals.flatMap((proposal) => proposal.assumptionsIntroduced),
         proposals: validation.proposals,
         validation: { valid: true, errors: [] },
