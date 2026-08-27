@@ -77,11 +77,12 @@ export async function withProviderBudget<T>(runId: string, repository: Taskmaste
       const requestUsage = usageFromBody(parsedBody);
       const current = await repository.getProviderUsage(runId);
       const next: TaskmasterProviderUsage = {
-        ...(current || { providerRequests: reservation.requestNumber, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' }),
+        ...(current || { providerRequests: reservation.requestNumber, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' }),
         provider: 'VERTEX_AI',
         location: process.env.GOOGLE_CLOUD_LOCATION || 'global',
         requestedModel: process.env.GEMINI_MODEL || 'gemini-3.7-flash',
         actualModel: requestUsage.actualModel || current?.actualModel,
+        successfulProviderRequests: (current?.successfulProviderRequests || 0) + (response.ok ? 1 : 0),
         promptTokens: (current?.promptTokens || 0) + requestUsage.prompt,
         candidateTokens: (current?.candidateTokens || 0) + requestUsage.candidate,
         toolUsePromptTokens: (current?.toolUsePromptTokens || 0) + requestUsage.tool,

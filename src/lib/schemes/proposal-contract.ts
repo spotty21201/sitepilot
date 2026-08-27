@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ExistingAssetStrategy, Project, SchemeProposal } from '@/types';
+import type { ConfirmedSchemeInputSnapshot, ExistingAssetStrategy, Project, SchemeProposal } from '@/types';
 import { getAiConfig } from '@/lib/ai/config';
 import { createAiClient } from '@/lib/ai/gemini';
 
@@ -244,9 +244,9 @@ export async function generateSchemeProposals(input: SchemeGenerationInput): Pro
     const proposals = createStudyTemplateProposals(input);
     return {
       provider: config.provider,
-      model: 'Not called in local development',
+      model: 'Template schemes used',
       modelCalled: false,
-      disclosure: 'No model is configured in this local environment. Study templates—not model-generated.',
+      disclosure: 'Template schemes used. No model request was made; SitePilot calculated and validated all planning figures deterministically.',
       generatedAt,
       opportunityId: input.opportunityId,
       sourceStudyVersion: input.studyVersion,
@@ -305,8 +305,8 @@ export async function generateSchemeProposals(input: SchemeGenerationInput): Pro
     if (process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true') throw error;
     const fallback = createStudyTemplateProposals(input);
     return {
-      provider: config.provider, model: 'Not called; deterministic fallback used', modelCalled: false,
-      disclosure: `The configured model could not return a valid proposal set (${error instanceof Error ? error.message : 'unknown error'}). Study templates—not model-generated.`,
+      provider: 'LOCAL_DEVELOPMENT', model: 'Template schemes used', modelCalled: false,
+      disclosure: 'Template schemes used after the live proposal path could not complete. No live result was accepted or presented as model-generated.',
       generatedAt, opportunityId: input.opportunityId, sourceStudyVersion: input.studyVersion, inputHash: input.inputHash,
       userPriorities: input.priorities, assumptions: fallback.flatMap((proposal) => proposal.assumptionsIntroduced), proposals: fallback,
       validation: { valid: true, errors: ['Model response was replaced by a bounded deterministic fallback.'] },
@@ -334,4 +334,29 @@ export function proposalGenerationInputFromProject(project: Project, priorities:
     priorities,
   };
   return { ...withoutHash, inputHash: buildSchemeInputHash(withoutHash) };
+}
+
+export function confirmSchemeGenerationInput(
+  project: Project,
+  priorities: SchemePriorities,
+  confirmedAt = new Date().toISOString(),
+): { input: SchemeGenerationInput; snapshot: ConfirmedSchemeInputSnapshot } {
+  const input = proposalGenerationInputFromProject(project, priorities);
+  return {
+    input,
+    snapshot: {
+      ...structuredClone(input),
+      confirmedAt,
+      priorities: { ...input.priorities },
+    },
+  };
+}
+
+export function isConfirmedSchemeInputCurrent(
+  project: Project,
+  snapshot: ConfirmedSchemeInputSnapshot | undefined = project.confirmedSchemeInput,
+): boolean {
+  if (!snapshot) return false;
+  const current = proposalGenerationInputFromProject(project, snapshot.priorities as SchemePriorities);
+  return current.inputHash === snapshot.inputHash && current.studyVersion === snapshot.studyVersion;
 }

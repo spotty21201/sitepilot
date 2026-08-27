@@ -341,9 +341,10 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
 
-    expect(data.status).toBe('COMPLIANT');
+    expect(data.status).toBe('WITHIN_SUPPLIED_STUDY_ENVELOPE');
     expect(data.decision).toContain('31.0m');
-    expect(data.decision).toContain('Verified planning compliance');
+    expect(data.decision).toContain('Within supplied study envelope');
+    expect(data.decision).toContain('Statutory status not yet confirmed');
     expect(data.identifiedRisks[0]).toContain('Street access');
   });
 
@@ -526,7 +527,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
 
     expect(data.status).toBe('NON_COMPLIANT_OUT_OF_BOUNDS');
     expect(data.decision).toContain('boundary');
-    expect(data.status).not.toBe('COMPLIANT');
+    expect(data.status).not.toBe('WITHIN_SUPPLIED_STUDY_ENVELOPE');
     expect(data.identifiedRisks[0]).toContain('outside registered parcel boundary');
     expect(data.identifiedRisks[1]).toContain('Critical legal liability');
   });

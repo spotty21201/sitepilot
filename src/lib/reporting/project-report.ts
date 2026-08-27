@@ -185,9 +185,7 @@ function scenarioOptionName(scenario: DevelopmentScenario, index: number): strin
 function complianceText(scenario: DevelopmentScenario): string {
   if (!scenario.complianceReport) return 'Not evaluated';
   if (scenario.complianceReport.isCompliant) {
-    return scenario.complianceReport.statusPillLabel.includes('Verified planning compliance')
-      ? 'Verified planning compliance against supplied confirmed controls'
-      : 'Within supplied study limits; statutory compliance not verified';
+    return 'Within supplied study envelope · Statutory status not yet confirmed';
   }
   return scenario.complianceReport.statusPillLabel.replace(/_/g, ' ');
 }
@@ -205,30 +203,30 @@ export function buildProjectReport(
     const constraints: OptionReportRow['constraints'] = [
       {
         label: 'Governing height', actual: `${scenario.metrics.totalHeightMeters.toFixed(1)} m`,
-        limit: limits?.maxHeightMeters ? `${limits.maxHeightMeters.toFixed(1)} m` : 'Not supplied',
-        result: limits?.maxHeightMeters ? (scenario.metrics.totalHeightMeters <= limits.maxHeightMeters + 0.01 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
-        exceedance: limits?.maxHeightMeters && scenario.metrics.totalHeightMeters > limits.maxHeightMeters
+        limit: limits?.maxHeightMeters !== undefined ? `${limits.maxHeightMeters.toFixed(1)} m` : 'Not supplied',
+        result: limits?.maxHeightMeters !== undefined ? (scenario.metrics.totalHeightMeters <= limits.maxHeightMeters + 0.01 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
+        exceedance: limits?.maxHeightMeters !== undefined && scenario.metrics.totalHeightMeters > limits.maxHeightMeters
           ? `+${(scenario.metrics.totalHeightMeters - limits.maxHeightMeters).toFixed(1)} m` : '—',
       },
       {
         label: 'FAR / KLB', actual: `${scenario.metrics.farKLB.toFixed(2)}x`,
-        limit: limits?.maxFAR ? `${limits.maxFAR.toFixed(2)}x` : 'Not supplied',
-        result: limits?.maxFAR ? (scenario.metrics.farKLB <= limits.maxFAR + 0.01 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
-        exceedance: limits?.maxFAR && scenario.metrics.farKLB > limits.maxFAR
+        limit: limits?.maxFAR !== undefined ? `${limits.maxFAR.toFixed(2)}x` : 'Not supplied',
+        result: limits?.maxFAR !== undefined ? (scenario.metrics.farKLB <= limits.maxFAR + 0.01 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
+        exceedance: limits?.maxFAR !== undefined && scenario.metrics.farKLB > limits.maxFAR
           ? `+${(scenario.metrics.farKLB - limits.maxFAR).toFixed(2)}x` : '—',
       },
       {
         label: 'Coverage / KDB', actual: `${scenario.metrics.siteCoveragePercentage.toFixed(1)}%`,
-        limit: limits?.maxCoveragePct ? `${limits.maxCoveragePct.toFixed(1)}% max` : 'Not supplied',
-        result: limits?.maxCoveragePct ? (scenario.metrics.siteCoveragePercentage <= limits.maxCoveragePct + 0.1 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
-        exceedance: limits?.maxCoveragePct && scenario.metrics.siteCoveragePercentage > limits.maxCoveragePct
+        limit: limits?.maxCoveragePct !== undefined ? `${limits.maxCoveragePct.toFixed(1)}% max` : 'Not supplied',
+        result: limits?.maxCoveragePct !== undefined ? (scenario.metrics.siteCoveragePercentage <= limits.maxCoveragePct + 0.1 ? 'PASS' : 'FAIL') : 'UNVERIFIED',
+        exceedance: limits?.maxCoveragePct !== undefined && scenario.metrics.siteCoveragePercentage > limits.maxCoveragePct
           ? `+${(scenario.metrics.siteCoveragePercentage - limits.maxCoveragePct).toFixed(1)} pp` : '—',
       },
       {
-        label: 'KDH demonstration', actual: scenario.metrics.kdhDemonstrated ? `${scenario.metrics.landscapedPermeableAreaM2?.toFixed(1)} m² (${((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100).toFixed(1)}%)` : 'Not yet demonstrated',
-        limit: limits?.minKDHPct ? `${limits.minKDHPct.toFixed(1)}% min` : 'Not supplied',
-        result: limits?.minKDHPct && scenario.metrics.kdhDemonstrated ? (((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100) + 0.1 >= limits.minKDHPct ? 'PASS' : 'FAIL') : 'UNVERIFIED',
-        exceedance: limits?.minKDHPct && scenario.metrics.kdhDemonstrated && ((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100) < limits.minKDHPct
+        label: 'KDH demonstration', actual: scenario.metrics.kdhDemonstrated ? `${scenario.metrics.landscapedPermeableAreaM2?.toFixed(1)} m² (${((scenario.metrics.landscapedPermeableAreaM2 ?? 0) / scenario.metrics.grossSiteArea * 100).toFixed(1)}%)` : 'KDH not demonstrated',
+        limit: limits?.minKDHPct !== undefined ? `${limits.minKDHPct.toFixed(1)}% min` : 'Not supplied',
+        result: limits?.minKDHPct !== undefined && scenario.metrics.kdhDemonstrated ? (((scenario.metrics.landscapedPermeableAreaM2 ?? 0) / scenario.metrics.grossSiteArea * 100) + 0.1 >= limits.minKDHPct ? 'PASS' : 'FAIL') : 'UNVERIFIED',
+        exceedance: limits?.minKDHPct !== undefined && scenario.metrics.kdhDemonstrated && ((scenario.metrics.landscapedPermeableAreaM2 ?? 0) / scenario.metrics.grossSiteArea * 100) < limits.minKDHPct
           ? `${(limits.minKDHPct - ((scenario.metrics.landscapedPermeableAreaM2 || 0) / scenario.metrics.grossSiteArea * 100)).toFixed(1)} pp short` : '—',
       },
     ];
@@ -383,7 +381,7 @@ export function serializeProjectReportCsv(report: ProjectReport): string {
     report.planning.minOpenSpace, option.podiumFloors ?? 'Not applicable', option.towerFloors ?? 'Not applicable',
     option.floors, option.floorToFloorMeters, option.heightMeters,
     option.footprintM2, option.gfaM2, option.farKLB, option.coverageKDBPct, option.openSpaceM2,
-    option.openSpacePct, option.kdhDemonstrated ? 'Yes' : 'Not yet demonstrated', option.frontSetbackMeters, option.sideSetbackMeters, option.rearSetbackMeters, option.existingAssetStrategy || 'Not applicable',
+    option.openSpacePct, option.kdhDemonstrated ? 'Yes' : 'KDH not demonstrated', option.frontSetbackMeters, option.sideSetbackMeters, option.rearSetbackMeters, option.existingAssetStrategy || 'Not applicable',
     option.compliance, option.floorLimitBasis, [
       ...report.assumptions,
       `Front building setback: ${option.frontSetbackMeters} m`,
@@ -654,7 +652,7 @@ function concisePlanningCheck(option: OptionReportRow): string {
   const failed = option.constraints.find((constraint) => constraint.result === 'FAIL');
   if (failed) return `${failed.label} exceeds the supplied limit${failed.exceedance === '—' ? '' : ` by ${failed.exceedance.replace(/^\+/, '')}`}.`;
   if (option.constraints.some((constraint) => constraint.result === 'UNVERIFIED')) return 'Planning limit not yet confirmed.';
-  return 'Within supplied planning controls.';
+  return 'Within supplied study envelope. Statutory status not yet confirmed.';
 }
 
 function conciseOptionWarning(option: OptionReportRow): string {
@@ -674,7 +672,7 @@ function comparisonMetricRows(): ComparisonMetricRow[] {
     { label: 'FAR / KLB', value: (option) => `${option.farKLB.toFixed(2)}x`, height: 18, numeric: true },
     { label: 'Coverage / KDB', value: (option) => `${option.coverageKDBPct.toFixed(1)}%`, height: 18, numeric: true },
     { label: 'Unbuilt site area', value: (option) => `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`, height: 18, numeric: true },
-    { label: 'KDH demonstration', value: (option) => option.kdhDemonstrated ? 'Explicit area entered' : 'Not yet demonstrated', height: 18 },
+    { label: 'KDH demonstration', value: (option) => option.kdhDemonstrated ? 'Explicit area entered' : 'KDH not demonstrated', height: 18 },
     { label: 'Front setback', value: (option) => `${option.frontSetbackMeters} m`, height: 18, numeric: true },
     { label: 'Side setback', value: (option) => `${option.sideSetbackMeters} m each side`, height: 18, numeric: true },
     { label: 'Rear setback', value: (option) => `${option.rearSetbackMeters} m`, height: 18, numeric: true },
@@ -834,7 +832,7 @@ export function generateProjectReportPdf(report: ProjectReport): Uint8Array {
       ['Governing height', `${option.heightMeters.toFixed(1)} m`], ['Footprint', `${option.footprintM2.toLocaleString()} m²`],
       ['Gross floor area', `${option.gfaM2.toLocaleString()} m²`], ['FAR / KLB', `${option.farKLB.toFixed(2)}x`],
       ['Coverage / KDB', `${option.coverageKDBPct.toFixed(1)}%`], ['Unbuilt site area', `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`],
-      ['KDH demonstration', option.kdhDemonstrated ? 'Explicit area entered' : 'Not yet demonstrated'],
+      ['KDH demonstration', option.kdhDemonstrated ? 'Explicit area entered' : 'KDH not demonstrated'],
       ['Front / sides / rear setbacks', `${option.frontSetbackMeters} m / ${option.sideSetbackMeters} m / ${option.rearSetbackMeters} m`],
     ], { fontSize: 7.2, rowMinHeight: 21 });
     detail.text('Planning-limit comparison', 30, 414, 10.5, 'F2', NAVY);

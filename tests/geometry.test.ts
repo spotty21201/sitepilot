@@ -145,7 +145,7 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
   it('performs single authoritative compliance evaluation and never reports green when 32m cap is exceeded', () => {
     const scenarioB = GOLDEN_PROJECT.scenarios[1];
     
-    // 1. Baseline Scenario B (30m height, 8 floors) -> COMPLIANT
+    // 1. Baseline Scenario B (30m height, 8 floors) -> within the supplied study envelope
     const baselineComp = evaluateScenarioCompliance(
       16850,
       scenarioB.assumptionsUsed.setbacks,
@@ -166,7 +166,9 @@ describe('Canonical Geometry Engine & Spatial Containment (PRD Sec 17, 24, & 34)
     );
     expect(baselineComp.isCompliant).toBe(true);
     expect(baselineComp.isGreen).toBe(true);
-    expect(baselineComp.statusPillLabel).toBe('Verified planning compliance · Within supplied controls');
+    expect(baselineComp.assessmentStatus).toBe('WITHIN_SUPPLIED_STUDY_ENVELOPE');
+    expect(baselineComp.statusPillLabel).toBe('Within supplied study envelope · Statutory status not yet confirmed');
+    expect(baselineComp.summaryText).toContain('KDH not demonstrated');
 
     // 2. F2F 4.0m resulting in 33.0m height -> NON-COMPLIANT
     const overheightMetrics = {

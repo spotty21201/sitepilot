@@ -713,7 +713,7 @@ export interface CanonicalComplianceReport {
   isCompliant: boolean;
   status: 'VALID' | 'WARNING_EXCEEDS_CONSTRAINT';
   violationCategory: ComplianceViolationCategory;
-  assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED';
+  assessmentStatus: 'WITHIN_SUPPLIED_STUDY_ENVELOPE' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED';
   statusPillLabel: string;
   isGreen: boolean;
   summaryText: string;
@@ -820,11 +820,9 @@ export function evaluateScenarioCompliance(
 
   // Determine primary violation category and labels
   let violationCategory: ComplianceViolationCategory = 'NONE';
-  let assessmentStatus: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' = 'COMPLIANT';
+  let assessmentStatus: CanonicalComplianceReport['assessmentStatus'] = 'WITHIN_SUPPLIED_STUDY_ENVELOPE';
   
-  let statusPillLabel = hasZoningEvidence
-    ? 'Verified planning compliance · Within supplied controls'
-    : 'Provisional Study · Within Envelope · statutory compliance not verified';
+  let statusPillLabel = 'Within supplied study envelope · Statutory status not yet confirmed';
 
   const verifiedLimitSummary = [
     hasExplicitHeight ? `height (${metrics.totalHeightMeters.toFixed(1)}m ≤ ${STATUTORY_HEIGHT_CAP_METERS.toFixed(1)}m)` : null,
@@ -832,9 +830,7 @@ export function evaluateScenarioCompliance(
     hasExplicitCoverage ? `coverage (${metrics.siteCoveragePercentage.toFixed(1)}% ≤ ${STATUTORY_MAX_KDB_PERCENT.toFixed(1)}%)` : null,
     'setback envelopes',
   ].filter(Boolean).join(', ');
-  let decisionText = hasZoningEvidence
-    ? `Verified planning compliance against the supplied confirmed ${zoningName || 'planning'} controls: ${verifiedLimitSummary}.`
-    : `Provisional Study: Within supplied study limits for the current geometric inputs (height ${metrics.totalHeightMeters.toFixed(1)}m, FAR ${metrics.farKLB.toFixed(2)}x). Statutory municipal zoning compliance is UNKNOWN and not verified because official planning evidence (RDTR / KRK) is absent.`;
+  let decisionText = `Within supplied study envelope for the current geometric inputs (${verifiedLimitSummary}). Statutory status not yet confirmed${hasZoningEvidence ? `; the supplied ${zoningName || 'planning'} source set still requires project-specific professional confirmation.` : ' because official planning evidence (RDTR / KRK) is absent.'}`;
 
   let recommendedAction = hasZoningEvidence
     ? (scenarioName 
@@ -842,11 +838,9 @@ export function evaluateScenarioCompliance(
         : 'Proceed with architectural schematic design and preliminary zoning verification.')
     : 'Obtain official municipal planning certificate (RDTR / KRK) to establish binding statutory FAR, height cap, and setback requirements.';
 
-  let summaryText = hasZoningEvidence
-    ? `Within supplied planning controls; statutory verification remains subject to the confirmed source set.`
-    : 'Within supplied study limits. Statutory compliance is not verified (no RDTR/KRK on file).';
+  let summaryText = 'Within supplied study envelope. Statutory status not yet confirmed.';
   if (options.minKDHPct !== undefined && !kdhDemonstrated) {
-    summaryText += ' KDH not yet demonstrated from explicit landscaped/permeable area.';
+    summaryText += ' KDH not demonstrated from explicit landscaped/permeable area.';
     decisionText += ' KDH cannot be assessed from unbuilt area alone.';
   }
 

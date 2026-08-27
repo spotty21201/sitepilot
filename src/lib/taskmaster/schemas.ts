@@ -138,6 +138,8 @@ export interface TaskmasterProviderUsage {
   location?: string;
   responseIds?: string[];
   providerRequests: number;
+  /** Provider responses accepted at the transport layer; authoritative model-call counter. */
+  successfulProviderRequests: number;
   promptTokens: number;
   candidateTokens: number;
   toolUsePromptTokens: number;

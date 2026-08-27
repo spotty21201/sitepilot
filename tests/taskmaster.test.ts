@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTaskmasterRun, executeTaskmasterRun, approveTaskmasterRun, completeApprovedTaskmasterRun, rejectTaskmasterRun } from '@/lib/taskmaster/runner';
 import { InMemoryTaskmasterRunRepository } from '@/lib/taskmaster/repository';
 import { buildAdkTaskmasterAgent, buildDeterministicTaskmasterPlan } from '@/lib/taskmaster/adk-agent';
@@ -35,6 +35,7 @@ describe('Taskmaster bounded workflow', () => {
   });
 
   it('creates a persisted fallback plan with distinct, deterministically simulated schemes', async () => {
+    const audit = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const repository = new InMemoryTaskmasterRunRepository();
     const run = createTaskmasterRun(input, input.objective, 'idempotency-thamrin');
     await repository.create(run);
@@ -43,13 +44,37 @@ describe('Taskmaster bounded workflow', () => {
     expect(result?.correlationId).toMatch(/^corr-/);
     expect(result?.modelCalled).toBe(false);
     expect(result?.modelCallCount).toBe(0);
-    expect(result?.disclosure).toContain('Study templates');
+    expect(result?.provider).toBe('LOCAL_DEVELOPMENT');
+    expect(result?.model).toBe('Template schemes used');
+    expect(result?.disclosure).toContain('Template schemes used');
+    expect(result?.generation).toMatchObject({
+      modelCalled: false,
+      provider: 'LOCAL_DEVELOPMENT',
+      model: 'Template schemes used',
+    });
+    expect(result?.providerUsage).toMatchObject({
+      providerRequests: 0,
+      successfulProviderRequests: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      toolUsePromptTokens: 0,
+      thoughtTokens: 0,
+      totalTokens: 0,
+    });
     expect(result?.plan?.steps.map((step) => step.tool)).toContain('calculate_buildable_envelope');
     expect(result?.generation?.proposals).toHaveLength(3);
     expect(new Set(result?.generation?.proposals.map((proposal) => proposal.thesis)).size).toBe(3);
     expect(result?.simulations).toHaveLength(3);
     expect(result?.simulations?.every((simulation) => typeof simulation.totalGFA === 'number')).toBe(true);
     expect(result?.simulations?.every((simulation) => simulation.warnings.some((warning) => warning.includes('KDH not demonstrated')))).toBe(true);
+    const events = audit.mock.calls.map(([entry]) => JSON.parse(String(entry)) as Record<string, unknown>);
+    expect(events.find((event) => event.event === 'delivery_started')).toMatchObject({
+      modelCalled: false,
+      provider: 'LOCAL_DEVELOPMENT',
+      model: 'Template schemes used',
+    });
+    expect(events.every((event) => !('prompt' in event) && !('credentials' in event) && !('opportunityDocument' in event))).toBe(true);
+    audit.mockRestore();
   });
 
   it('is idempotent for duplicate delivery and requires approval before completion', async () => {

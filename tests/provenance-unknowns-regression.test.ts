@@ -31,8 +31,8 @@ describe('SitePilot Release 1 — Provenance & Unknown Value Handling Regression
 
     // Scenarios must be flagged as provisional study
     for (const scen of blankCase.scenarios) {
-      expect(scen.complianceReport?.statusPillLabel).toContain('Provisional Study');
-      expect(scen.complianceReport?.decisionText).toContain('Statutory municipal zoning compliance is UNKNOWN');
+      expect(scen.complianceReport?.statusPillLabel).toContain('Within supplied study envelope');
+      expect(scen.complianceReport?.decisionText).toContain('Statutory status not yet confirmed');
     }
   });
 

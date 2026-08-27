@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useReducer, useRef } from 'react';
 import { CreateCaseParams } from '@/lib/storage/case-repository';
 import { X, Building2, ShieldCheck, Sparkles, SlidersHorizontal, Calculator, Layers, FileSpreadsheet } from 'lucide-react';
 import {
@@ -8,6 +8,19 @@ import {
   resolveRectangularParcel,
 } from '@/lib/opportunity/canonical-opportunity';
 import type { SchemePriorities } from '@/lib/schemes/proposal-contract';
+import {
+  clearOpportunityIntakeDraft,
+  createOpportunityIntakeDraft,
+  intakeSourceLabel,
+  loadOpportunityIntakeDraft,
+  parseDraftNumber,
+  persistOpportunityIntakeDraft,
+  reviewOpportunityIntakeDraft,
+  updateIntakeDraftField,
+  updateIntakeDraftPriorities,
+  type IntakeFieldName,
+  type OpportunityIntakeDraft,
+} from '@/lib/opportunity/intake-draft';
 
 interface NewCaseModalProps {
   isOpen: boolean;
@@ -16,6 +29,17 @@ interface NewCaseModalProps {
 }
 
 type IntakeTab = 'SITE' | 'EXISTING' | 'ZONING' | 'VALUATION';
+
+type IntakeDraftAction =
+  | { type: 'FIELD'; field: IntakeFieldName; value: string }
+  | { type: 'PRIORITIES'; value: SchemePriorities }
+  | { type: 'RESET' };
+
+function intakeDraftReducer(draft: OpportunityIntakeDraft, action: IntakeDraftAction): OpportunityIntakeDraft {
+  if (action.type === 'FIELD') return updateIntakeDraftField(draft, action.field, action.value);
+  if (action.type === 'PRIORITIES') return updateIntakeDraftPriorities(draft, action.value);
+  return createOpportunityIntakeDraft();
+}
 
 function formatRupiahHelper(amount: number): string {
   if (isNaN(amount) || amount <= 0) return '';
@@ -30,56 +54,60 @@ function formatRupiahHelper(amount: number): string {
 
 export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProps) {
   const [activeTab, setActiveTab] = useState<IntakeTab>('SITE');
-
-  // Basic Site
-  const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('Jakarta');
-  const [country, setCountry] = useState('Indonesia');
-  const [objective, setObjective] = useState('');
-  const [grossSiteArea, setGrossSiteArea] = useState<string>('');
-  const [frontageLength, setFrontageLength] = useState<string>('');
-  const [lotDepth, setLotDepth] = useState<string>('');
-  const [manualStreetName, setManualStreetName] = useState<string>('');
-
-  // Existing Asset Facts
-  const [existingBuildingGFA, setExistingBuildingGFA] = useState<string>('');
-  const [existingFloors, setExistingFloors] = useState<string>('');
-  const [existingAssetDescription, setExistingAssetDescription] = useState<string>('');
-  const [existingAssetStatus, setExistingAssetStatus] = useState<string>('Operational');
-
-  // Planning & Zoning Controls
-  const [zoneCode, setZoneCode] = useState<string>('KT + K-1');
-  const [zoneName, setZoneName] = useState<string>('Commercial / Hospitality');
-  const [statutoryMaxFAR, setStatutoryMaxFAR] = useState<string>('6.65');
-  const [statutoryMaxCoveragePct, setStatutoryMaxCoveragePct] = useState<string>('55');
-  const [statutoryMinKDHPct, setStatutoryMinKDHPct] = useState<string>('20');
-  const [statutoryMaxHeightMeters, setStatutoryMaxHeightMeters] = useState<string>('');
-  const [setbackFront, setSetbackFront] = useState<string>('');
-  const [setbackRear, setSetbackRear] = useState<string>('');
-  const [setbackSide, setSetbackSide] = useState<string>('');
-
-  // Commercial & Valuation
-  const [askingPriceAmount, setAskingPriceAmount] = useState<string>('');
-  const [askingPriceCurrency, setAskingPriceCurrency] = useState('IDR');
-  const [njopAmount, setNjopAmount] = useState<string>('');
-  const [valuationBasisNotes, setValuationBasisNotes] = useState<string>('');
+  const [draft, dispatchDraft] = useReducer(
+    intakeDraftReducer,
+    undefined,
+    () => loadOpportunityIntakeDraft(typeof window === 'undefined' ? undefined : window.localStorage),
+  );
+  const {
+    name, address, city, country, objective, grossSiteArea, frontageLength, lotDepth, manualStreetName,
+    existingBuildingGFA, existingFloors, existingAssetDescription, existingAssetStatus,
+    zoneCode, zoneName, statutoryMaxFAR, statutoryMaxCoveragePct, statutoryMinKDHPct,
+    landscapedPermeableAreaM2, statutoryMaxHeightMeters, setbackFront, setbackRear, setbackSide,
+    askingPriceAmount, askingPriceCurrency, njopAmount, valuationBasisNotes,
+  } = draft.values;
+  const priorities = draft.priorities;
+  const setField = (field: IntakeFieldName) => (value: string) => dispatchDraft({ type: 'FIELD', field, value });
+  const setName = setField('name');
+  const setAddress = setField('address');
+  const setCity = setField('city');
+  const setCountry = setField('country');
+  const setObjective = setField('objective');
+  const setGrossSiteArea = setField('grossSiteArea');
+  const setFrontageLength = setField('frontageLength');
+  const setLotDepth = setField('lotDepth');
+  const setManualStreetName = setField('manualStreetName');
+  const setExistingBuildingGFA = setField('existingBuildingGFA');
+  const setExistingFloors = setField('existingFloors');
+  const setExistingAssetDescription = setField('existingAssetDescription');
+  const setExistingAssetStatus = setField('existingAssetStatus');
+  const setZoneCode = setField('zoneCode');
+  const setZoneName = setField('zoneName');
+  const setStatutoryMaxFAR = setField('statutoryMaxFAR');
+  const setStatutoryMaxCoveragePct = setField('statutoryMaxCoveragePct');
+  const setStatutoryMinKDHPct = setField('statutoryMinKDHPct');
+  const setLandscapedPermeableAreaM2 = setField('landscapedPermeableAreaM2');
+  const setStatutoryMaxHeightMeters = setField('statutoryMaxHeightMeters');
+  const setSetbackFront = setField('setbackFront');
+  const setSetbackRear = setField('setbackRear');
+  const setSetbackSide = setField('setbackSide');
+  const setAskingPriceAmount = setField('askingPriceAmount');
+  const setAskingPriceCurrency = setField('askingPriceCurrency');
+  const setNjopAmount = setField('njopAmount');
+  const setValuationBasisNotes = setField('valuationBasisNotes');
+  const setPriorities = (updater: SchemePriorities | ((value: SchemePriorities) => SchemePriorities)) => {
+    dispatchDraft({ type: 'PRIORITIES', value: typeof updater === 'function' ? updater(priorities) : updater });
+  };
 
   const [error, setError] = useState<string | null>(null);
   const [showPriorityConfirmation, setShowPriorityConfirmation] = useState(false);
-  const [priorities, setPriorities] = useState<SchemePriorities>({
-    existingBuildingRetention: 'adapt',
-    developmentYield: 'balanced',
-    publicRealm: 'strong',
-    programMix: 'Active retail podium, offices, residences, hotel, shaded public realm and transit-oriented development',
-    phasing: 'phased',
-    planningRiskTolerance: 'medium',
-    investmentHorizon: 'medium',
-    allowNonCompliantStretch: false,
-  });
 
   const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    persistOpportunityIntakeDraft(typeof window === 'undefined' ? undefined : window.localStorage, draft);
+  }, [draft]);
 
   const handleClose = React.useCallback(() => {
     setActiveTab('SITE');
@@ -115,9 +143,9 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
 
   if (!isOpen) return null;
 
-  const parsedArea = grossSiteArea.trim() ? parseFloat(grossSiteArea) : undefined;
-  const parsedFrontagePreview = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
-  const parsedDepthPreview = lotDepth.trim() ? parseFloat(lotDepth) : undefined;
+  const parsedArea = parseDraftNumber(grossSiteArea);
+  const parsedFrontagePreview = parseDraftNumber(frontageLength);
+  const parsedDepthPreview = parseDraftNumber(lotDepth);
   const parcelPreview = resolveRectangularParcel({
     frontageMeters: parsedFrontagePreview,
     depthMeters: parsedDepthPreview,
@@ -133,14 +161,24 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
     : '';
   const effectiveArea = parcelPreview.valid ? parcelPreview.siteAreaM2 : 10000;
   const streetPreview = deriveStreetName(address, manualStreetName);
-  const enteredFAR = statutoryMaxFAR.trim() ? parseFloat(statutoryMaxFAR) : undefined;
-  const parsedFAR = enteredFAR && enteredFAR > 0 ? enteredFAR : 3.20;
+  const enteredFAR = parseDraftNumber(statutoryMaxFAR);
+  const parsedFAR = enteredFAR !== undefined && enteredFAR > 0 ? enteredFAR : 3.20;
   const maxGFA = Math.round(effectiveArea * parsedFAR);
-  const parsedExistingGFA = parseFloat(existingBuildingGFA) || 0;
+  const parsedExistingGFA = parseDraftNumber(existingBuildingGFA) ?? 0;
   const headroomGFA = parsedExistingGFA > 0 ? Math.max(0, maxGFA - parsedExistingGFA) : maxGFA;
-  const parsedPrice = parseFloat(askingPriceAmount) || 0;
+  const parsedPrice = parseDraftNumber(askingPriceAmount) ?? 0;
   const pricePerM2 = parsedPrice > 0 && effectiveArea > 0 ? Math.round(parsedPrice / effectiveArea) : 0;
-  const parsedNJOP = parseFloat(njopAmount) || 0;
+  const parsedNJOP = parseDraftNumber(njopAmount) ?? 0;
+  const intakeReview = reviewOpportunityIntakeDraft(draft);
+  const reviewRows = [
+    { label: 'Site and dimensions', value: `${name || 'Unnamed'} · ${effectiveArea.toLocaleString()} m² · ${parcelPreview.valid ? `${parcelPreview.frontageMeters}m × ${parcelPreview.depthMeters}m` : 'dimensions incomplete'}`, source: draft.sources.grossSiteArea },
+    { label: 'Existing asset', value: parsedExistingGFA > 0 ? `${parsedExistingGFA.toLocaleString()} m²${existingFloors ? ` · ${existingFloors} storeys` : ' · storeys not provided'}` : 'No existing GFA supplied', source: draft.sources.existingBuildingGFA },
+    { label: 'Development intent', value: objective.trim() || 'Default viability and yield study', source: draft.sources.objective },
+    { label: 'Planning inputs', value: `FAR ${statutoryMaxFAR || 'not supplied'} · KDB ${statutoryMaxCoveragePct || 'not supplied'}% · KDH ${statutoryMinKDHPct || 'not supplied'}% · height ${statutoryMaxHeightMeters || 'not supplied'}m`, source: draft.sources.statutoryMaxFAR },
+    { label: 'Setbacks', value: `${setbackFront || 'default'}m front · ${setbackRear || 'default'}m rear · ${setbackSide || 'default'}m sides`, source: draft.sources.setbackFront },
+    { label: 'Commercial assumptions', value: `${askingPriceAmount ? `${askingPriceCurrency} ${parsedPrice.toLocaleString()} asking price` : 'Asking price not supplied'} · ${njopAmount ? `IDR ${parsedNJOP.toLocaleString()} NJOP` : 'NJOP not supplied'}`, source: draft.sources.askingPriceAmount },
+    { label: 'KDH basis', value: parseDraftNumber(landscapedPermeableAreaM2) !== undefined ? `${Number(landscapedPermeableAreaM2).toLocaleString()} m² landscaped/permeable area supplied` : 'KDH not demonstrated — landscaped/permeable basis not supplied', source: draft.sources.landscapedPermeableAreaM2 },
+  ] as const;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,14 +186,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
 
     const trimmedName = name.trim();
     const trimmedAddress = address.trim();
-
-    if (!trimmedName) {
-      setError('Opportunity name is required.');
-      setActiveTab('SITE');
-      return;
-    }
-    if (!trimmedAddress) {
-      setError('Site address is required.');
+    if (intakeReview.criticalErrors.length > 0) {
+      setError(intakeReview.criticalErrors.join(' '));
       setActiveTab('SITE');
       return;
     }
@@ -165,8 +197,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       return;
     }
 
-    const parsedFrontage = frontageLength.trim() ? parseFloat(frontageLength) : undefined;
-    const parsedDepth = lotDepth.trim() ? parseFloat(lotDepth) : undefined;
+    const parsedFrontage = parseDraftNumber(frontageLength);
+    const parsedDepth = parseDraftNumber(lotDepth);
     const resolvedParcel = resolveRectangularParcel({
       frontageMeters: parsedFrontage,
       depthMeters: parsedDepth,
@@ -177,14 +209,15 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       setActiveTab('SITE');
       return;
     }
-    const parsedFloors = existingFloors.trim() ? parseInt(existingFloors, 10) : undefined;
-    const parsedMaxCoverage = statutoryMaxCoveragePct.trim() ? parseFloat(statutoryMaxCoveragePct) : undefined;
-    const parsedMinKDH = statutoryMinKDHPct.trim() ? parseFloat(statutoryMinKDHPct) : undefined;
-    const parsedMaxHeight = statutoryMaxHeightMeters.trim() ? parseFloat(statutoryMaxHeightMeters) : undefined;
-    const parsedFrontSetback = setbackFront.trim() ? parseFloat(setbackFront) : undefined;
-    const parsedRearSetback = setbackRear.trim() ? parseFloat(setbackRear) : undefined;
-    const parsedSideSetback = setbackSide.trim() ? parseFloat(setbackSide) : undefined;
-    const finalNJOP = njopAmount.trim() ? parseFloat(njopAmount) : undefined;
+    const parsedFloors = parseDraftNumber(existingFloors);
+    const parsedMaxCoverage = parseDraftNumber(statutoryMaxCoveragePct);
+    const parsedMinKDH = parseDraftNumber(statutoryMinKDHPct);
+    const parsedLandscapedArea = parseDraftNumber(landscapedPermeableAreaM2);
+    const parsedMaxHeight = parseDraftNumber(statutoryMaxHeightMeters);
+    const parsedFrontSetback = parseDraftNumber(setbackFront);
+    const parsedRearSetback = parseDraftNumber(setbackRear);
+    const parsedSideSetback = parseDraftNumber(setbackSide);
+    const finalNJOP = parseDraftNumber(njopAmount);
 
     onCreateCase({
       name: trimmedName,
@@ -198,8 +231,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       streetName: manualStreetName.trim() || undefined,
       
       // Existing Asset
-      existingBuildingGFA: parsedExistingGFA > 0 ? parsedExistingGFA : undefined,
-      existingFloors: parsedFloors && !isNaN(parsedFloors) && parsedFloors > 0 ? parsedFloors : undefined,
+      existingBuildingGFA: parsedExistingGFA,
+      existingFloors: parsedFloors,
       existingAssetDescription: existingAssetDescription.trim() || undefined,
       existingAssetStatus: existingAssetStatus || 'Operational',
 
@@ -209,6 +242,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       statutoryMaxFAR: enteredFAR,
       statutoryMaxCoveragePct: parsedMaxCoverage,
       statutoryMinKDHPct: parsedMinKDH,
+      landscapedPermeableAreaM2: parsedLandscapedArea,
       statutoryMaxHeightMeters: parsedMaxHeight,
       setbackFront: parsedFrontSetback,
       setbackRear: parsedRearSetback,
@@ -216,13 +250,16 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       setbackSideRight: parsedSideSetback,
 
       // Valuation
-      askingPriceAmount: parsedPrice > 0 ? parsedPrice : undefined,
+      askingPriceAmount: parseDraftNumber(askingPriceAmount),
       askingPriceCurrency,
-      njopAmount: finalNJOP && !isNaN(finalNJOP) ? finalNJOP : undefined,
+      njopAmount: finalNJOP,
       valuationBasisNotes: valuationBasisNotes.trim() || undefined,
-      provenanceType: 'USER_ENTERED_ASSUMPTION'
+      provenanceType: 'USER_ENTERED_ASSUMPTION',
+      intakeValueSources: { ...draft.sources },
     }, priorities);
 
+    clearOpportunityIntakeDraft(typeof window === 'undefined' ? undefined : window.localStorage);
+    dispatchDraft({ type: 'RESET' });
     handleClose();
   };
 
@@ -231,7 +268,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
       role="dialog"
       aria-modal="true"
       aria-labelledby="new-case-modal-title"
-      onClick={onClose}
+      onClick={handleClose}
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4"
     >
       <div
@@ -255,7 +292,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="Close dialog"
             className="dialog-close p-1.5 cursor-pointer"
           >
@@ -319,15 +356,39 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
           )}
 
           {showPriorityConfirmation && (
-            <section className="surface-inspector border border-[var(--spatial-selection)] p-3 space-y-3" aria-label="Confirm development priorities">
+            <section className="surface-inspector border border-[var(--spatial-selection)] p-3 space-y-3" aria-label="Review and confirm opportunity inputs">
               <div>
                 <div className="flex items-center gap-2 text-[var(--status-evidence)] font-semibold">
                   <Sparkles className="w-3.5 h-3.5" />
-                  Confirm priorities before generating three development studies
+                  Review confirmed input snapshot
                 </div>
                 <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-                  SitePilot will use these priorities to request three contrasting studies, then independently check their geometry and planning inputs.
+                  Generation will be bound to this exact snapshot, its study version, and input hash. SitePilot remains authoritative for geometry and planning figures.
                 </p>
+              </div>
+              <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Confirmed opportunity summary">
+                {reviewRows.map((row) => (
+                  <div key={row.label} className="rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
+                    <dt className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{row.label}</dt>
+                    <dd className="mt-0.5 text-[10px] leading-relaxed text-[var(--text-primary)]">{row.value}</dd>
+                    <dd className="mt-1 text-[9px] text-[var(--status-assumed)]">{intakeSourceLabel(row.source)}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="flex flex-wrap gap-1.5" aria-label="Return to edit intake section">
+                {([['SITE', 'Edit site'], ['EXISTING', 'Edit existing asset'], ['ZONING', 'Edit planning'], ['VALUATION', 'Edit commercials']] as const).map(([tab, label]) => (
+                  <button key={tab} type="button" className="button-secondary px-2 py-1 text-[9px]" onClick={() => { setActiveTab(tab); setShowPriorityConfirmation(false); }}>{label}</button>
+                ))}
+              </div>
+              {intakeReview.clarifyingQuestions.length > 0 && (
+                <div className="rounded-[var(--radius-control)] border border-[var(--status-warning)] bg-[var(--status-warning-surface)] p-2 text-[10px] text-[var(--text-secondary)]">
+                  <strong className="text-[var(--status-warning)]">Information still required:</strong>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">{intakeReview.clarifyingQuestions.map((question) => <li key={question}>{question}</li>)}</ul>
+                </div>
+              )}
+              <div className="rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 text-[9px] text-[var(--text-muted)]">
+                <strong className="text-[var(--text-secondary)]">Defaults and provisional assumptions:</strong>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">{intakeReview.assumptions.map((assumption) => <li key={assumption}>{assumption}</li>)}</ul>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <label className="space-y-1"><span className="block font-semibold text-[var(--text-secondary)]">Existing-building approach</span><select className="intake-control w-full px-2 py-1.5" value={priorities.existingBuildingRetention} onChange={(e) => setPriorities((prev) => ({ ...prev, existingBuildingRetention: e.target.value as SchemePriorities['existingBuildingRetention'] }))}><option value="retain">Retain</option><option value="adapt">Adapt</option><option value="partial">Partial retention</option><option value="replace">Replace</option></select></label>
@@ -356,6 +417,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   required
                   placeholder="e.g. Hotel Sofyan Betawi — Acquisition & Expansion"
                   value={name}
+                  aria-label="Opportunity title"
                   onChange={(e) => setName(e.target.value)}
                   className="intake-control w-full px-3 py-2"
                 />
@@ -371,6 +433,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     required
                     placeholder="e.g. Jl. Cut Mutiah No. 9, Menteng"
                     value={address}
+                    aria-label="Site address"
                     onChange={(e) => setAddress(e.target.value)}
                     className="intake-control w-full px-3 py-2"
                   />
@@ -405,7 +468,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     min="0.01"
                     step="0.01"
                     placeholder="e.g. 2014"
-                    value={grossSiteArea || estimatedArea}
+                    value={grossSiteArea}
+                    aria-label="Site area"
                     onChange={(e) => setGrossSiteArea(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -420,6 +484,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="0.01"
                     placeholder="e.g. 40.0"
                     value={frontageLength}
+                    aria-label="Street frontage"
                     onChange={(e) => setFrontageLength(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -433,7 +498,8 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     min="0.01"
                     step="0.01"
                     placeholder="Calculated from area ÷ frontage"
-                    value={lotDepth || estimatedDepth}
+                    value={lotDepth}
+                    aria-label="Lot depth"
                     onChange={(e) => setLotDepth(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -470,6 +536,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   rows={2}
                   placeholder="e.g. Evaluate acquisition yield, operational continuity, and 10,000 m² phased lifestyle expansion feasibility."
                   value={objective}
+                  aria-label="Development intent"
                   onChange={(e) => setObjective(e.target.value)}
                   className="intake-control intake-control--textarea w-full p-2.5 resize-none"
                 />
@@ -501,6 +568,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="1"
                     placeholder="e.g. 3760"
                     value={existingBuildingGFA}
+                    aria-label="Existing building GFA"
                     onChange={(e) => setExistingBuildingGFA(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -515,6 +583,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     max="50"
                     placeholder="e.g. 4 (leave blank if unconfirmed)"
                     value={existingFloors}
+                    aria-label="Existing storeys"
                     onChange={(e) => setExistingFloors(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -582,9 +651,10 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   </label>
                   <input
                     type="number"
-                    min="0.5"
+                    min="0"
                     step="0.05"
                     value={statutoryMaxFAR}
+                    aria-label="Maximum FAR KLB"
                     onChange={(e) => setStatutoryMaxFAR(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -595,10 +665,11 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   </label>
                   <input
                     type="number"
-                    min="10"
+                    min="0"
                     max="100"
                     step="1"
                     value={statutoryMaxCoveragePct}
+                    aria-label="Maximum KDB percent"
                     onChange={(e) => setStatutoryMaxCoveragePct(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -613,6 +684,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     max="100"
                     step="1"
                     value={statutoryMinKDHPct}
+                    aria-label="Minimum KDH percent"
                     onChange={(e) => setStatutoryMinKDHPct(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -621,15 +693,33 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   <label className="block font-semibold text-[var(--text-secondary)]">Max Height (m)</label>
                   <input
                     type="number"
-                    min="3"
+                    min="0"
                     max="300"
                     step="0.5"
                     placeholder="e.g. 48 (leave blank if unknown)"
                     value={statutoryMaxHeightMeters}
+                    aria-label="Maximum height"
                     onChange={(e) => setStatutoryMaxHeightMeters(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-semibold text-[var(--text-secondary)]">
+                  Landscaped / Permeable Area (m²) <span className="text-[var(--text-muted)] font-normal">(required to demonstrate KDH)</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Leave blank when the KDH basis has not been measured"
+                  value={landscapedPermeableAreaM2}
+                  aria-label="Landscaped permeable area"
+                  onChange={(e) => setLandscapedPermeableAreaM2(e.target.value)}
+                  className="intake-control w-full px-3 py-2 font-mono"
+                />
+                <p className="text-[10px] text-[var(--text-muted)]">Unbuilt site area is reported separately and never substituted for landscaped/permeable area.</p>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -641,6 +731,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="0.5"
                     placeholder="e.g. 8 (standard assumption)"
                     value={setbackFront}
+                    aria-label="Front setback"
                     onChange={(e) => setSetbackFront(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -653,6 +744,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="0.5"
                     placeholder="e.g. 5 (standard assumption)"
                     value={setbackRear}
+                    aria-label="Rear setback"
                     onChange={(e) => setSetbackRear(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -665,6 +757,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="0.5"
                     placeholder="e.g. 4 (standard assumption)"
                     value={setbackSide}
+                    aria-label="Side setbacks"
                     onChange={(e) => setSetbackSide(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -687,6 +780,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                     step="any"
                     placeholder="e.g. 125290000000"
                     value={askingPriceAmount}
+                    aria-label="Asking price"
                     onChange={(e) => setAskingPriceAmount(e.target.value)}
                     className="intake-control w-full px-3 py-2 font-mono"
                   />
@@ -720,6 +814,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   step="any"
                   placeholder="e.g. 104405760000"
                   value={njopAmount}
+                  aria-label="NJOP benchmark"
                   onChange={(e) => setNjopAmount(e.target.value)}
                   className="intake-control w-full px-3 py-2 font-mono"
                 />
@@ -814,7 +909,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleClose}
                 className="button-secondary px-4 py-2 text-xs font-semibold cursor-pointer"
               >
                 Cancel
@@ -824,7 +919,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                 className="button-primary px-4 py-2 text-xs font-semibold shadow-md transition-transform active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{showPriorityConfirmation ? 'Confirm priorities & generate 3 schemes' : 'Create Opportunity & Generate 3 Schemes'}</span>
+                <span>{showPriorityConfirmation ? 'Confirm snapshot & create opportunity + 3 schemes' : 'Review Opportunity & 3 Schemes'}</span>
               </button>
             </div>
             <p className="col-span-full text-right text-[9px] text-[var(--text-muted)]">The review will identify the provider and model used. If no model is available, proposals are labelled study templates—not model-generated.</p>

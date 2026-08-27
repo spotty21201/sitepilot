@@ -66,7 +66,8 @@ describe('AI Planning Assessment API & Security Suite', () => {
     const body = await res.json();
 
     expect(body.scenarioId).toBe('scen-002');
-    expect(body.status).toBe('COMPLIANT');
+    expect(body.status).toBe('WITHIN_SUPPLIED_STUDY_ENVELOPE');
+    expect(body.decision).toContain('Statutory status not yet confirmed');
     expect(body.decision).toBeDefined();
     expect(body.supportingEvidence.length).toBeGreaterThan(0);
     expect(body.identifiedRisks.length).toBeGreaterThan(0);

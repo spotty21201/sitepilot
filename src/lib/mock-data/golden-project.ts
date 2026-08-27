@@ -426,7 +426,7 @@ export const GOLDEN_PROJECT: Project = {
         unverifiedAssumptionsCount: 0
       },
       risks: ['Lower development capacity than the denser options', 'Construction and operating assumptions require separate review'],
-      opportunities: ['Within supplied study limits', 'Clear residential frontage and landscape strategy', 'Shorter delivery sequence is a study assumption, not a confirmed programme'],
+      opportunities: ['Within supplied study envelope', 'Clear residential frontage and landscape strategy', 'Shorter delivery sequence is a study assumption, not a confirmed programme'],
       createdAt: '2026-08-14T12:00:00Z',
       updatedAt: '2026-08-16T14:30:00Z'
     },
@@ -434,7 +434,7 @@ export const GOLDEN_PROJECT: Project = {
       id: 'scen-002',
       projectId: 'proj-menteng-001',
       name: 'Scenario B: Mid-Rise Mixed-Use (Preferred)',
-      description: '8-storey residential study atop a 2-storey boutique retail and dining podium. Within supplied study limits; statutory status is not verified.',
+      description: '8-storey residential study atop a 2-storey boutique retail and dining podium. Within supplied study envelope; statutory status not yet confirmed.',
       isPreferred: true,
       status: 'VALID',
       masses: [

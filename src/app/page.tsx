@@ -26,7 +26,7 @@ import { detectScenarioEditClassification } from '@/lib/geometry/engine';
 import { ArrowLeft, Compass, ShieldCheck } from 'lucide-react';
 import { Project, DevelopmentScenario, CaseSummary } from '@/types';
 import type { SchemePriorities } from '@/lib/schemes/proposal-contract';
-import { proposalGenerationInputFromProject } from '@/lib/schemes/proposal-contract';
+import { confirmSchemeGenerationInput, isConfirmedSchemeInputCurrent } from '@/lib/schemes/proposal-contract';
 import type { PublicTaskmasterRun } from '@/lib/taskmaster/schemas';
 import {
   CanonicalSpatialCommand,
@@ -44,8 +44,7 @@ function initializeProjectScenarios(rawProject: Project): Project {
 function markUnacceptedSchemesStale(rawProject: Project): Project {
   const generation = rawProject.schemeGeneration;
   if (!generation || generation.status !== 'READY') return rawProject;
-  const hasUnacceptedProposal = generation.proposals.some((proposal) => proposal.id !== generation.acceptedProposalId);
-  return hasUnacceptedProposal
+  return !isConfirmedSchemeInputCurrent(rawProject)
     ? { ...rawProject, schemeGeneration: { ...generation, status: 'NEEDS_REGENERATION' } }
     : rawProject;
 }
@@ -219,7 +218,10 @@ export default function SitePilotDecisionRoom() {
     setCasesList(listCases());
     if (!priorities) return;
     setSchemeGenerationProgress('Preparing site and planning inputs');
-    const input = proposalGenerationInputFromProject(initialized, priorities);
+    const confirmation = confirmSchemeGenerationInput(initialized, priorities);
+    const input = confirmation.input;
+    const confirmedProject = { ...initialized, confirmedSchemeInput: confirmation.snapshot };
+    replaceProject(confirmedProject);
     const goal = initialized.objective || 'Create and compare three development schemes for this opportunity using the supplied site dimensions, existing assets, planning limits and development intent.';
     void fetch('/api/taskmaster/runs', {
       method: 'POST',

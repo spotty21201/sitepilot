@@ -909,11 +909,11 @@ export function ScenarioControls({
               <div className="flex items-center justify-between pb-1.5 border-b border-[var(--border-subtle)]">
                 <span className="text-[10px] font-semibold text-[var(--text-secondary)]">Executive Verdict</span>
                 <span className={`status-badge !min-h-0 !px-2 !py-0.5 text-[9px] ${
-                  assessment.status === 'COMPLIANT' 
+                  assessment.status === 'WITHIN_SUPPLIED_STUDY_ENVELOPE'
                     ? 'status-badge--verified'
                     : 'status-badge--error'
                 }`}>
-                  {assessment.status === 'COMPLIANT' ? 'Within supplied controls' : 'Planning issues found'}
+                  {assessment.status === 'WITHIN_SUPPLIED_STUDY_ENVELOPE' ? 'Within supplied study envelope' : 'Planning issues found'}
                 </span>
               </div>
 

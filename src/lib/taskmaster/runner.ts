@@ -21,6 +21,22 @@ import { withProviderBudget } from './provider-budget';
 
 const activeExecutions = new Set<string>();
 
+function authoritativeModelMetadata(
+  usage: TaskmasterRunRecord['providerUsage'],
+): Pick<TaskmasterRunRecord, 'provider' | 'model' | 'modelCalled' | 'modelCallCount' | 'disclosure'> {
+  const successfulRequests = usage.successfulProviderRequests || 0;
+  const modelCalled = successfulRequests > 0;
+  const disclosure = taskmasterModelDisclosure(modelCalled);
+  if (!modelCalled) return { ...disclosure, modelCallCount: 0 };
+  return {
+    provider: usage.provider || disclosure.provider,
+    model: usage.actualModel || usage.requestedModel || disclosure.model,
+    modelCalled: true,
+    modelCallCount: successfulRequests,
+    disclosure: disclosure.disclosure,
+  };
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -43,7 +59,7 @@ function progressFor(state: TaskmasterRunState, stepIndex = 0, stepCount = 1): n
 
 export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempotencyKey: string = randomUUID(), forceFallback = false): TaskmasterRunRecord {
   const validated = taskmasterInputSchema.parse(input);
-  const disclosure = taskmasterModelDisclosure();
+  const disclosure = taskmasterModelDisclosure(false);
   const timestamp = now();
   return {
     runId: `tm-${randomUUID()}`,
@@ -69,6 +85,7 @@ export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempo
     forceFallback,
     providerUsage: {
       providerRequests: 0,
+      successfulProviderRequests: 0,
       promptTokens: 0,
       candidateTokens: 0,
       toolUsePromptTokens: 0,
@@ -163,7 +180,14 @@ export async function executeTaskmasterRun(
           if (liveAllowed) throw error;
           plan = buildDeterministicTaskmasterPlan(run.goal);
         }
-        run = { ...run, plan, modelCallCount: modelCalls, currentStep: 'Executing bounded read-only tools', provider: taskmasterModelDisclosure().provider, model: taskmasterModelDisclosure().model, modelCalled: modelCalls > 0, disclosure: taskmasterModelDisclosure().disclosure };
+        const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
+        run = {
+          ...run,
+          plan,
+          currentStep: 'Executing bounded read-only tools',
+          providerUsage,
+          ...authoritativeModelMetadata(providerUsage),
+        };
         run = await repository.save(run);
       }
 
@@ -172,7 +196,8 @@ export async function executeTaskmasterRun(
         modelGeneration = await withProviderBudget(executionRun.runId, repository, () => generateSchemeProposals(executionRun.input));
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
-        run = { ...run, modelCallCount: modelCalls };
+        const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
+        run = { ...run, providerUsage, ...authoritativeModelMetadata(providerUsage) };
         run = await repository.save(run);
       } else if (run.forceFallback) {
         context.proposals = createStudyTemplateProposals(run.input);
@@ -223,12 +248,13 @@ export async function executeTaskmasterRun(
       }
 
       run = transition(run, 'VALIDATING', 'Checking geometry and planning limits');
-      const disclosure = taskmasterModelDisclosure();
+      const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
+      const modelMetadata = authoritativeModelMetadata(providerUsage);
       const generation: SchemeGenerationResult = {
-        provider: (modelGeneration?.provider || disclosure.provider) as SchemeGenerationResult['provider'],
-        model: modelGeneration?.model || disclosure.model,
-        modelCalled: modelGeneration ? modelGeneration.modelCalled : disclosure.modelCalled,
-        disclosure: modelGeneration?.disclosure || disclosure.disclosure,
+        provider: modelMetadata.provider as SchemeGenerationResult['provider'],
+        model: modelMetadata.model,
+        modelCalled: modelMetadata.modelCalled,
+        disclosure: modelMetadata.disclosure,
         generatedAt: now(),
         opportunityId: run.input.opportunityId,
         sourceStudyVersion: run.input.studyVersion,
@@ -238,7 +264,7 @@ export async function executeTaskmasterRun(
         proposals: validation.proposals,
         validation: { valid: true, errors: [] },
       };
-      run = { ...run, generation, simulations: context.simulations, providerUsage: (await repository.getProviderUsage(run.runId)) || run.providerUsage };
+      run = { ...run, generation, simulations: context.simulations, providerUsage, ...modelMetadata };
       run = transition(run, 'AWAITING_APPROVAL', 'Ready for human review');
       run = { ...run, progress: progressFor(run.state) };
       run = await repository.save(run);

@@ -274,6 +274,24 @@ export interface SchemeGenerationMetadata {
   taskmasterState?: string;
 }
 
+export interface ConfirmedSchemeInputSnapshot {
+  confirmedAt: string;
+  opportunityId: string;
+  name: string;
+  address: string;
+  objective: string;
+  siteAreaM2: number;
+  frontageMeters: number;
+  depthMeters: number;
+  landscapedPermeableAreaM2?: number;
+  landscapedPermeablePct?: number;
+  existingAsset?: { gfa: number; floors?: number; description?: string; currentStatus?: string };
+  planningLimits: { maxFAR?: number; maxCoveragePct?: number; minKDHPct?: number; maxHeightMeters?: number; setbacks: Setbacks };
+  studyVersion: string;
+  inputHash: string;
+  priorities: Record<string, string | boolean>;
+}
+
 export type ScenarioEditClassification = 
   | 'BASE_CONCEPT'
   | 'USER_GEOMETRY_EDIT'
@@ -438,6 +456,10 @@ export interface Project {
   scenarios: DevelopmentScenario[];
   /** Optional record of the latest model-assisted (or honest local-template) scheme study. */
   schemeGeneration?: SchemeGenerationMetadata;
+  /** Exact reviewed input used to create the current Taskmaster run. */
+  confirmedSchemeInput?: ConfirmedSchemeInputSnapshot;
+  /** Per-field intake origin so defaults, missing values, and user entries remain distinguishable. */
+  intakeValueSources?: Record<string, 'DEFAULT' | 'USER_PROVIDED' | 'USER_CLEARED' | 'MISSING'>;
   /** Browser-local pointer used to resume/poll a server-side Taskmaster run. */
   taskmasterRunId?: string;
   
@@ -455,7 +477,7 @@ export interface Project {
 export interface PlanningAssessment {
   scenarioId: string;
   scenarioName: string;
-  status: 'COMPLIANT' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
+  status: 'WITHIN_SUPPLIED_STUDY_ENVELOPE' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
   decision: string;
   supportingEvidence: string[];
   identifiedRisks: string[];

@@ -84,12 +84,13 @@ describe('Golden Project Zero-Leakage & Provenance Decoupling Suite', () => {
 
     expect(reportA).toBeDefined();
     // Invariant: Without official zoning certificate, status pill must indicate provisional study
-    expect(reportA?.statusPillLabel).toContain('Provisional Study');
+    expect(reportA?.statusPillLabel).toContain('Within supplied study envelope');
+    expect(reportA?.statusPillLabel).toContain('Statutory status not yet confirmed');
     expect(reportA?.statusPillLabel).not.toContain('Subzone R.9');
 
     // Invariant: Decision text must be honest about unverified statutory compliance
-    expect(reportA?.decisionText).toContain('Provisional Study');
-    expect(reportA?.decisionText).toContain('Statutory municipal zoning compliance is UNKNOWN');
+    expect(reportA?.decisionText).toContain('Within supplied study envelope');
+    expect(reportA?.decisionText).toContain('Statutory status not yet confirmed');
     expect(reportA?.decisionText).not.toContain('Fully conforms to Subzone R.9');
 
     // Invariant: Recommended action must advise obtaining official RDTR/KRK
@@ -245,7 +246,7 @@ describe('Golden Project Zero-Leakage & Provenance Decoupling Suite', () => {
     expect(newMetrics.totalFloors).toBe(6);
     expect(newMetrics.totalHeightMeters).toBe(21.0);
     expect(newMetrics.totalGFA).toBe(initialMass.footprintArea * 6);
-    expect(newReport.statusPillLabel).toContain('Provisional Study');
-    expect(newReport.decisionText).toContain('Provisional Study');
+    expect(newReport.statusPillLabel).toContain('Within supplied study envelope');
+    expect(newReport.decisionText).toContain('Statutory status not yet confirmed');
   });
 });

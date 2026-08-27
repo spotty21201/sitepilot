@@ -225,7 +225,7 @@ export function ScenarioComparisonModal({
                   <div key={scen.id} className="font-mono tabular-nums text-[var(--text-secondary)] text-right sm:text-left">
                     <span className="font-bold text-[var(--status-verified)]">{scen.metrics.openSpacePercentage}%</span>
                     <span className="text-[10px] text-[var(--text-muted)] block">({scen.metrics.openSpaceArea.toLocaleString()} m² unbuilt)</span>
-                    <span className="text-[10px] text-[var(--status-warning)] block">{scen.metrics.kdhDemonstrated ? 'KDH area entered' : 'KDH not yet demonstrated'}</span>
+                    <span className="text-[10px] text-[var(--status-warning)] block">{scen.metrics.kdhDemonstrated ? 'KDH area entered' : 'KDH not demonstrated'}</span>
                   </div>
                 ))}
               </div>

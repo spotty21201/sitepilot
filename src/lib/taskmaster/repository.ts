@@ -66,7 +66,7 @@ export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository 
   }
 
   async reserveProviderRequest(runId: string, limit: number) {
-    const current = this.providerUsage.get(runId) || { providerRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    const current = this.providerUsage.get(runId) || { providerRequests: 0, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
     if (current.providerRequests >= limit) {
       current.budgetStopReason = `Provider request ceiling of ${limit} reached.`;
       this.providerUsage.set(runId, structuredClone(current));
@@ -78,7 +78,7 @@ export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository 
   }
 
   async recordProviderUsage(runId: string, usage: Partial<TaskmasterProviderUsage>) {
-    const current = this.providerUsage.get(runId) || { providerRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    const current = this.providerUsage.get(runId) || { providerRequests: 0, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
     this.providerUsage.set(runId, structuredClone({ ...current, ...usage }));
   }
 

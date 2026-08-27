@@ -78,7 +78,7 @@ export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoo
 
         <section className="surface-inspector p-3" aria-label="Planning limits and options comparison">
           <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-semibold text-[var(--text-primary)]">Options A, B & C</h4><span className="type-metadata">{report.currentOption} selected</span></div>
-          <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace} · {project.site.landscapedPermeableAreaM2 === undefined ? 'KDH not yet demonstrated' : 'landscaped/permeable area entered'}</p>
+          <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace} · {project.site.landscapedPermeableAreaM2 === undefined ? 'KDH not demonstrated' : 'landscaped/permeable area entered'}</p>
           <div className="mt-2 space-y-1.5">
             {report.options.map((option) => (
               <div key={option.scenarioId} className={`grid grid-cols-[52px_minmax(0,1fr)_minmax(0,92px)] items-start gap-2 rounded-[var(--radius-control)] border px-2 py-1.5 text-[10px] ${option.selected ? 'border-[var(--spatial-selection)] bg-[var(--spatial-selection-surface)]' : 'border-[var(--border-subtle)]'}`}>

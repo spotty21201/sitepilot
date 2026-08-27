@@ -377,7 +377,7 @@ export function SpatialCanvas({ site, activeScenario }: SpatialCanvasProps) {
           ) : (
             <div className="flex items-center gap-1.5 bg-emerald-950/90 border border-emerald-600/70 text-emerald-200 px-3 py-1.5 rounded-lg text-xs font-medium backdrop-blur-md shadow">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>{activeScenario.complianceReport?.statusPillLabel ?? 'Within supplied study limits; statutory compliance not verified'}</span>
+              <span>{activeScenario.complianceReport?.statusPillLabel ?? 'Within supplied study envelope · Statutory status not yet confirmed'}</span>
             </div>
           )}
         </div>

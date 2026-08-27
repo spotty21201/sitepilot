@@ -20,6 +20,7 @@ import {
   deriveStreetName,
   resolveRectangularParcel,
 } from '@/lib/opportunity/canonical-opportunity';
+import type { IntakeValueSource } from '@/lib/opportunity/intake-draft';
 
 const STORAGE_VERSION = 'v1';
 const CASES_STORAGE_KEY = `sitepilot_cases_${STORAGE_VERSION}`;
@@ -52,6 +53,7 @@ export interface CreateCaseParams {
   maxCoveragePct?: number;
   statutoryMinKDHPct?: number;    // e.g. 20.0%
   minKDHPct?: number;
+  landscapedPermeableAreaM2?: number;
   statutoryMaxKTBPct?: number;    // e.g. 55.0%
   statutoryMaxHeightMeters?: number; // e.g. 32.0m or 48.0m
   maxHeightMeters?: number;
@@ -72,6 +74,7 @@ export interface CreateCaseParams {
   // Provenance
   provenanceType?: AreaProvenanceType;
   hasZoningEvidence?: boolean;
+  intakeValueSources?: Record<string, IntakeValueSource>;
 }
 
 function isBrowser(): boolean {
@@ -322,15 +325,15 @@ export const resetDemoCase = resetDemo;
 export function createCase(params: CreateCaseParams): Project {
   const caseId = `proj-${Date.now()}`;
   const now = new Date().toISOString();
-  const suppliedArea = params.grossSiteArea && params.grossSiteArea > 0 ? params.grossSiteArea : 10000;
+  const suppliedArea = params.grossSiteArea !== undefined && params.grossSiteArea > 0 ? params.grossSiteArea : 10000;
   const inferredFrontage = Math.max(20, Math.round(Math.sqrt(suppliedArea * 0.75) * 10) / 10);
   const parcelResolution = resolveRectangularParcel({
     frontageMeters: params.frontageLength ?? inferredFrontage,
     depthMeters: params.lotDepth,
     siteAreaM2: suppliedArea,
-    frontageSource: params.frontageLength ? 'USER_ENTERED' : 'LEGACY_INFERRED',
-    depthSource: params.lotDepth ? 'USER_ENTERED' : 'ESTIMATED',
-    areaSource: params.grossSiteArea ? 'USER_ENTERED' : 'LEGACY_INFERRED',
+    frontageSource: params.frontageLength !== undefined ? 'USER_ENTERED' : 'LEGACY_INFERRED',
+    depthSource: params.lotDepth !== undefined ? 'USER_ENTERED' : 'ESTIMATED',
+    areaSource: params.grossSiteArea !== undefined ? 'USER_ENTERED' : 'LEGACY_INFERRED',
   });
   if (!parcelResolution.valid) throw new Error(parcelResolution.errors.join(' '));
   const grossSiteArea = parcelResolution.siteAreaM2;
@@ -352,10 +355,11 @@ export function createCase(params: CreateCaseParams): Project {
   // Planning & Zoning Limits
   const suppliedMaxFAR = params.maxFAR ?? params.statutoryMaxFAR;
   const suppliedMaxCoveragePct = params.maxCoveragePct ?? params.statutoryMaxCoveragePct;
+  const suppliedMinKDHPct = params.minKDHPct ?? params.statutoryMinKDHPct;
   const suppliedMaxHeightMeters = params.maxHeightMeters ?? params.statutoryMaxHeightMeters;
   const maxFAR = suppliedMaxFAR ?? 3.20;
   const maxCoveragePct = suppliedMaxCoveragePct ?? 55.0;
-  const minKDHPct = params.minKDHPct ?? params.statutoryMinKDHPct ?? 20.0;
+  const minKDHPct = suppliedMinKDHPct ?? 20.0;
   const floorStudy = deriveScenarioFloorLimit({
     maximumHeightMeters: suppliedMaxHeightMeters,
     maximumFAR: suppliedMaxFAR,
@@ -368,7 +372,7 @@ export function createCase(params: CreateCaseParams): Project {
   const verifiedPlanningBasis = Boolean(params.hasZoningEvidence && suppliedMaxFAR);
   const densityBasisLabel = verifiedPlanningBasis ? 'verified planning limit' : 'working planning-study assumption';
   const rawExistingGFA = params.existingGFA ?? params.existingBuildingGFA;
-  const existingGFA = rawExistingGFA ? Math.round(rawExistingGFA) : undefined;
+  const existingGFA = rawExistingGFA !== undefined && rawExistingGFA > 0 ? Math.round(rawExistingGFA) : undefined;
   const isFloorsAssumed = params.existingFloors === undefined;
   const existingFloors = params.existingFloors ?? 4;
   const expansionHeadroomGFA = existingGFA ? Math.max(0, maxGFA - existingGFA) : undefined;
@@ -438,7 +442,7 @@ export function createCase(params: CreateCaseParams): Project {
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
     maxFAR: suppliedMaxFAR,
     maxCoveragePct: suppliedMaxCoveragePct,
-    minKDHPct,
+    minKDHPct: suppliedMinKDHPct,
     maxHeightMeters,
     maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
@@ -574,7 +578,7 @@ export function createCase(params: CreateCaseParams): Project {
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
     maxFAR: suppliedMaxFAR,
     maxCoveragePct: suppliedMaxCoveragePct,
-    minKDHPct: params.minKDHPct ?? params.statutoryMinKDHPct,
+    minKDHPct: suppliedMinKDHPct,
     maxHeightMeters,
     maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
@@ -650,7 +654,7 @@ export function createCase(params: CreateCaseParams): Project {
     hasZoningEvidence: Boolean(params.hasZoningEvidence),
     maxFAR: suppliedMaxFAR,
     maxCoveragePct: suppliedMaxCoveragePct,
-    minKDHPct: params.minKDHPct ?? params.statutoryMinKDHPct,
+    minKDHPct: suppliedMinKDHPct,
     maxHeightMeters,
     maxFloors: floorStudy.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorStudy.floorCount ?? undefined : undefined,
     frontageLength: standardFrontage
@@ -718,7 +722,7 @@ export function createCase(params: CreateCaseParams): Project {
     });
   }
 
-  if (params.statutoryMaxFAR || params.maxFAR) {
+  if (params.statutoryMaxFAR !== undefined || params.maxFAR !== undefined) {
     findings.push({
       id: `fnd-${caseId}-03`,
       projectId: caseId,
@@ -735,13 +739,13 @@ export function createCase(params: CreateCaseParams): Project {
     });
   }
 
-  if (params.statutoryMinKDHPct || params.minKDHPct) {
+  if (params.statutoryMinKDHPct !== undefined || params.minKDHPct !== undefined) {
     findings.push({
       id: `fnd-${caseId}-04`,
       projectId: caseId,
       sourceId: 'src-intake-01',
       sourceName: 'Planning Guideline Assumption',
-      statement: `A ${minKDHPct}% KDH planning requirement was provided, but landscaped/permeable area has not been entered; KDH is not yet demonstrated.`,
+      statement: `A ${minKDHPct}% KDH planning requirement was provided, but landscaped/permeable area has not been entered; KDH is not demonstrated.`,
       category: 'ENVIRONMENTAL_TOPOGRAPHY',
       classification: 'ASSUMPTION',
       confidence: 'LOW',
@@ -750,7 +754,7 @@ export function createCase(params: CreateCaseParams): Project {
     });
   }
 
-  if (params.askingPriceAmount) {
+  if (params.askingPriceAmount !== undefined) {
     const derivedPricePerM2 = Math.round(params.askingPriceAmount / grossSiteArea);
     findings.push({
       id: `fnd-${caseId}-05`,
@@ -766,7 +770,7 @@ export function createCase(params: CreateCaseParams): Project {
     });
   }
 
-  if (params.njopAmount) {
+  if (params.njopAmount !== undefined) {
     findings.push({
       id: `fnd-${caseId}-06`,
       projectId: caseId,
@@ -781,45 +785,51 @@ export function createCase(params: CreateCaseParams): Project {
     });
   }
 
+  const intakeText = (key: string, value: string | undefined, fallback: string): string => {
+    if (params.intakeValueSources?.[key] === 'USER_CLEARED') return '';
+    return value?.trim() || fallback;
+  };
+  const askingPriceAmount = params.askingPriceAmount;
+  const hasAskingPrice = askingPriceAmount !== undefined;
   const newProject: Project = {
     id: caseId,
     name: params.name.trim(),
     isTemplate: false,
-    objective: params.objective?.trim() || 'Evaluate site viability, development yield, and zoning envelope.',
+    objective: intakeText('objective', params.objective, 'Evaluate site viability, development yield, and zoning envelope.'),
     location: {
       address: params.address.trim(),
-      city: params.city?.trim() || 'Jakarta',
-      country: params.country?.trim() || 'Indonesia',
+      city: intakeText('city', params.city, 'Jakarta'),
+      country: intakeText('country', params.country, 'Indonesia'),
       center: { lat: -6.2088, lng: 106.8456 }
     },
-    askingPrice: params.askingPriceAmount ? {
-      amount: params.askingPriceAmount,
+    askingPrice: hasAskingPrice ? {
+      amount: askingPriceAmount!,
       currency: params.askingPriceCurrency || 'IDR',
-      pricePerM2: Math.round(params.askingPriceAmount / grossSiteArea)
+      pricePerM2: Math.round(askingPriceAmount! / grossSiteArea)
     } : undefined,
     existingAsset: existingGFA ? {
       gfa: existingGFA,
       floors: isFloorsAssumed ? undefined : existingFloors,
       isFloorsAssumed,
-      description: params.existingAssetDescription || 'Operational Structure',
-      currentStatus: params.existingAssetStatus || 'Operational'
+      description: intakeText('existingAssetDescription', params.existingAssetDescription, 'Operational Structure'),
+      currentStatus: intakeText('existingAssetStatus', params.existingAssetStatus, 'Operational')
     } : undefined,
     zoningLimits: {
-      zoneCode: params.zoneCode || 'K.1',
-      zoneName: params.zoneName || 'Perkantoran, Perdagangan dan Jasa',
+      zoneCode: intakeText('zoneCode', params.zoneCode, 'K.1'),
+      zoneName: intakeText('zoneName', params.zoneName, 'Perkantoran, Perdagangan dan Jasa'),
       maxFAR: suppliedMaxFAR,
       maxCoveragePct: suppliedMaxCoveragePct,
-      minKDHPct,
-      maxKTBPct: params.statutoryMaxKTBPct || 55.0,
+      minKDHPct: suppliedMinKDHPct,
+      maxKTBPct: params.statutoryMaxKTBPct ?? 55.0,
       maxHeightMeters,
       maxFloors: params.maxFloors ?? params.statutoryMaxFloors,
       setbacks: defaultSetbacks
     },
-    valuation: params.askingPriceAmount ? {
-      askingPriceAmount: params.askingPriceAmount,
+    valuation: hasAskingPrice ? {
+      askingPriceAmount: askingPriceAmount!,
       askingPriceCurrency: params.askingPriceCurrency || 'IDR',
       njopAmount: params.njopAmount,
-      pricePerM2: Math.round(params.askingPriceAmount / grossSiteArea),
+      pricePerM2: Math.round(askingPriceAmount! / grossSiteArea),
       valuationBasisNotes: params.valuationBasisNotes
     } : undefined,
     expansionHeadroomGFA,
@@ -848,6 +858,7 @@ export function createCase(params: CreateCaseParams): Project {
       dimensionProvenance: parcelResolution.provenance,
       projectName: params.name.trim(),
       hasZoningEvidence: Boolean(params.hasZoningEvidence),
+      landscapedPermeableAreaM2: params.landscapedPermeableAreaM2,
       setbacks: defaultSetbacks,
       boundary: {
         type: 'Polygon',
@@ -914,6 +925,7 @@ export function createCase(params: CreateCaseParams): Project {
       }
     ],
     scenarios: [scenarioA, scenarioB, scenarioC],
+    intakeValueSources: params.intakeValueSources,
     executiveSummary: {
       topOpportunities: [
         `Opportunity captured: ${params.name.trim()} (${grossSiteArea.toLocaleString()} m² site area).`,
@@ -923,7 +935,7 @@ export function createCase(params: CreateCaseParams): Project {
       ],
       criticalRisks: [
         'Site area, setbacks, and allowable yields are provisional assumptions requiring verification.',
-        params.askingPriceAmount ? `Acquisition price of Rp ${(params.askingPriceAmount / 1e9).toFixed(1)}B requires formal yield validation.` : 'Commercial terms unverified.'
+        params.askingPriceAmount !== undefined ? `Acquisition price of Rp ${(params.askingPriceAmount / 1e9).toFixed(1)}B requires formal yield validation.` : 'Commercial terms unverified.'
       ],
       criticalUnknowns: [
         'Legal land title certificate and official cadastral boundary verification pending.',

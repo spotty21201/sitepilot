@@ -23,7 +23,7 @@ function providerStatus(generation: SchemeGenerationMetadata) {
 function planningStatus(scenario?: DevelopmentScenario) {
   if (!scenario) return 'Planning check pending';
   return scenario.complianceReport?.statusPillLabel
-    || (scenario.status === 'VALID' ? 'Within supplied study limits' : 'Outside supplied study limits');
+    || (scenario.status === 'VALID' ? 'Within supplied study envelope' : 'Outside supplied study envelope');
 }
 
 function selectedLabel(generation: SchemeGenerationMetadata, selectedScenario?: DevelopmentScenario) {
@@ -139,7 +139,7 @@ export function SchemeGenerationReview({
                 <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">Review the positioning, assumptions, and planning check for each study before accepting one for editing.</p>
                 <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-[var(--text-muted)]">
                   <span>{providerStatus(generation)}</span>
-                  <span>{generation.modelCalled ? generation.model : 'No model configured for this run'}</span>
+                  <span>{generation.modelCalled ? generation.model : 'Model not called · template schemes used'}</span>
                   <span>Study version {generation.sourceStudyVersion.replace(/^Study version\s*/i, '')}</span>
                 </div>
               </div>

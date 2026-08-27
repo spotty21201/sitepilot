@@ -24,6 +24,7 @@ describe('Taskmaster provider transport budget', () => {
     await expect(withProviderBudget('run-budget', repository, async () => fetch('https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/gemini-3.7-flash:generateContent'))).rejects.toBeInstanceOf(ProviderBudgetExceeded);
     const usage = await repository.getProviderUsage('run-budget');
     expect(usage?.providerRequests).toBe(2);
+    expect(usage?.successfulProviderRequests).toBe(2);
     expect(usage?.totalTokens).toBe(39);
     expect(usage?.actualModel).toBe('gemini-3.7-flash-001');
     expect(usage?.responseIds).toEqual(['resp-1', 'resp-2']);

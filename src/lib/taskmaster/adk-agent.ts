@@ -50,14 +50,14 @@ export function buildDeterministicTaskmasterPlan(goal: string): TaskmasterPlan {
   });
 }
 
-export function taskmasterModelDisclosure(): { provider: string; model: string; modelCalled: boolean; disclosure: string } {
+export function taskmasterModelDisclosure(modelCalled = false): { provider: string; model: string; modelCalled: boolean; disclosure: string } {
   const config = getAiConfig();
-  if (config.provider === 'LOCAL_DEVELOPMENT' || process.env.TASKMASTER_ALLOW_LIVE_MODEL !== 'true') {
+  if (!modelCalled) {
     return {
       provider: 'LOCAL_DEVELOPMENT',
-      model: 'Not called in local development',
+      model: 'Template schemes used',
       modelCalled: false,
-      disclosure: 'No live ADK/Gemini call was authorized in this environment. Study templates—not model-generated.',
+      disclosure: 'Template schemes used. No model request was made; SitePilot calculated and validated all planning figures deterministically.',
     };
   }
   return {
