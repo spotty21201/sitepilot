@@ -7,10 +7,14 @@ describe('Taskmaster provider transport budget', () => {
     vi.unstubAllGlobals();
     delete process.env.TASKMASTER_MAX_PROVIDER_REQUESTS;
     delete process.env.TASKMASTER_MAX_TOTAL_TOKENS;
+    delete process.env.GOOGLE_CLOUD_LOCATION;
+    delete process.env.VERTEX_AI_LOCATION;
   });
 
   it('counts every Vertex transport request and persists usage metadata', async () => {
     process.env.TASKMASTER_MAX_PROVIDER_REQUESTS = '2';
+    process.env.GOOGLE_CLOUD_LOCATION = 'asia-southeast2';
+    process.env.VERTEX_AI_LOCATION = 'global';
     const repository = new InMemoryTaskmasterRunRepository();
     const responses = [
       { responseId: 'resp-1', modelVersion: 'gemini-3.7-flash-001', usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 8, totalTokenCount: 18 } },
@@ -27,6 +31,7 @@ describe('Taskmaster provider transport budget', () => {
     expect(usage?.successfulProviderRequests).toBe(2);
     expect(usage?.totalTokens).toBe(39);
     expect(usage?.actualModel).toBe('gemini-3.7-flash-001');
+    expect(usage?.location).toBe('global');
     expect(usage?.responseIds).toEqual(['resp-1', 'resp-2']);
   });
 });

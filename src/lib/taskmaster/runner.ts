@@ -293,8 +293,9 @@ export async function executeTaskmasterRun(
       const retryable = run.retryCount < Number(process.env.TASKMASTER_MAX_RETRIES || 2);
       const nextState: TaskmasterRunState = retryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL';
       if (allowedTaskmasterTransitions[run.state].includes(nextState)) {
+        const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
         run = transition(run, nextState, 'Taskmaster execution failed');
-        run = { ...run, error: message, progress: 0 };
+        run = { ...run, error: message, progress: 0, providerUsage, ...authoritativeModelMetadata(providerUsage) };
         run = await repository.save(run);
         auditTaskmaster(run, 'execution_failed');
       }

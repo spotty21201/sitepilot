@@ -89,6 +89,37 @@ describe('Taskmaster bounded workflow', () => {
     await expect(completeApprovedTaskmasterRun(run.runId, input.studyVersion, repository)).rejects.toThrow(/not awaiting application/i);
   });
 
+  it('copies provider-attempt metadata into a failed run without claiming model use', async () => {
+    const repository = new InMemoryTaskmasterRunRepository();
+    const run = createTaskmasterRun(input, input.objective, 'idempotency-provider-failure', true);
+    await repository.create(run);
+    await repository.recordProviderUsage(run.runId, {
+      providerRequests: 1,
+      successfulProviderRequests: 0,
+      provider: 'VERTEX_AI',
+      requestedModel: 'gemini-3.7-flash',
+      location: 'global',
+    });
+    process.env.TASKMASTER_MAX_TOOL_CALLS = '1';
+    try {
+      const failed = await executeTaskmasterRun(run.runId, repository, 'delivery-provider-failure');
+      expect(failed).toMatchObject({
+        state: 'FAILED_RETRYABLE',
+        modelCalled: false,
+        modelCallCount: 0,
+        providerUsage: {
+          providerRequests: 1,
+          successfulProviderRequests: 0,
+          provider: 'VERTEX_AI',
+          requestedModel: 'gemini-3.7-flash',
+          location: 'global',
+        },
+      });
+    } finally {
+      delete process.env.TASKMASTER_MAX_TOOL_CALLS;
+    }
+  });
+
   it('blocks stale approval and prevents double approval', async () => {
     const repository = new InMemoryTaskmasterRunRepository();
     const run = createTaskmasterRun(input, input.objective, 'idempotency-stale');
