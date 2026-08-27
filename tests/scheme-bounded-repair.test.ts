@@ -10,6 +10,7 @@ vi.mock('@/lib/ai/gemini', () => ({
 }));
 
 import { createStudyTemplateProposals, generateSchemeProposals, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
+import { ProviderAdapterError } from '@/lib/taskmaster/provider-adapter';
 
 const input: SchemeGenerationInput = {
   opportunityId: 'repair-case', name: 'Repair case', address: 'Synthetic address', objective: 'Three distinct strategies',
@@ -43,9 +44,28 @@ describe('bounded proposal repair', () => {
     expect(result.qualityGate).toEqual({ distinctnessPassed: true, repairAttempted: true, repairSucceeded: true });
   });
 
+  it('uses the installed SDK structured-output contract and records schema acceptance', async () => {
+    provider.generateContent.mockResolvedValue({ text: JSON.stringify(createStudyTemplateProposals(input)) });
+    const onSchemaAccepted = vi.fn();
+    await generateSchemeProposals(input, { onSchemaAccepted });
+    expect(provider.generateContent).toHaveBeenCalledTimes(1);
+    const request = provider.generateContent.mock.calls[0][0];
+    expect(request.config.responseMimeType).toBe('application/json');
+    expect(request.config.responseSchema).toMatchObject({ type: 'ARRAY' });
+    expect(request.config).not.toHaveProperty('responseJsonSchema');
+    expect(onSchemaAccepted).toHaveBeenCalledTimes(1);
+  });
+
   it('stops after the one repair when structured output remains invalid', async () => {
     provider.generateContent.mockResolvedValue({ text: '[]' });
     await expect(generateSchemeProposals(input)).rejects.toThrow();
     expect(provider.generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not silently fall back when the provider fails before usable output', async () => {
+    provider.generateContent.mockRejectedValue(new ProviderAdapterError('EMPTY_RESPONSE_BODY', { runId: 'tm-live-failure', correlationId: 'corr-live-failure' }));
+    await expect(generateSchemeProposals(input, { identifiers: { runId: 'tm-live-failure', correlationId: 'corr-live-failure' } }))
+      .rejects.toMatchObject({ code: 'EMPTY_RESPONSE_BODY' });
+    expect(provider.generateContent).toHaveBeenCalledTimes(1);
   });
 });

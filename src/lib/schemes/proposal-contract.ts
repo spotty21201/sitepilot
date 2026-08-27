@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ConfirmedSchemeInputSnapshot, ExistingAssetStrategy, Project, SchemeProposal } from '@/types';
 import { getAiConfig } from '@/lib/ai/config';
 import { createAiClient } from '@/lib/ai/gemini';
+import { ProviderAdapterError, isRepairEligible, parseStructuredCandidate, type ProviderRunIdentifiers } from '@/lib/taskmaster/provider-adapter';
 
 export const schemePrioritiesSchema = z.object({
   existingBuildingRetention: z.enum(['retain', 'adapt', 'partial', 'replace']),
@@ -415,17 +416,13 @@ function modelPrompt(input: SchemeGenerationInput): string {
   return `Return exactly three concise professional urban-design strategy documents for ${input.name} at ${input.address}. Do not return chain-of-thought and do not claim calculated, statutory, approved or authoritative figures. Use these confirmed user priorities: ${JSON.stringify(input.priorities)}. Site: ${input.siteAreaM2} m², ${input.frontageMeters} m frontage, ${input.depthMeters} m depth. Existing asset: ${JSON.stringify(input.existingAsset || null)}. Planning inputs: ${JSON.stringify(input.planningLimits)}. Supplied study envelope: maximum GFA ${maxGfa.toFixed(1)} m², maximum footprint ${maxCoverage}%, height input ${height}, and setbacks ${JSON.stringify(input.planningLimits.setbacks)}. Explore CONSERVATIVE retention/continuity, BALANCED phased development, and BOUNDARY comprehensive higher-yield lenses, adapted to the actual brief rather than fixed narratives. For each, state exact existing GFA retained and removed; these must sum to the entered existing asset and retention/adaptation must keep it exactly. Include targetGFA as a recommendation only, program GFA summing to that target, program shares totaling 100%, the exact supplied setbacks, massing intent, public realm/street interface, pedestrian/vehicle/loading/servicing, phasing and operational continuity, commercial premise, response to supplied limits, major trade-offs, assumptions and information still required. Options must differ meaningfully in at least two strategy areas. SitePilot will ignore any attempted achieved result and independently calculate geometry, achieved GFA, variance and planning checks.`;
 }
 
-function parseProposalResponse(text: string | undefined): unknown {
-  try {
-    return JSON.parse(text || '[]');
-  } catch {
-    return [];
-  }
-}
-
 export async function generateSchemeProposals(
   input: SchemeGenerationInput,
-  options: { onRepairAttempt?: () => void | Promise<void> } = {},
+  options: {
+    identifiers?: ProviderRunIdentifiers;
+    onRepairAttempt?: () => void | Promise<void>;
+    onSchemaAccepted?: () => void | Promise<void>;
+  } = {},
 ): Promise<SchemeGenerationResult> {
   const config = getAiConfig();
   const generatedAt = new Date().toISOString();
@@ -475,20 +472,30 @@ export async function generateSchemeProposals(
       ...(Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
       responseSchema,
     };
+    const identifiers = options.identifiers || { runId: 'not-recorded', correlationId: 'not-recorded' };
+    const validateCandidate = (text: string | undefined) => {
+      const candidate = parseStructuredCandidate(text, z.unknown(), identifiers);
+      const checked = validateSchemeProposals(candidate, input);
+      if (!checked.valid) throw new ProviderAdapterError('SCHEMA_INVALID_OUTPUT', identifiers);
+      return checked;
+    };
     let repairAttempted = false;
     let response = await ai.models.generateContent({ model, contents: modelPrompt(input), config: requestConfig });
-    let validation = validateSchemeProposals(parseProposalResponse(response.text), input);
-    if (!validation.valid && process.env.TASKMASTER_ALLOW_MODEL_REPAIR === 'true') {
+    let validation;
+    try {
+      validation = validateCandidate(response.text);
+    } catch (error) {
+      if (process.env.TASKMASTER_ALLOW_MODEL_REPAIR !== 'true' || !isRepairEligible(error)) throw error;
       repairAttempted = true;
       await options.onRepairAttempt?.();
       response = await ai.models.generateContent({
         model,
-        contents: `Repair this invalid SitePilot proposal set once. Return only a schema-valid JSON array of exactly three materially different proposals. Do not add calculated planning totals. Validation errors: ${validation.errors.join('; ')}. Candidate: ${response.text || '[]'}`,
+        contents: `Repair this invalid SitePilot proposal set once. Return only a schema-valid JSON array of exactly three materially different proposals. Do not add calculated planning totals. Failure class: ${error.code}. Candidate: ${response.text || '[]'}`,
         config: requestConfig,
       });
-      validation = validateSchemeProposals(parseProposalResponse(response.text), input);
+      validation = validateCandidate(response.text);
     }
-    if (!validation.valid) throw new Error(validation.errors.join(' '));
+    await options.onSchemaAccepted?.();
     return {
       provider: provider as SchemeGenerationResult['provider'], model, modelCalled: true,
       disclosure: `${provider} generated structured proposals with ${model}. SitePilot independently checks geometry and planning limits.`,

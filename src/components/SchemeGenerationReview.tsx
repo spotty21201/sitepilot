@@ -17,7 +17,10 @@ interface SchemeGenerationReviewProps {
 }
 
 function providerStatus(generation: SchemeGenerationMetadata) {
-  return generation.modelCalled ? 'Live Gemini proposals' : 'Template fallback';
+  if (generation.providerUsage?.outcome === 'VALIDATED_STRATEGIES') return 'Live Gemini proposals';
+  if (generation.providerUsage?.outcome === 'REQUEST_FAILED') return 'Gemini request failed';
+  if (generation.providerUsage?.outcome === 'OUTPUT_INVALID') return 'Invalid Gemini proposal';
+  return 'Template fallback';
 }
 
 function planningStatus(scenario?: DevelopmentScenario) {
@@ -160,12 +163,13 @@ export function SchemeGenerationReview({
                 <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">How these schemes were prepared</summary>
                 <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 leading-relaxed sm:grid-cols-2">
                   <div><dt className="inline font-semibold">Source: </dt><dd className="inline">{providerStatus(generation)} · {generation.provider}</dd></div>
+                  <div><dt className="inline font-semibold">Disclosure: </dt><dd className="inline">{generation.disclosure}</dd></div>
                   {generation.modelCalled && <div><dt className="inline font-semibold">Model: </dt><dd className="inline">{generation.model}</dd></div>}
                   <div><dt className="inline font-semibold">Run / correlation: </dt><dd className="inline font-mono break-all">{generation.taskmasterRunId || 'Not recorded'} / {generation.correlationId || 'Not recorded'}</dd></div>
                   <div><dt className="inline font-semibold">Confirmed input: </dt><dd className="inline font-mono break-all">{generation.inputHash}</dd></div>
                   <div><dt className="inline font-semibold">Validation: </dt><dd className="inline">{generation.preparation?.validationResult || (generation.validation.valid ? 'PASSED' : 'FAILED')} · distinctness {generation.preparation?.distinctnessResult || 'not recorded'}</dd></div>
                   <div><dt className="inline font-semibold">Repair: </dt><dd className="inline">{generation.preparation?.repairAttempted ? (generation.preparation.repairSucceeded ? 'One bounded repair passed' : 'One bounded repair failed') : 'Not required'}</dd></div>
-                  <div><dt className="inline font-semibold">Provider usage: </dt><dd className="inline">{generation.providerUsage?.successfulProviderRequests ?? 0} model calls · {generation.providerUsage?.providerRequests ?? 0} provider requests · {(generation.providerUsage?.totalTokens ?? 0).toLocaleString()} tokens{generation.providerUsage?.location ? ` · ${generation.providerUsage.location}` : ''}{generation.providerUsage?.estimatedCostUsd !== undefined ? ` · approximately $${generation.providerUsage.estimatedCostUsd.toFixed(6)}` : ''}</dd></div>
+                  <div><dt className="inline font-semibold">Provider usage: </dt><dd className="inline">{generation.providerUsage?.providerRequests ?? 0} attempted · {generation.providerUsage?.providerResponses ?? 0} responses · {generation.providerUsage?.modelOutputsReceived ?? 0} outputs · {generation.providerUsage?.modelOutputsSchemaAccepted ?? 0} schema accepted · {generation.providerUsage?.repairRequests ?? 0} repairs · {(generation.providerUsage?.totalTokens ?? 0).toLocaleString()} tokens{generation.providerUsage?.location ? ` · ${generation.providerUsage.location}` : ''}{generation.providerUsage?.estimatedCostUsd !== undefined ? ` · approximately $${generation.providerUsage.estimatedCostUsd.toFixed(6)}` : ''}</dd></div>
                   <div className="sm:col-span-2"><dt className="inline font-semibold">Inputs and assumptions used: </dt><dd className="inline">{generation.assumptions.join(' · ') || 'No additional assumptions recorded'}</dd></div>
                   <div className="sm:col-span-2"><dt className="inline font-semibold">Information still required: </dt><dd className="inline">{generation.preparation?.informationStillRequired.join(' · ') || 'None recorded'}</dd></div>
                 </dl>

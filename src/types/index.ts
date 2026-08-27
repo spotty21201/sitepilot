@@ -286,6 +286,12 @@ export interface SchemeGenerationMetadata {
   providerUsage?: {
     providerRequests: number;
     successfulProviderRequests: number;
+    providerResponses: number;
+    modelOutputsReceived: number;
+    modelOutputsSchemaAccepted: number;
+    repairRequests: number;
+    outcome: 'NO_REQUEST' | 'REQUEST_FAILED' | 'OUTPUT_INVALID' | 'VALIDATED_STRATEGIES';
+    failureCode?: string | null;
     promptTokens: number;
     candidateTokens: number;
     toolUsePromptTokens: number;

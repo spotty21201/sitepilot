@@ -1,6 +1,26 @@
 import { createHash } from 'node:crypto';
 import type { TaskmasterProviderUsage, TaskmasterRunRecord } from './schemas';
 
+function emptyProviderUsage(): TaskmasterProviderUsage {
+  return {
+    providerRequests: 0,
+    successfulProviderRequests: 0,
+    providerResponses: 0,
+    modelOutputsReceived: 0,
+    modelOutputsSchemaAccepted: 0,
+    repairRequests: 0,
+    outcome: 'NO_REQUEST',
+    promptTokens: 0,
+    candidateTokens: 0,
+    toolUsePromptTokens: 0,
+    thoughtTokens: 0,
+    totalTokens: 0,
+    modelLatencyMs: 0,
+    repairCount: 0,
+    costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1',
+  };
+}
+
 function idempotencyKeyHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');
 }
@@ -66,7 +86,7 @@ export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository 
   }
 
   async reserveProviderRequest(runId: string, limit: number) {
-    const current = this.providerUsage.get(runId) || { providerRequests: 0, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    const current = this.providerUsage.get(runId) || emptyProviderUsage();
     if (current.providerRequests >= limit) {
       current.budgetStopReason = `Provider request ceiling of ${limit} reached.`;
       this.providerUsage.set(runId, structuredClone(current));
@@ -78,7 +98,7 @@ export class InMemoryTaskmasterRunRepository implements TaskmasterRunRepository 
   }
 
   async recordProviderUsage(runId: string, usage: Partial<TaskmasterProviderUsage>) {
-    const current = this.providerUsage.get(runId) || { providerRequests: 0, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' };
+    const current = this.providerUsage.get(runId) || emptyProviderUsage();
     this.providerUsage.set(runId, structuredClone({ ...current, ...usage }));
   }
 

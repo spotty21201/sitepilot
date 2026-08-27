@@ -139,8 +139,15 @@ export interface TaskmasterProviderUsage {
   location?: string;
   responseIds?: string[];
   providerRequests: number;
-  /** Provider responses accepted at the transport layer; authoritative model-call counter. */
+  /** Successful HTTP responses. Retained for compatibility; not a model-output counter. */
   successfulProviderRequests: number;
+  providerResponses: number;
+  modelOutputsReceived: number;
+  modelOutputsSchemaAccepted: number;
+  repairRequests: number;
+  outcome: 'NO_REQUEST' | 'REQUEST_FAILED' | 'OUTPUT_INVALID' | 'VALIDATED_STRATEGIES';
+  failureCode?: import('./provider-adapter').ProviderFailureCode | null;
+  lastResponseMetadata?: import('./provider-adapter').SafeProviderResponseMetadata;
   promptTokens: number;
   candidateTokens: number;
   toolUsePromptTokens: number;
@@ -234,7 +241,15 @@ export function toPublicTaskmasterRun(run: TaskmasterRunRecord): PublicTaskmaste
     modelCalled: run.modelCalled,
     modelCallCount: run.modelCallCount,
     disclosure: run.disclosure,
-    providerUsage: { ...run.providerUsage, successfulProviderRequests: run.providerUsage.successfulProviderRequests || 0 },
+    providerUsage: {
+      ...run.providerUsage,
+      successfulProviderRequests: run.providerUsage.successfulProviderRequests || 0,
+      providerResponses: run.providerUsage.providerResponses || 0,
+      modelOutputsReceived: run.providerUsage.modelOutputsReceived || 0,
+      modelOutputsSchemaAccepted: run.providerUsage.modelOutputsSchemaAccepted || 0,
+      repairRequests: run.providerUsage.repairRequests || run.providerUsage.repairCount || 0,
+      outcome: run.providerUsage.outcome || (run.providerUsage.providerRequests > 0 ? 'REQUEST_FAILED' : 'NO_REQUEST'),
+    },
   };
 }
 

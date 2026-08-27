@@ -18,23 +18,46 @@ import { getTaskmasterRunRepository, type TaskmasterRunRepository } from './repo
 import { buildDeterministicTaskmasterPlan, runAdkPlan, taskmasterModelDisclosure } from './adk-agent';
 import { executeTaskmasterTool, type TaskmasterToolContext } from './tools';
 import { withProviderBudget } from './provider-budget';
+import { ProviderAdapterError } from './provider-adapter';
 
 const activeExecutions = new Set<string>();
 
-function authoritativeModelMetadata(
+export function authoritativeModelMetadata(
   usage: TaskmasterRunRecord['providerUsage'],
 ): Pick<TaskmasterRunRecord, 'provider' | 'model' | 'modelCalled' | 'modelCallCount' | 'disclosure'> {
-  const successfulRequests = usage.successfulProviderRequests || 0;
-  const modelCalled = successfulRequests > 0;
-  const disclosure = taskmasterModelDisclosure(modelCalled);
-  if (!modelCalled) return { ...disclosure, modelCallCount: 0 };
-  return {
-    provider: usage.provider || disclosure.provider,
-    model: usage.actualModel || usage.requestedModel || disclosure.model,
-    modelCalled: true,
-    modelCallCount: successfulRequests,
-    disclosure: disclosure.disclosure,
+  const modelOutputs = usage.modelOutputsReceived || 0;
+  const modelCalled = modelOutputs > 0;
+  if ((usage.providerRequests || 0) === 0) return { ...taskmasterModelDisclosure(false), modelCallCount: 0 };
+  if (!modelCalled) return {
+    provider: usage.provider || 'VERTEX_AI',
+    model: 'No usable model response',
+    modelCalled: false,
+    modelCallCount: 0,
+    disclosure: 'Gemini request failed before a usable response.',
   };
+  const disclosure = usage.outcome === 'VALIDATED_STRATEGIES'
+    ? 'Gemini generated three validated strategies. SitePilot independently calculated and checked all authoritative planning figures.'
+    : 'Gemini returned an invalid proposal. No model proposal was accepted or persisted.';
+  return {
+    provider: usage.provider || 'VERTEX_AI',
+    model: usage.actualModel || usage.requestedModel || 'Gemini model',
+    modelCalled: true,
+    modelCallCount: modelOutputs,
+    disclosure,
+  };
+}
+
+async function recordSchemaAccepted(
+  repository: TaskmasterRunRepository,
+  runId: string,
+  validatedStrategies = false,
+): Promise<void> {
+  const usage = await repository.getProviderUsage(runId);
+  await repository.recordProviderUsage(runId, {
+    modelOutputsSchemaAccepted: (usage?.modelOutputsSchemaAccepted || 0) + 1,
+    outcome: validatedStrategies ? 'VALIDATED_STRATEGIES' : (usage?.outcome || 'OUTPUT_INVALID'),
+    failureCode: null,
+  });
 }
 
 function now(): string {
@@ -86,6 +109,11 @@ export function createTaskmasterRun(input: TaskmasterInput, goal: string, idempo
     providerUsage: {
       providerRequests: 0,
       successfulProviderRequests: 0,
+      providerResponses: 0,
+      modelOutputsReceived: 0,
+      modelOutputsSchemaAccepted: 0,
+      repairRequests: 0,
+      outcome: 'NO_REQUEST',
       promptTokens: 0,
       candidateTokens: 0,
       toolUsePromptTokens: 0,
@@ -109,6 +137,12 @@ function auditTaskmaster(run: TaskmasterRunRecord, event: string): void {
     provider: run.provider,
     model: run.model,
     modelCalled: run.modelCalled,
+    providerOutcome: run.providerUsage.outcome,
+    providerRequests: run.providerUsage.providerRequests,
+    providerResponses: run.providerUsage.providerResponses,
+    modelOutputsReceived: run.providerUsage.modelOutputsReceived,
+    modelOutputsSchemaAccepted: run.providerUsage.modelOutputsSchemaAccepted,
+    failureCode: run.providerUsage.failureCode,
   }));
 }
 
@@ -169,7 +203,11 @@ export async function executeTaskmasterRun(
         try {
           if (liveAllowed) {
             if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
-            plan = await withProviderBudget(executionRun.runId, repository, () => runAdkPlan(executionRun.input, context));
+            plan = await withProviderBudget(executionRun.runId, repository, () => runAdkPlan(executionRun.input, context, {
+              runId: executionRun.runId,
+              correlationId: executionRun.correlationId,
+            }));
+            await recordSchemaAccepted(repository, executionRun.runId);
             modelCalls += 1;
           } else {
             plan = buildDeterministicTaskmasterPlan(run.goal);
@@ -194,10 +232,15 @@ export async function executeTaskmasterRun(
       if (liveAllowed) {
         if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
         modelGeneration = await withProviderBudget(executionRun.runId, repository, () => generateSchemeProposals(executionRun.input, {
+          identifiers: { runId: executionRun.runId, correlationId: executionRun.correlationId },
           onRepairAttempt: async () => {
             const recorded = await repository!.getProviderUsage(executionRun.runId);
-            await repository!.recordProviderUsage(executionRun.runId, { repairCount: (recorded?.repairCount || 0) + 1 });
+            await repository!.recordProviderUsage(executionRun.runId, {
+              repairCount: (recorded?.repairCount || 0) + 1,
+              repairRequests: (recorded?.repairRequests || 0) + 1,
+            });
           },
+          onSchemaAccepted: () => recordSchemaAccepted(repository!, executionRun.runId, true),
         }));
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
@@ -289,6 +332,13 @@ export async function executeTaskmasterRun(
       auditTaskmaster(run, 'awaiting_approval');
       return toPublicTaskmasterRun(run);
     } catch (error) {
+      if (error instanceof ProviderAdapterError) {
+        const recorded = await repository.getProviderUsage(run.runId);
+        await repository.recordProviderUsage(run.runId, {
+          failureCode: error.code,
+          outcome: (recorded?.modelOutputsReceived || 0) > 0 ? 'OUTPUT_INVALID' : 'REQUEST_FAILED',
+        });
+      }
       const message = error instanceof Error ? error.message : 'Taskmaster execution failed.';
       const retryable = run.retryCount < Number(process.env.TASKMASTER_MAX_RETRIES || 2);
       const nextState: TaskmasterRunState = retryable ? 'FAILED_RETRYABLE' : 'FAILED_FINAL';

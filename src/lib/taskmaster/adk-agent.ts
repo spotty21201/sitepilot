@@ -3,6 +3,7 @@ import { taskmasterPlanSchema, type TaskmasterInput, type TaskmasterPlan } from 
 import type { TaskmasterToolContext } from './tools';
 import type { Schema } from '@google/genai';
 import path from 'node:path';
+import { parseStructuredCandidate, type ProviderRunIdentifiers } from './provider-adapter';
 
 /**
  * Load only the ADK modules needed by Taskmaster.
@@ -120,7 +121,11 @@ export async function buildAdkTaskmasterAgent(input: TaskmasterInput, context: T
   });
 }
 
-export async function runAdkPlan(input: TaskmasterInput, context: TaskmasterToolContext): Promise<TaskmasterPlan> {
+export async function runAdkPlan(
+  input: TaskmasterInput,
+  context: TaskmasterToolContext,
+  identifiers: ProviderRunIdentifiers = { runId: 'not-recorded', correlationId: 'not-recorded' },
+): Promise<TaskmasterPlan> {
   if (process.env.TASKMASTER_ALLOW_LIVE_MODEL !== 'true') return buildDeterministicTaskmasterPlan(input.objective || FALLBACK_GOAL);
   const { InMemoryRunner } = await loadAdkModule<{ InMemoryRunner: new (options: Record<string, unknown>) => { runEphemeral: (options: Record<string, unknown>) => AsyncIterable<unknown> } }>('runner/in_memory_runner.js');
   const agent = await buildAdkTaskmasterAgent(input, context);
@@ -139,5 +144,5 @@ export async function runAdkPlan(input: TaskmasterInput, context: TaskmasterTool
       return typeof value === 'string' ? [value] : [];
     });
   }).join('\n');
-  return taskmasterPlanSchema.parse(JSON.parse(text));
+  return parseStructuredCandidate(text, taskmasterPlanSchema, identifiers);
 }

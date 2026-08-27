@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTaskmasterRun, executeTaskmasterRun, approveTaskmasterRun, completeApprovedTaskmasterRun, rejectTaskmasterRun } from '@/lib/taskmaster/runner';
+import { authoritativeModelMetadata, createTaskmasterRun, executeTaskmasterRun, approveTaskmasterRun, completeApprovedTaskmasterRun, rejectTaskmasterRun } from '@/lib/taskmaster/runner';
 import { InMemoryTaskmasterRunRepository } from '@/lib/taskmaster/repository';
 import { buildAdkTaskmasterAgent, buildDeterministicTaskmasterPlan } from '@/lib/taskmaster/adk-agent';
 import { executeTaskmasterTool } from '@/lib/taskmaster/tools';
@@ -32,6 +32,8 @@ const input: TaskmasterInput = {
 describe('Taskmaster bounded workflow', () => {
   beforeEach(() => {
     delete process.env.TASKMASTER_ALLOW_LIVE_MODEL;
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    delete process.env.GCP_PROJECT;
   });
 
   it('creates a persisted fallback plan with distinct, deterministically simulated schemes', async () => {
@@ -115,9 +117,40 @@ describe('Taskmaster bounded workflow', () => {
           location: 'global',
         },
       });
+      expect(failed?.disclosure).toBe('Gemini request failed before a usable response.');
     } finally {
       delete process.env.TASKMASTER_MAX_TOOL_CALLS;
     }
+  });
+
+  it('derives the four provider disclosures from authoritative counters', () => {
+    const usage = createTaskmasterRun(input, input.objective, 'disclosure-counters').providerUsage;
+    expect(authoritativeModelMetadata(usage).disclosure).toContain('Template schemes used');
+    expect(authoritativeModelMetadata({ ...usage, providerRequests: 1, providerResponses: 1, outcome: 'REQUEST_FAILED' }).disclosure)
+      .toBe('Gemini request failed before a usable response.');
+    expect(authoritativeModelMetadata({ ...usage, providerRequests: 1, providerResponses: 1, successfulProviderRequests: 1, modelOutputsReceived: 1, outcome: 'OUTPUT_INVALID' }).disclosure)
+      .toBe('Gemini returned an invalid proposal. No model proposal was accepted or persisted.');
+    expect(authoritativeModelMetadata({ ...usage, providerRequests: 2, providerResponses: 2, successfulProviderRequests: 2, modelOutputsReceived: 2, modelOutputsSchemaAccepted: 2, outcome: 'VALIDATED_STRATEGIES' }).disclosure)
+      .toContain('Gemini generated three validated strategies');
+  });
+
+  it('keeps forceFallback away from the provider with hosted flags enabled, including a resumed delivery', async () => {
+    process.env.TASKMASTER_ALLOW_LIVE_MODEL = 'true';
+    process.env.GOOGLE_CLOUD_PROJECT = 'synthetic-project';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const repository = new InMemoryTaskmasterRunRepository();
+    const run = createTaskmasterRun(input, input.objective, 'idempotency-force-fallback-resume', true);
+    await repository.create(run);
+    process.env.TASKMASTER_MAX_TOOL_CALLS = '1';
+    const failed = await executeTaskmasterRun(run.runId, repository, 'delivery-force-fallback-1');
+    expect(failed?.state).toBe('FAILED_RETRYABLE');
+    delete process.env.TASKMASTER_MAX_TOOL_CALLS;
+    const resumed = await executeTaskmasterRun(run.runId, repository, 'delivery-force-fallback-2');
+    expect(resumed?.state).toBe('AWAITING_APPROVAL');
+    expect(resumed?.providerUsage).toMatchObject({ providerRequests: 0, providerResponses: 0, modelOutputsReceived: 0, outcome: 'NO_REQUEST' });
+    expect(resumed?.disclosure).toContain('Template schemes used');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 
   it('blocks stale approval and prevents double approval', async () => {

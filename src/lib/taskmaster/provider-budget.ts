@@ -1,5 +1,12 @@
 import type { TaskmasterProviderUsage } from './schemas';
 import type { TaskmasterRunRepository } from './repository';
+import {
+  ProviderAdapterError,
+  analyzeVertexEnvelope,
+  classifyConnectionFailure,
+  type ProviderRunIdentifiers,
+  type SafeProviderResponseMetadata,
+} from './provider-adapter';
 
 // Vertex can use the global endpoint (`aiplatform.googleapis.com`), a
 // regional endpoint (`asia-southeast2-aiplatform.googleapis.com`) or a
@@ -14,23 +21,6 @@ function requestUrl(input: RequestInfo | URL): string {
 function numberEnv(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function usageFromBody(body: unknown): { prompt: number; candidate: number; tool: number; thought: number; total: number; responseId?: string; actualModel?: string } {
-  if (!body || typeof body !== 'object') return { prompt: 0, candidate: 0, tool: 0, thought: 0, total: 0 };
-  const record = body as Record<string, unknown>;
-  const metadata = (record.usageMetadata || record.usage_metadata) as Record<string, unknown> | undefined;
-  if (!metadata) return { prompt: 0, candidate: 0, tool: 0, thought: 0, total: 0 };
-  const value = (name: string) => Number(metadata[name] || metadata[name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)] || 0);
-  return {
-    prompt: value('promptTokenCount'),
-    candidate: value('candidatesTokenCount'),
-    tool: value('toolUsePromptTokenCount'),
-    thought: value('thoughtsTokenCount'),
-    total: value('totalTokenCount'),
-    responseId: typeof record.responseId === 'string' ? record.responseId : undefined,
-    actualModel: typeof record.modelVersion === 'string' ? record.modelVersion : undefined,
-  };
 }
 
 function estimateCost(usage: TaskmasterProviderUsage): number | undefined {
@@ -49,6 +39,71 @@ export class ProviderBudgetExceeded extends Error {
   }
 }
 
+function emptyUsage(requestNumber = 0): TaskmasterProviderUsage {
+  return {
+    providerRequests: requestNumber,
+    successfulProviderRequests: 0,
+    providerResponses: 0,
+    modelOutputsReceived: 0,
+    modelOutputsSchemaAccepted: 0,
+    repairRequests: 0,
+    outcome: requestNumber > 0 ? 'REQUEST_FAILED' : 'NO_REQUEST',
+    promptTokens: 0,
+    candidateTokens: 0,
+    toolUsePromptTokens: 0,
+    thoughtTokens: 0,
+    totalTokens: 0,
+    modelLatencyMs: 0,
+    repairCount: 0,
+    costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1',
+  };
+}
+
+function safeResponseLog(identifiers: ProviderRunIdentifiers, metadata: SafeProviderResponseMetadata): void {
+  console.info(JSON.stringify({
+    service: 'sitepilot-taskmaster',
+    event: 'vertex_response_metadata',
+    runId: identifiers.runId,
+    correlationId: identifiers.correlationId,
+    ...metadata,
+  }));
+}
+
+async function recordResponse(
+  runId: string,
+  repository: TaskmasterRunRepository,
+  reservationNumber: number,
+  metadata: SafeProviderResponseMetadata,
+  options: { responseReceived: boolean; httpSuccess: boolean; outputReceived: boolean; countDuration?: boolean; failureCode?: Exclude<TaskmasterProviderUsage['failureCode'], null | undefined> },
+): Promise<void> {
+  const current = await repository.getProviderUsage(runId);
+  const next: TaskmasterProviderUsage = {
+    ...(current || emptyUsage(reservationNumber)),
+    providerRequests: Math.max(current?.providerRequests || 0, reservationNumber),
+    provider: 'VERTEX_AI',
+    location: process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || 'global',
+    requestedModel: process.env.GEMINI_MODEL || 'gemini-3.7-flash',
+    actualModel: metadata.modelVersion || current?.actualModel,
+    providerResponses: (current?.providerResponses || 0) + (options.responseReceived ? 1 : 0),
+    successfulProviderRequests: (current?.successfulProviderRequests || 0) + (options.httpSuccess ? 1 : 0),
+    modelOutputsReceived: (current?.modelOutputsReceived || 0) + (options.outputReceived ? 1 : 0),
+    outcome: options.outputReceived ? 'OUTPUT_INVALID' : 'REQUEST_FAILED',
+    failureCode: options.failureCode ?? null,
+    promptTokens: (current?.promptTokens || 0) + (metadata.promptTokens || 0),
+    candidateTokens: (current?.candidateTokens || 0) + (metadata.candidateTokens || 0),
+    toolUsePromptTokens: (current?.toolUsePromptTokens || 0) + (metadata.toolUsePromptTokens || 0),
+    thoughtTokens: (current?.thoughtTokens || 0) + (metadata.thoughtTokens || 0),
+    totalTokens: (current?.totalTokens || 0) + (metadata.totalTokens || 0),
+    modelLatencyMs: (current?.modelLatencyMs || 0) + (options.countDuration === false ? 0 : metadata.requestDurationMs),
+    responseIds: [...(current?.responseIds || []), ...(metadata.responseId ? [metadata.responseId] : [])].slice(-20),
+    lastResponseMetadata: metadata,
+    costConfigVersion: current?.costConfigVersion || process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1',
+    estimatedCostUsd: undefined,
+  };
+  next.estimatedCostUsd = estimateCost(next);
+  await repository.recordProviderUsage(runId, next);
+}
+
 /**
  * Installs a server-only transport guard around Vertex requests. ADK and the
  * GenAI SDK both use fetch, so internal turns and repair calls cannot bypass
@@ -56,6 +111,8 @@ export class ProviderBudgetExceeded extends Error {
  */
 export async function withProviderBudget<T>(runId: string, repository: TaskmasterRunRepository, work: () => Promise<T>): Promise<T> {
   const previousFetch = globalThis.fetch;
+  const run = await repository.get(runId);
+  const identifiers: ProviderRunIdentifiers = { runId, correlationId: run?.correlationId || 'not-recorded' };
   const maxRequests = Math.max(1, numberEnv('TASKMASTER_MAX_PROVIDER_REQUESTS', 8));
   const maxTokens = Math.max(0, numberEnv('TASKMASTER_MAX_TOTAL_TOKENS', 32768));
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -73,32 +130,40 @@ export async function withProviderBudget<T>(runId: string, repository: Taskmaste
     const started = Date.now();
     try {
       const response = await previousFetch(input, init);
-      const parsedBody = await response.clone().json().catch(() => undefined);
-      const requestUsage = usageFromBody(parsedBody);
-      const current = await repository.getProviderUsage(runId);
-      const next: TaskmasterProviderUsage = {
-        ...(current || { providerRequests: reservation.requestNumber, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, modelLatencyMs: 0, repairCount: 0, costConfigVersion: process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1' }),
-        provider: 'VERTEX_AI',
-        location: process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || 'global',
-        requestedModel: process.env.GEMINI_MODEL || 'gemini-3.7-flash',
-        actualModel: requestUsage.actualModel || current?.actualModel,
-        successfulProviderRequests: (current?.successfulProviderRequests || 0) + (response.ok ? 1 : 0),
-        promptTokens: (current?.promptTokens || 0) + requestUsage.prompt,
-        candidateTokens: (current?.candidateTokens || 0) + requestUsage.candidate,
-        toolUsePromptTokens: (current?.toolUsePromptTokens || 0) + requestUsage.tool,
-        thoughtTokens: (current?.thoughtTokens || 0) + requestUsage.thought,
-        totalTokens: (current?.totalTokens || 0) + requestUsage.total,
-        modelLatencyMs: (current?.modelLatencyMs || 0) + (Date.now() - started),
-        responseIds: [...(current?.responseIds || []), ...(requestUsage.responseId ? [requestUsage.responseId] : [])].slice(-20),
-        costConfigVersion: current?.costConfigVersion || process.env.TASKMASTER_COST_CONFIG_VERSION || '2026-08-sitepilot-v1',
-        estimatedCostUsd: undefined,
+      const body = await response.clone().text();
+      const baseMetadata: SafeProviderResponseMetadata = {
+        httpStatus: response.status,
+        contentType: response.headers.get('content-type') || undefined,
+        responseBytes: new TextEncoder().encode(body).byteLength,
+        requestDurationMs: Date.now() - started,
+        requestId: response.headers.get('x-goog-request-id') || response.headers.get('x-request-id') || undefined,
       };
-      next.estimatedCostUsd = estimateCost(next);
-      await repository.recordProviderUsage(runId, next);
+      safeResponseLog(identifiers, baseMetadata);
+      await recordResponse(runId, repository, reservation.requestNumber, baseMetadata, {
+        responseReceived: true,
+        httpSuccess: response.ok,
+        outputReceived: false,
+        failureCode: response.ok ? undefined : 'NON_SUCCESS_HTTP',
+      });
+      if (!response.ok) {
+        throw new ProviderAdapterError('NON_SUCCESS_HTTP', identifiers, baseMetadata);
+      }
+      try {
+        const analysis = analyzeVertexEnvelope(body, baseMetadata, identifiers);
+        await recordResponse(runId, repository, reservation.requestNumber, analysis.metadata, { responseReceived: false, httpSuccess: false, outputReceived: analysis.modelOutputReceived, countDuration: false });
+      } catch (error) {
+        if (error instanceof ProviderAdapterError) {
+          await recordResponse(runId, repository, reservation.requestNumber, error.safeMetadata || baseMetadata, { responseReceived: false, httpSuccess: false, outputReceived: false, countDuration: false, failureCode: error.code });
+        }
+        throw error;
+      }
       return response;
     } catch (error) {
-      await repository.recordProviderUsage(runId, { modelLatencyMs: (await repository.getProviderUsage(runId))?.modelLatencyMs || (Date.now() - started) });
-      throw error;
+      if (error instanceof ProviderAdapterError || error instanceof ProviderBudgetExceeded) throw error;
+      const code = classifyConnectionFailure(error);
+      const metadata: SafeProviderResponseMetadata = { requestDurationMs: Date.now() - started };
+      await recordResponse(runId, repository, reservation.requestNumber, metadata, { responseReceived: false, httpSuccess: false, outputReceived: false, failureCode: code });
+      throw new ProviderAdapterError(code, identifiers, metadata);
     }
   };
   try {

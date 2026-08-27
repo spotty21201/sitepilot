@@ -24,7 +24,7 @@ function metadata(): SchemeGenerationMetadata {
     sourceStudyVersion: input.studyVersion, inputHash: input.inputHash, userPriorities: input.priorities,
     assumptions: ['Rectangular study parcel'], validation: { valid: true, errors: [] }, proposals,
     taskmasterRunId: 'tm-ui-test', correlationId: 'corr-ui-test', taskmasterState: 'AWAITING_APPROVAL',
-    providerUsage: { providerRequests: 0, successfulProviderRequests: 0, promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, repairCount: 0 },
+    providerUsage: { providerRequests: 0, successfulProviderRequests: 0, providerResponses: 0, modelOutputsReceived: 0, modelOutputsSchemaAccepted: 0, repairRequests: 0, outcome: 'NO_REQUEST', promptTokens: 0, candidateTokens: 0, toolUsePromptTokens: 0, thoughtTokens: 0, totalTokens: 0, repairCount: 0 },
     preparation: { validationResult: 'PASSED', distinctnessResult: 'PASSED', repairAttempted: false, repairSucceeded: false, informationStillRequired: ['Measured landscaped/permeable area to demonstrate KDH'] },
   };
 }
