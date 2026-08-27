@@ -23,7 +23,10 @@ export function createAiClient(): { ai: GoogleGenAI; model: string; provider: st
       ai: new GoogleGenAI({
         vertexai: true,
         project: config.projectId,
-        location: config.location || 'asia-southeast2'
+        location: config.location || 'asia-southeast2',
+        // @google/genai 2.17.1 otherwise defaults Vertex requests to v1beta1.
+        // SitePilot uses the stable v1 generateContent contract explicitly.
+        httpOptions: { apiVersion: 'v1' },
       }),
       model: config.model,
       provider: 'VERTEX_AI'

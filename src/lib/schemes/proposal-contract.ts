@@ -468,6 +468,7 @@ export async function generateSchemeProposals(
       },
     };
     const requestConfig = {
+      httpOptions: { apiVersion: 'v1' },
       responseMimeType: 'application/json',
       ...(Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
       responseSchema,

@@ -186,6 +186,7 @@ describe('Taskmaster bounded workflow', () => {
     const agent = await buildAdkTaskmasterAgent(input, context);
     expect(agent.name).toBe('sitepilot_taskmaster');
     expect(agent.tools).toHaveLength(0);
+    expect(agent.generateContentConfig).toMatchObject({ httpOptions: { apiVersion: 'v1' } });
     expect(process.env.TASKMASTER_ALLOW_LIVE_MODEL).not.toBe('true');
   });
 });

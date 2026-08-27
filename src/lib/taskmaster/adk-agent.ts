@@ -114,9 +114,14 @@ export async function buildAdkTaskmasterAgent(input: TaskmasterInput, context: T
     // allowlisted tools itself after the plan is persisted, which keeps model
     // tool turns from bypassing the provider budget or mutating study state.
     tools: [],
-    generateContentConfig: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
-      ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
-      : undefined,
+    generateContentConfig: {
+      // ADK 2.0.0 uses @google/genai's v1beta1 default unless the supported
+      // per-request HTTP option is set. Keep the hosted boundary on stable v1.
+      httpOptions: { apiVersion: 'v1' },
+      ...(Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
+        ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
+        : {}),
+    },
     outputSchema: adkPlanSchema() as unknown as Schema,
   });
 }

@@ -50,6 +50,7 @@ describe('bounded proposal repair', () => {
     await generateSchemeProposals(input, { onSchemaAccepted });
     expect(provider.generateContent).toHaveBeenCalledTimes(1);
     const request = provider.generateContent.mock.calls[0][0];
+    expect(request.config.httpOptions).toEqual({ apiVersion: 'v1' });
     expect(request.config.responseMimeType).toBe('application/json');
     expect(request.config.responseSchema).toMatchObject({ type: 'ARRAY' });
     expect(request.config).not.toHaveProperty('responseJsonSchema');
