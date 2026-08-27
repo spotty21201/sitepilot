@@ -41,6 +41,74 @@ function initializeProjectScenarios(rawProject: Project): Project {
   return ensureCanonicalProjectRevisions(synchronizeProjectDerivedState(rawProject));
 }
 
+function taskmasterProgressLabel(run: PublicTaskmasterRun): string {
+  if (run.state === 'QUEUED' || run.state === 'PLANNING') return 'Reviewing confirmed inputs';
+  if (run.state === 'EXECUTING_TOOLS') {
+    const latest = run.activities.at(-1)?.name;
+    if (!latest || ['get_opportunity_context', 'get_site_and_planning_inputs', 'list_assumptions_and_missing_information'].includes(latest)) return 'Reviewing confirmed inputs';
+    if (latest === 'prepare_scheme_proposals') return 'Developing three strategies';
+    if (latest === 'simulate_development_scheme' || latest === 'get_scheme_planning_checks') return 'Testing massing and planning limits';
+    if (latest === 'compare_development_schemes') return 'Reconciling development figures';
+    return 'Developing three strategies';
+  }
+  if (run.state === 'VALIDATING') return 'Reconciling development figures';
+  if (run.state === 'AWAITING_APPROVAL') return 'Preparing schemes for review';
+  if (run.state === 'FAILED_RETRYABLE') return 'A temporary generation failure can be retried';
+  if (run.state === 'FAILED_FINAL') return 'Generation failed; review the diagnostic details';
+  if (run.state === 'BLOCKED_STALE') return 'The source study changed; regenerate before review';
+  if (run.state === 'REJECTED') return 'Study proposals rejected; no accepted study was changed';
+  return run.currentStep || 'Taskmaster workflow update';
+}
+
+function applyReadyTaskmasterRun(project: Project, run: PublicTaskmasterRun): Project {
+  if (!run.generation) return project;
+  const informationStillRequired = [...new Set(run.generation.proposals.flatMap((proposal) => proposal.informationStillRequired))];
+  const generation = {
+    status: 'READY' as const,
+    taskmasterRunId: run.runId,
+    correlationId: run.correlationId,
+    taskmasterState: run.state,
+    provider: run.generation.provider,
+    model: run.generation.model,
+    modelCalled: run.generation.modelCalled,
+    disclosure: run.generation.disclosure,
+    generatedAt: run.generation.generatedAt,
+    opportunityId: run.generation.opportunityId,
+    sourceStudyVersion: run.generation.sourceStudyVersion,
+    inputHash: run.generation.inputHash,
+    userPriorities: run.generation.userPriorities,
+    assumptions: run.generation.assumptions,
+    validation: run.generation.validation,
+    proposals: run.generation.proposals,
+    providerUsage: run.providerUsage,
+    preparation: {
+      validationResult: run.generation.validation.valid ? 'PASSED' as const : 'FAILED' as const,
+      distinctnessResult: run.generation.qualityGate.distinctnessPassed ? 'PASSED' as const : 'FAILED' as const,
+      repairAttempted: run.generation.qualityGate.repairAttempted,
+      repairSucceeded: run.generation.qualityGate.repairSucceeded,
+      informationStillRequired,
+    },
+  };
+  return initializeProjectScenarios({
+    ...project,
+    taskmasterRunId: run.runId,
+    schemeGeneration: generation,
+    scenarios: project.scenarios.map((scenario, index) => {
+      const proposal = run.generation?.proposals[index];
+      const simulation = run.simulations?.find((candidate) => candidate.proposalId === proposal?.id);
+      if (!proposal) return scenario;
+      return {
+        ...scenario,
+        name: `Scenario ${String.fromCharCode(65 + index)}: ${proposal.name.replace(/^Scheme [A-C]\s*[—-]\s*/, '')}`,
+        description: `${proposal.thesis} ${proposal.rationale}`,
+        proposal,
+        masses: simulation?.masses || scenario.masses,
+        existingAssetStrategy: proposal.existingAssetDecision,
+      };
+    }),
+  });
+}
+
 function markUnacceptedSchemesStale(rawProject: Project): Project {
   const generation = rawProject.schemeGeneration;
   if (!generation || generation.status !== 'READY') return rawProject;
@@ -135,41 +203,9 @@ export default function SitePilotDecisionRoom() {
       .then((status) => {
         if (cancelled || !status.ok || !status.run) return;
         setTaskmasterRunState(status.run.state);
-        const recoveredLabels: Record<string, string> = {
-          QUEUED: 'Queued for Taskmaster',
-          PLANNING: 'Preparing site and planning inputs',
-          EXECUTING_TOOLS: 'Checking the study with bounded planning tools',
-          VALIDATING: 'Validating three study proposals',
-          FAILED_RETRYABLE: 'A temporary generation failure can be retried',
-          FAILED_FINAL: 'Generation failed; review the diagnostic details',
-          BLOCKED_STALE: 'The source study changed; regenerate before review',
-          CANCELLED: 'Taskmaster run cancelled',
-          REJECTED: 'Study proposals rejected; no accepted study was changed',
-        };
-        setSchemeGenerationProgress(recoveredLabels[status.run.state] || null);
+        setSchemeGenerationProgress(taskmasterProgressLabel(status.run));
         if (status.run.state === 'AWAITING_APPROVAL' && status.run.generation) {
-          const generation = {
-            status: 'READY' as const,
-            taskmasterRunId: status.run.runId,
-            taskmasterState: status.run.state,
-            provider: status.run.generation.provider,
-            model: status.run.generation.model,
-            modelCalled: status.run.generation.modelCalled,
-            disclosure: status.run.generation.disclosure,
-            generatedAt: status.run.generation.generatedAt,
-            opportunityId: status.run.generation.opportunityId,
-            sourceStudyVersion: status.run.generation.sourceStudyVersion,
-            inputHash: status.run.generation.inputHash,
-            userPriorities: status.run.generation.userPriorities,
-            assumptions: status.run.generation.assumptions,
-            validation: status.run.generation.validation,
-            proposals: status.run.generation.proposals,
-          };
-          const updated = initializeProjectScenarios({
-            ...project,
-            schemeGeneration: generation,
-            scenarios: project.scenarios.map((scenario, index) => ({ ...scenario, proposal: status.run?.generation?.proposals[index], existingAssetStrategy: status.run?.generation?.proposals[index]?.existingAssetDecision || scenario.existingAssetStrategy })),
-          });
+          const updated = applyReadyTaskmasterRun(project, status.run);
           replaceProject(updated);
           setSchemeGenerationProgress(null);
           setIsSchemeReviewOpen(true);
@@ -217,7 +253,7 @@ export default function SitePilotDecisionRoom() {
     }
     setCasesList(listCases());
     if (!priorities) return;
-    setSchemeGenerationProgress('Preparing site and planning inputs');
+    setSchemeGenerationProgress('Reviewing confirmed inputs');
     const confirmation = confirmSchemeGenerationInput(initialized, priorities);
     const input = confirmation.input;
     const confirmedProject = { ...initialized, confirmedSchemeInput: confirmation.snapshot };
@@ -233,52 +269,15 @@ export default function SitePilotDecisionRoom() {
       const runId = result.run.runId;
       const current = projectRef.current;
       if (current.id === initialized.id) replaceProject({ ...current, taskmasterRunId: runId });
-      setSchemeGenerationProgress('Preparing site and planning inputs');
+      setSchemeGenerationProgress('Reviewing confirmed inputs');
       if (taskmasterPollTimerRef.current !== null) window.clearInterval(taskmasterPollTimerRef.current);
       const applyRunStatus = (run: PublicTaskmasterRun) => {
-        const labels: Record<string, string> = {
-          QUEUED: 'Queued for Taskmaster',
-          PLANNING: 'Preparing a bounded study plan',
-          EXECUTING_TOOLS: 'Inspecting inputs and simulating studies',
-          VALIDATING: 'Checking geometry and planning limits',
-          AWAITING_APPROVAL: 'Three development studies ready for review',
-          FAILED_RETRYABLE: 'Study generation needs a safe retry',
-          FAILED_FINAL: 'Study generation could not be completed',
-          BLOCKED_STALE: 'Study inputs changed; regeneration is required',
-        };
         setTaskmasterRunState(run.state);
-        setSchemeGenerationProgress(labels[run.state] || 'Taskmaster is working');
+        setSchemeGenerationProgress(taskmasterProgressLabel(run));
         if (run.state === 'AWAITING_APPROVAL' && run.generation) {
           const currentProject = projectRef.current;
           if (currentProject.id !== initialized.id) return;
-          const generation = {
-            status: 'READY' as const,
-            taskmasterRunId: run.runId,
-            taskmasterState: run.state,
-            provider: run.generation.provider,
-            model: run.generation.model,
-            modelCalled: run.generation.modelCalled,
-            disclosure: run.generation.disclosure,
-            generatedAt: run.generation.generatedAt,
-            opportunityId: run.generation.opportunityId,
-            sourceStudyVersion: run.generation.sourceStudyVersion,
-            inputHash: run.generation.inputHash,
-            userPriorities: run.generation.userPriorities,
-            assumptions: run.generation.assumptions,
-            validation: run.generation.validation,
-            proposals: run.generation.proposals,
-          };
-          const proposalByIndex = run.generation.proposals;
-          const updated = initializeProjectScenarios({
-            ...currentProject,
-            taskmasterRunId: run.runId,
-            schemeGeneration: generation,
-            scenarios: currentProject.scenarios.map((scenario, index) => ({
-              ...scenario,
-              proposal: proposalByIndex[index],
-              existingAssetStrategy: proposalByIndex[index]?.existingAssetDecision || scenario.existingAssetStrategy,
-            })),
-          });
+          const updated = applyReadyTaskmasterRun(currentProject, run);
           replaceProject(updated);
           setSchemeGenerationProgress(null);
           setTaskmasterRunState(run.state);

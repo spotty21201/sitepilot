@@ -29,7 +29,7 @@ function siteBounds(input: TaskmasterInput): CanonicalParcelBounds {
   return getCanonicalParcelBounds(input.siteAreaM2, input.planningLimits.setbacks, input.frontageMeters);
 }
 
-function massFromProposal(
+export function massFromProposal(
   input: TaskmasterInput,
   proposal: SchemeProposal,
   bounds: CanonicalParcelBounds,
@@ -46,16 +46,13 @@ function massFromProposal(
     ? proposal.towerStoreys ?? 0
     : Math.max(0, Math.floor((input.planningLimits.maxHeightMeters - podiumFloors * podiumFloorHeight) / towerFloorHeight));
   const towerFloors = Math.min(proposal.towerStoreys ?? 0, maximumTowerFloors);
+  const alternativeFloorHeight = proposal.floorToFloorAssumptions.alternative ?? 3.5;
+  const alternativeFloors = input.planningLimits.maxHeightMeters === undefined
+    ? proposal.alternativeStoreys ?? 0
+    : Math.min(proposal.alternativeStoreys ?? 0, Math.max(0, Math.floor(input.planningLimits.maxHeightMeters / alternativeFloorHeight)));
   const podiumHeight = podiumFloors * podiumFloorHeight;
-  const strategyFar = proposal.strategy === 'CONSERVATIVE'
-    ? Math.min(input.planningLimits.maxFAR ?? 3.2, 2.4)
-    : proposal.strategy === 'BALANCED'
-      ? Math.min(input.planningLimits.maxFAR ?? 3.2, 5.2)
-      : input.planningLimits.maxFAR ?? 3.2;
-  const targetGfa = Math.max(0, input.siteAreaM2 * strategyFar);
-  const retainedGfa = input.existingAsset && proposal.existingAssetDecision !== 'REPLACE' && proposal.existingAssetDecision !== 'NOT_APPLICABLE'
-    ? input.existingAsset.gfa * (proposal.existingAssetDecision === 'PARTIALLY_RETAIN' ? 0.5 : 1)
-    : 0;
+  const targetGfa = Math.max(0, proposal.targetGFA);
+  const retainedGfa = input.existingAsset ? proposal.existingGfaRetainedM2 : 0;
   const retainedFloors = input.existingAsset?.floors ?? 1;
   const retainedFootprintTarget = retainedGfa / Math.max(1, retainedFloors);
   const retainedWidth = retainedGfa > 0 ? Math.max(1, Math.min(bounds.buildableWidth * 0.42, Math.sqrt(retainedFootprintTarget))) : 0;
@@ -108,6 +105,26 @@ function massFromProposal(
       program: 'MIXED_USE',
       position: { x: centerX, y: 0, z: podiumCenterZ },
       dimensions: { width: podiumWidth, length: podiumLength, height: podiumHeight },
+    });
+  }
+
+  if (alternativeFloors > 0) {
+    const alternativeFootprint = Math.max(1, Math.min(availableCoverage, targetNewGfa / alternativeFloors));
+    const alternativeLength = Math.max(1, Math.min(maxSeparatedPodiumLength, Math.sqrt(alternativeFootprint)));
+    const alternativeWidth = Math.max(1, Math.min(bounds.buildableWidth, alternativeFootprint / alternativeLength));
+    const alternativeCenterZ = bounds.buildableMaxY - alternativeLength / 2;
+    masses.push({
+      id: `${proposal.id}-alternative`,
+      name: `${proposal.name} · low-rise courtyard wings`,
+      type: 'GENERAL',
+      footprintArea: round(alternativeWidth * alternativeLength),
+      floors: alternativeFloors,
+      floorToFloorHeight: alternativeFloorHeight,
+      height: alternativeFloors * alternativeFloorHeight,
+      gfa: round(alternativeWidth * alternativeLength * alternativeFloors),
+      program: 'MIXED_USE',
+      position: { x: centerX, y: 0, z: alternativeCenterZ },
+      dimensions: { width: alternativeWidth, length: alternativeLength, height: alternativeFloors * alternativeFloorHeight },
     });
   }
 
@@ -187,6 +204,8 @@ export function simulateDevelopmentSchemeTool(input: TaskmasterInput, proposal: 
       'Figures are calculated from the rectangular study parcel and supplied setbacks.',
       proposal.existingAssetDecision === 'REPLACE' ? 'Existing asset is replaced in this study.' : proposal.existingAssetScope,
     ],
+    programGFAByUse: proposal.programGFAByUse,
+    masses,
   };
 }
 

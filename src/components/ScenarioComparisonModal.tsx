@@ -158,6 +158,15 @@ export function ScenarioComparisonModal({
                 ))}
               </div>
 
+              <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
+                <div className="font-semibold text-[var(--text-secondary)]"><span>Strategy Target Reconciliation</span><span className="text-[10px] text-[var(--text-muted)] block">Target · deterministic result · variance</span></div>
+                {scenarios.map((scen) => (
+                  <div key={scen.id} className="font-mono tabular-nums text-right sm:text-left">
+                    {scen.proposal ? <><span className="font-bold text-[var(--text-primary)]">{scen.proposal.targetGFA.toLocaleString()} · {scen.proposal.achievedGFA.toLocaleString()} m²</span><span className="block text-[10px] text-[var(--text-muted)]">{scen.proposal.varianceGFA > 0 ? '+' : ''}{scen.proposal.varianceGFA.toLocaleString()} m² · {scen.proposal.varianceExplanation}</span></> : <span className="text-[var(--text-muted)]">No separate target recorded</span>}
+                  </div>
+                ))}
+              </div>
+
               {/* Row 2: FAR / KLB */}
               <div className={`grid gap-3 p-3 bg-[var(--bg-secondary)] grid-cols-${scenarios.length + 1}`}>
                 <div className="font-semibold text-[var(--text-secondary)]">

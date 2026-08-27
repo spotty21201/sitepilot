@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createStudyTemplateProposals, generateSchemeProposals, validateSchemeProposals, type SchemeGenerationResult } from '@/lib/schemes/proposal-contract';
+import { createStudyTemplateProposals, generateSchemeProposals, reconcileSchemeProposals, validateSchemeProposals, type SchemeGenerationResult } from '@/lib/schemes/proposal-contract';
 import { getAiConfig } from '@/lib/ai/config';
 import {
   allowedTaskmasterTransitions,
@@ -193,7 +193,12 @@ export async function executeTaskmasterRun(
 
       if (liveAllowed) {
         if (modelCalls >= maxModelCalls) throw new Error(`Taskmaster exceeded the ${maxModelCalls}-model-call limit.`);
-        modelGeneration = await withProviderBudget(executionRun.runId, repository, () => generateSchemeProposals(executionRun.input));
+        modelGeneration = await withProviderBudget(executionRun.runId, repository, () => generateSchemeProposals(executionRun.input, {
+          onRepairAttempt: async () => {
+            const recorded = await repository!.getProviderUsage(executionRun.runId);
+            await repository!.recordProviderUsage(executionRun.runId, { repairCount: (recorded?.repairCount || 0) + 1 });
+          },
+        }));
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
         const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
@@ -238,14 +243,22 @@ export async function executeTaskmasterRun(
         const prepare = executeTaskmasterTool('prepare_scheme_proposals', context).result as { proposals: unknown };
         context.proposals = (prepare.proposals as typeof context.proposals);
       }
-      const validation = validateSchemeProposals(context.proposals, run.input);
-      if (!validation.valid) throw new Error(validation.errors.join(' '));
+      const draftValidation = validateSchemeProposals(context.proposals, run.input);
+      if (!draftValidation.valid) throw new Error(draftValidation.errors.join(' '));
+      context.proposals = draftValidation.proposals;
       if (context.simulations.length !== 3) {
         for (const proposal of context.proposals) executeTaskmasterTool('simulate_development_scheme', context, { proposalId: proposal.id });
       }
       if (context.simulations.some((simulation) => simulation.planningStatus !== 'WITHIN_SUPPLIED_LIMITS')) {
         throw new Error('One or more proposals failed deterministic planning checks; no studies were made ready for approval.');
       }
+      context.proposals = reconcileSchemeProposals(context.proposals, context.simulations);
+      context.simulations = context.simulations.map((simulation) => ({
+        ...simulation,
+        programGFAByUse: context.proposals.find((proposal) => proposal.id === simulation.proposalId)?.programGFAByUse,
+      }));
+      const validation = validateSchemeProposals(context.proposals, run.input, 'RECONCILED');
+      if (!validation.valid) throw new Error(validation.errors.join(' '));
 
       run = transition(run, 'VALIDATING', 'Checking geometry and planning limits');
       const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
@@ -263,6 +276,11 @@ export async function executeTaskmasterRun(
         assumptions: validation.proposals.flatMap((proposal) => proposal.assumptionsIntroduced),
         proposals: validation.proposals,
         validation: { valid: true, errors: [] },
+        qualityGate: modelGeneration?.qualityGate || {
+          distinctnessPassed: validation.distinctnessPassed,
+          repairAttempted: false,
+          repairSucceeded: false,
+        },
       };
       run = { ...run, generation, simulations: context.simulations, providerUsage, ...modelMetadata };
       run = transition(run, 'AWAITING_APPROVAL', 'Ready for human review');

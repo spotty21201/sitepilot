@@ -235,10 +235,13 @@ export interface SchemeProposal {
   thesis: string;
   existingAssetDecision: ExistingAssetStrategy;
   existingAssetScope: string;
+  existingGfaRetainedM2: number;
+  existingGfaRemovedM2: number;
   proposedMassRoles: string[];
   podiumStoreys?: number;
   towerStoreys?: number;
-  floorToFloorAssumptions: { podium?: number; tower?: number };
+  alternativeStoreys?: number;
+  floorToFloorAssumptions: { podium?: number; tower?: number; alternative?: number };
   programGFAByUse: Record<string, number>;
   programSharePct: Record<string, number>;
   setbacks: Setbacks;
@@ -247,10 +250,17 @@ export interface SchemeProposal {
   landscapedPermeableKDHIntent: string;
   accessServicingConcept: string;
   phasingConcept: string;
+  commercialPremise: string;
+  planningResponse: string;
+  targetGFA: number;
+  achievedGFA: number;
+  varianceGFA: number;
+  varianceExplanation: string;
   ownerPrioritiesAddressed: string[];
   assumptionsIntroduced: string[];
   rationale: string;
   tradeOffs: string[];
+  informationStillRequired: string[];
   allowNonCompliantStretch: boolean;
 }
 
@@ -271,7 +281,27 @@ export interface SchemeGenerationMetadata {
   acceptedProposalId?: string;
   /** Server-side Taskmaster run that produced this review set, when available. */
   taskmasterRunId?: string;
+  correlationId?: string;
   taskmasterState?: string;
+  providerUsage?: {
+    providerRequests: number;
+    successfulProviderRequests: number;
+    promptTokens: number;
+    candidateTokens: number;
+    toolUsePromptTokens: number;
+    thoughtTokens: number;
+    totalTokens: number;
+    repairCount: number;
+    location?: string;
+    estimatedCostUsd?: number;
+  };
+  preparation?: {
+    validationResult: 'PASSED' | 'FAILED';
+    distinctnessResult: 'PASSED' | 'FAILED';
+    repairAttempted: boolean;
+    repairSucceeded: boolean;
+    informationStillRequired: string[];
+  };
 }
 
 export interface ConfirmedSchemeInputSnapshot {

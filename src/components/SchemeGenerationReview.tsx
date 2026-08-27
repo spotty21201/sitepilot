@@ -17,7 +17,7 @@ interface SchemeGenerationReviewProps {
 }
 
 function providerStatus(generation: SchemeGenerationMetadata) {
-  return generation.modelCalled ? 'Model-generated' : 'Study templates used';
+  return generation.modelCalled ? 'Live Gemini proposals' : 'Template fallback';
 }
 
 function planningStatus(scenario?: DevelopmentScenario) {
@@ -139,7 +139,7 @@ export function SchemeGenerationReview({
                 <p className="mt-1 text-[10px] leading-relaxed text-[var(--text-secondary)]">Review the positioning, assumptions, and planning check for each study before accepting one for editing.</p>
                 <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[9px] text-[var(--text-muted)]">
                   <span>{providerStatus(generation)}</span>
-                  <span>{generation.modelCalled ? generation.model : 'Model not called · template schemes used'}</span>
+                  {generation.modelCalled ? <span>{generation.model}</span> : <span>Model not called · template schemes used</span>}
                   <span>Study version {generation.sourceStudyVersion.replace(/^Study version\s*/i, '')}</span>
                 </div>
               </div>
@@ -155,6 +155,21 @@ export function SchemeGenerationReview({
                   <span><strong>Inputs changed after these studies were prepared.</strong> Generate a new set before relying on the proposals.</span>
                 </div>
               )}
+
+              <details className="mb-3 rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2.5 py-2 text-[9px] text-[var(--text-secondary)]">
+                <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">How these schemes were prepared</summary>
+                <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 leading-relaxed sm:grid-cols-2">
+                  <div><dt className="inline font-semibold">Source: </dt><dd className="inline">{providerStatus(generation)} · {generation.provider}</dd></div>
+                  {generation.modelCalled && <div><dt className="inline font-semibold">Model: </dt><dd className="inline">{generation.model}</dd></div>}
+                  <div><dt className="inline font-semibold">Run / correlation: </dt><dd className="inline font-mono break-all">{generation.taskmasterRunId || 'Not recorded'} / {generation.correlationId || 'Not recorded'}</dd></div>
+                  <div><dt className="inline font-semibold">Confirmed input: </dt><dd className="inline font-mono break-all">{generation.inputHash}</dd></div>
+                  <div><dt className="inline font-semibold">Validation: </dt><dd className="inline">{generation.preparation?.validationResult || (generation.validation.valid ? 'PASSED' : 'FAILED')} · distinctness {generation.preparation?.distinctnessResult || 'not recorded'}</dd></div>
+                  <div><dt className="inline font-semibold">Repair: </dt><dd className="inline">{generation.preparation?.repairAttempted ? (generation.preparation.repairSucceeded ? 'One bounded repair passed' : 'One bounded repair failed') : 'Not required'}</dd></div>
+                  <div><dt className="inline font-semibold">Provider usage: </dt><dd className="inline">{generation.providerUsage?.successfulProviderRequests ?? 0} model calls · {generation.providerUsage?.providerRequests ?? 0} provider requests · {(generation.providerUsage?.totalTokens ?? 0).toLocaleString()} tokens{generation.providerUsage?.location ? ` · ${generation.providerUsage.location}` : ''}{generation.providerUsage?.estimatedCostUsd !== undefined ? ` · approximately $${generation.providerUsage.estimatedCostUsd.toFixed(6)}` : ''}</dd></div>
+                  <div className="sm:col-span-2"><dt className="inline font-semibold">Inputs and assumptions used: </dt><dd className="inline">{generation.assumptions.join(' · ') || 'No additional assumptions recorded'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="inline font-semibold">Information still required: </dt><dd className="inline">{generation.preparation?.informationStillRequired.join(' · ') || 'None recorded'}</dd></div>
+                </dl>
+              </details>
 
               <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-3">
                 {generation.proposals.map((proposal, index) => {
@@ -173,9 +188,11 @@ export function SchemeGenerationReview({
                       <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--text-secondary)]">{proposal.rationale}</p>
 
                       <dl className="mt-2.5 space-y-1.5 text-[9px] leading-relaxed text-[var(--text-muted)]">
-                        <div><dt className="inline font-semibold text-[var(--text-secondary)]">Existing asset: </dt><dd className="inline">{proposal.existingAssetDecision.toLowerCase().replace('_', ' ')} — {proposal.existingAssetScope}</dd></div>
+                        <div><dt className="inline font-semibold text-[var(--text-secondary)]">Existing asset: </dt><dd className="inline">{proposal.existingAssetDecision.toLowerCase().replace('_', ' ')} · {proposal.existingGfaRetainedM2.toLocaleString()} m² retained · {proposal.existingGfaRemovedM2.toLocaleString()} m² removed — {proposal.existingAssetScope}</dd></div>
+                        <div><dt className="inline font-semibold text-[var(--text-secondary)]">Development figure: </dt><dd className="inline">{proposal.achievedGFA.toLocaleString()} m² achieved · {proposal.targetGFA.toLocaleString()} m² target · {proposal.varianceGFA > 0 ? '+' : ''}{proposal.varianceGFA.toLocaleString()} m² variance. {proposal.varianceExplanation}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Public realm: </dt><dd className="inline">{proposal.publicRealmIntent}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Phasing: </dt><dd className="inline">{proposal.phasingConcept}</dd></div>
+                        <div><dt className="inline font-semibold text-[var(--text-secondary)]">Commercial premise: </dt><dd className="inline">{proposal.commercialPremise}</dd></div>
                         <div><dt className="inline font-semibold text-[var(--text-secondary)]">Planning check: </dt><dd className="inline">{planningStatus(scenario)}</dd></div>
                       </dl>
 
@@ -183,9 +200,12 @@ export function SchemeGenerationReview({
                         <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">More study detail</summary>
                         <div className="mt-1.5 space-y-1.5 leading-relaxed">
                           <p><strong>Mass roles:</strong> {proposal.proposedMassRoles.join(' · ')}</p>
+                          <p><strong>Program allocation:</strong> {Object.entries(proposal.programGFAByUse).map(([use, gfa]) => `${use} ${gfa.toLocaleString()} m² (${(proposal.programSharePct[use] || 0).toFixed(1)}%)`).join(' · ')}</p>
                           <p><strong>Access and servicing:</strong> {proposal.accessServicingConcept}</p>
                           <p><strong>Landscape and KDH:</strong> {proposal.landscapedPermeableKDHIntent}</p>
+                          <p><strong>Response to supplied limits:</strong> {proposal.planningResponse}</p>
                           <p><strong>Trade-offs:</strong> {proposal.tradeOffs.join(' · ')}</p>
+                          <p><strong>Information still required:</strong> {proposal.informationStillRequired.join(' · ') || 'None recorded'}</p>
                         </div>
                       </details>
 

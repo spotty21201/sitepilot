@@ -129,6 +129,7 @@ export interface TaskmasterSimulation {
   warnings: string[];
   assumptions: string[];
   programGFAByUse?: Record<string, number>;
+  masses: import('@/types').BuildingMass[];
 }
 
 export interface TaskmasterProviderUsage {
@@ -233,7 +234,7 @@ export function toPublicTaskmasterRun(run: TaskmasterRunRecord): PublicTaskmaste
     modelCalled: run.modelCalled,
     modelCallCount: run.modelCallCount,
     disclosure: run.disclosure,
-    providerUsage: run.providerUsage,
+    providerUsage: { ...run.providerUsage, successfulProviderRequests: run.providerUsage.successfulProviderRequests || 0 },
   };
 }
 

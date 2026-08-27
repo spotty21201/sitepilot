@@ -45,6 +45,7 @@ describe('model-assisted scheme contract and truthful fallbacks', () => {
     expect(result.proposals).toHaveLength(3);
     expect(new Set(result.proposals.map((proposal) => proposal.thesis)).size).toBe(3);
     expect(result.proposals.map((proposal) => proposal.existingAssetDecision)).toEqual(['ADAPT', 'PARTIALLY_RETAIN', 'REPLACE']);
+    expect(result.proposals.every((proposal) => proposal.commercialPremise && proposal.planningResponse && proposal.informationStillRequired.length > 0)).toBe(true);
     expect(result.proposals[2].allowNonCompliantStretch).toBe(false);
   });
 
@@ -82,6 +83,9 @@ describe('existing asset, rear setback, KDH and reporting truth', () => {
     const csv = serializeProjectReportCsv(report);
     expect(csv).toContain('Rear Setback (m)');
     expect(csv).toContain('KDH not demonstrated');
+    expect(csv).toContain('Target GFA (m2)');
+    expect(csv).toContain('Calculated Achieved GFA (m2)');
+    expect(csv).toContain('Variance Explanation');
     expect(csv).not.toContain('51,495');
     const pdf = generateProjectReportPdf({ ...report, options: report.options.map((option) => option.option === 'Option B' ? { ...option, scenarioName: 'Phased Expansion with a deliberately long title for print' } : option) });
     expect(Buffer.from(pdf.slice(0, 8)).toString('latin1')).toContain('%PDF-1.4');

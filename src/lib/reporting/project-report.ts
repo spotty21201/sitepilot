@@ -24,6 +24,20 @@ export interface OptionReportRow {
   sideSetbackMeters: number;
   rearSetbackMeters: number;
   existingAssetStrategy?: string;
+  existingGfaRetainedM2: number | null;
+  existingGfaRemovedM2: number | null;
+  strategyIntent: string;
+  targetGfaM2: number;
+  achievedGfaM2: number;
+  varianceGfaM2: number;
+  varianceExplanation: string;
+  programAllocation: string;
+  publicRealmConcept: string;
+  accessServicingConcept: string;
+  phasingPlan: string;
+  commercialPremise: string;
+  planningResponse: string;
+  informationStillRequired: string[];
   floorLimitBasis: string;
   warnings: string[];
   constraints: Array<{
@@ -255,6 +269,20 @@ export function buildProjectReport(
       sideSetbackMeters: scenario.assumptionsUsed.setbacks.sideLeft,
       rearSetbackMeters: scenario.assumptionsUsed.setbacks.rear,
       existingAssetStrategy: scenario.existingAssetStrategy,
+      existingGfaRetainedM2: scenario.proposal?.existingGfaRetainedM2 ?? null,
+      existingGfaRemovedM2: scenario.proposal?.existingGfaRemovedM2 ?? null,
+      strategyIntent: scenario.proposal?.thesis ?? scenario.description,
+      targetGfaM2: scenario.proposal?.targetGFA ?? scenario.metrics.totalGFA,
+      achievedGfaM2: scenario.proposal?.achievedGFA ?? scenario.metrics.totalGFA,
+      varianceGfaM2: scenario.proposal?.varianceGFA ?? 0,
+      varianceExplanation: scenario.proposal?.varianceExplanation.replace(/Deterministic/gi, 'Calculated').replace(/deterministic/gi, 'calculated') ?? 'No separate strategy target was recorded; the calculated study figure is authoritative.',
+      programAllocation: scenario.proposal ? Object.entries(scenario.proposal.programGFAByUse).map(([use, gfa]) => `${use}: ${gfa.toLocaleString()} m² (${(scenario.proposal?.programSharePct[use] || 0).toFixed(1)}%)`).join(' | ') : 'Not recorded',
+      publicRealmConcept: scenario.proposal?.publicRealmIntent ?? 'Not recorded',
+      accessServicingConcept: scenario.proposal?.accessServicingConcept ?? 'Not recorded',
+      phasingPlan: scenario.proposal?.phasingConcept ?? 'Not recorded',
+      commercialPremise: scenario.proposal?.commercialPremise ?? 'Not recorded',
+      planningResponse: scenario.proposal?.planningResponse ?? 'Not recorded',
+      informationStillRequired: scenario.proposal?.informationStillRequired ?? [],
       floorLimitBasis: floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM'
         ? `height-derived whole-floor limit from supplied maximum: ${floorLimit.formula}`
         : `${floorLimit.kind.replace(/_/g, ' ').toLowerCase()}: ${floorLimit.formula}`,
@@ -285,11 +313,14 @@ export function buildProjectReport(
     && (selected.compliance.startsWith('Within supplied') || selected.compliance.startsWith('Verified planning'))
     && (project.recommendation === 'PROCEED' || project.recommendation === 'CONDITIONAL_PROCEED');
   const missingInputs: string[] = [];
-  if (!project.zoningLimits?.maxHeightMeters) missingInputs.push('Maximum building height');
-  if (!project.zoningLimits?.maxFAR) missingInputs.push('FAR/KLB');
-  if (!project.zoningLimits?.maxCoveragePct) missingInputs.push('Coverage/KDB');
-  if (!project.zoningLimits?.minKDHPct) missingInputs.push('Open-space/KDH requirement');
+  if (project.zoningLimits?.maxHeightMeters === undefined) missingInputs.push('Maximum building height');
+  if (project.zoningLimits?.maxFAR === undefined) missingInputs.push('FAR/KLB');
+  if (project.zoningLimits?.maxCoveragePct === undefined) missingInputs.push('Coverage/KDB');
+  if (project.zoningLimits?.minKDHPct === undefined) missingInputs.push('Open-space/KDH requirement');
   if (!hasVerifiedPlanning) missingInputs.push('Confirmed municipal planning controls');
+  for (const item of options.flatMap((option) => option.informationStillRequired)) {
+    if (!missingInputs.includes(item)) missingInputs.push(item);
+  }
   const dimensionWarning = provenance?.warning;
   const assumptions = [
     'Parcel is represented as a rectangle for planning study purposes; it is not surveyed cadastral geometry.',
@@ -322,10 +353,10 @@ export function buildProjectReport(
     acquisition: amount && currency ? `${currency} ${amount.toLocaleString()}` : 'Not provided',
     planning: {
       status: hasVerifiedPlanning ? 'Confirmed planning information on file' : 'Provided inputs and study assumptions; confirm before reliance',
-      maxHeight: project.zoningLimits?.maxHeightMeters ? `${project.zoningLimits.maxHeightMeters} m` : 'Not provided',
-      maxFAR: project.zoningLimits?.maxFAR ? `${project.zoningLimits.maxFAR.toFixed(2)}x` : 'Not provided',
-      maxCoverage: project.zoningLimits?.maxCoveragePct ? `${project.zoningLimits.maxCoveragePct}%` : 'Not provided',
-      minOpenSpace: project.zoningLimits?.minKDHPct ? `${project.zoningLimits.minKDHPct}%` : 'Not provided',
+      maxHeight: project.zoningLimits?.maxHeightMeters !== undefined ? `${project.zoningLimits.maxHeightMeters} m` : 'Not provided',
+      maxFAR: project.zoningLimits?.maxFAR !== undefined ? `${project.zoningLimits.maxFAR.toFixed(2)}x` : 'Not provided',
+      maxCoverage: project.zoningLimits?.maxCoveragePct !== undefined ? `${project.zoningLimits.maxCoveragePct}%` : 'Not provided',
+      minOpenSpace: project.zoningLimits?.minKDHPct !== undefined ? `${project.zoningLimits.minKDHPct}%` : 'Not provided',
     },
     options,
     currentOption: selected?.option ?? 'No option selected',
@@ -363,6 +394,8 @@ const CSV_HEADERS = [
   'Minimum KDH Requirement', 'Podium Storeys', 'Tower Storeys', 'Governing Floor Count', 'Floor-to-Floor Height (m)', 'Building Height (m)',
   'Footprint (m2)', 'GFA (m2)', 'FAR / KLB', 'Coverage / KDB (%)', 'Unbuilt Site Area (m2)',
   'Unbuilt Site Area (%)', 'KDH Demonstrated', 'Front Setback (m)', 'Symmetric Side Setback (m)', 'Rear Setback (m)', 'Existing Asset Strategy',
+  'Existing GFA Retained (m2)', 'Existing GFA Removed (m2)', 'Strategy Intent', 'Target GFA (m2)', 'Calculated Achieved GFA (m2)', 'Variance (m2)', 'Variance Explanation',
+  'Program Allocation', 'Public Realm Concept', 'Access and Servicing', 'Phasing Plan', 'Commercial Premise', 'Response to Supplied Limits',
   'Planning Check', 'Floor Limit Method', 'Assumptions', 'Warnings', 'Information Still Needed',
   'Sources & Assumptions', 'Generated On', 'Study Version',
 ] as const;
@@ -382,6 +415,9 @@ export function serializeProjectReportCsv(report: ProjectReport): string {
     option.floors, option.floorToFloorMeters, option.heightMeters,
     option.footprintM2, option.gfaM2, option.farKLB, option.coverageKDBPct, option.openSpaceM2,
     option.openSpacePct, option.kdhDemonstrated ? 'Yes' : 'KDH not demonstrated', option.frontSetbackMeters, option.sideSetbackMeters, option.rearSetbackMeters, option.existingAssetStrategy || 'Not applicable',
+    option.existingGfaRetainedM2 ?? 'Not applicable', option.existingGfaRemovedM2 ?? 'Not applicable', option.strategyIntent,
+    option.targetGfaM2, option.achievedGfaM2, option.varianceGfaM2, option.varianceExplanation, option.programAllocation,
+    option.publicRealmConcept, option.accessServicingConcept, option.phasingPlan, option.commercialPremise, option.planningResponse,
     option.compliance, option.floorLimitBasis, [
       ...report.assumptions,
       `Front building setback: ${option.frontSetbackMeters} m`,
@@ -669,6 +705,8 @@ function comparisonMetricRows(): ComparisonMetricRow[] {
     { label: 'Height', value: (option) => `${option.heightMeters.toFixed(1)} m`, height: 18, numeric: true },
     { label: 'Footprint', value: (option) => `${option.footprintM2.toLocaleString()} m²`, height: 18, numeric: true },
     { label: 'GFA', value: (option) => `${option.gfaM2.toLocaleString()} m²`, height: 18, numeric: true },
+    { label: 'Strategy target / achieved', value: (option) => `${option.targetGfaM2.toLocaleString()} / ${option.achievedGfaM2.toLocaleString()} m²`, height: 18, numeric: true },
+    { label: 'Target variance', value: (option) => `${option.varianceGfaM2 > 0 ? '+' : ''}${option.varianceGfaM2.toLocaleString()} m²`, height: 18, numeric: true },
     { label: 'FAR / KLB', value: (option) => `${option.farKLB.toFixed(2)}x`, height: 18, numeric: true },
     { label: 'Coverage / KDB', value: (option) => `${option.coverageKDBPct.toFixed(1)}%`, height: 18, numeric: true },
     { label: 'Unbuilt site area', value: (option) => `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`, height: 18, numeric: true },
@@ -830,11 +868,12 @@ export function generateProjectReportPdf(report: ProjectReport): Uint8Array {
       ['Podium storeys', option.podiumFloors === null ? 'Not applicable' : `${option.podiumFloors} floors`],
       ['Tower storeys', option.towerFloors === null ? 'Not applicable' : `${option.towerFloors} floors`],
       ['Governing height', `${option.heightMeters.toFixed(1)} m`], ['Footprint', `${option.footprintM2.toLocaleString()} m²`],
-      ['Gross floor area', `${option.gfaM2.toLocaleString()} m²`], ['FAR / KLB', `${option.farKLB.toFixed(2)}x`],
+      ['Gross floor area', `${option.gfaM2.toLocaleString()} m²`], ['Strategy target', `${option.targetGfaM2.toLocaleString()} m²`],
+      ['Calculated achieved GFA', `${option.achievedGfaM2.toLocaleString()} m²`], ['Target variance', `${option.varianceGfaM2 > 0 ? '+' : ''}${option.varianceGfaM2.toLocaleString()} m²`], ['FAR / KLB', `${option.farKLB.toFixed(2)}x`],
       ['Coverage / KDB', `${option.coverageKDBPct.toFixed(1)}%`], ['Unbuilt site area', `${option.openSpaceM2.toLocaleString()} m² · ${option.openSpacePct.toFixed(1)}%`],
       ['KDH demonstration', option.kdhDemonstrated ? 'Explicit area entered' : 'KDH not demonstrated'],
       ['Front / sides / rear setbacks', `${option.frontSetbackMeters} m / ${option.sideSetbackMeters} m / ${option.rearSetbackMeters} m`],
-    ], { fontSize: 7.2, rowMinHeight: 21 });
+    ], { fontSize: 7.0, rowMinHeight: 18 });
     detail.text('Planning-limit comparison', 30, 414, 10.5, 'F2', NAVY);
     drawTable(detail, 30, 426, [
       { header: 'Control', width: 130 }, { header: 'Actual', width: 82, align: 'right' }, { header: 'Supplied limit', width: 108, align: 'right' },
@@ -846,6 +885,7 @@ export function generateProjectReportPdf(report: ProjectReport): Uint8Array {
     detail.text('Assumptions and warnings', 595, 414, 10.5, 'F2', NAVY);
     detail.paragraph(option.floorLimitBasis, 595, 432, 217, 6.8, 'F1', MUTED, 8.5, 4);
     detail.paragraph(option.warnings.join(' · ') || 'No current planning breach recorded. Planning controls and source information still require professional confirmation.', 595, 470, 217, 6.8, 'F1', option.warnings.length ? ROSE : MUTED, 8.5, 7);
+    detail.paragraph(`Strategy: ${option.strategyIntent} Target reconciliation: ${option.varianceExplanation} Public realm: ${option.publicRealmConcept} Access and servicing: ${option.accessServicingConcept} Phasing: ${option.phasingPlan} Commercial premise: ${option.commercialPremise} Response to supplied limits: ${option.planningResponse} Information still required: ${option.informationStillRequired.join(' · ') || 'None recorded'}.`, 595, 535, 217, 6.4, 'F1', MUTED, 8, 22);
     pages.push(detail);
   });
 

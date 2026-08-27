@@ -93,7 +93,7 @@ describe('Hotel Sofyan Betawi — Human Acceptance & Investor Workflow Integrati
     expect(scenA.metrics.farKLB).toBeCloseTo(1.87, 2);
     expect(scenA.metrics.siteCoveragePercentage).toBeLessThanOrEqual(55.0);
     expect(scenA.complianceReport?.isCompliant).toBe(true);
-    expect(scenA.complianceReport?.statusPillLabel).toContain('Within Envelope');
+    expect(scenA.complianceReport?.statusPillLabel).toContain('Within supplied study envelope');
 
     // Scenario B: Phased Expansion (Preferred)
     expect(scenB.name).toContain('Scenario B: Phased Expansion');

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { schemePrioritiesSchema, generateSchemeProposals, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
+import { schemePrioritiesSchema, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
 
 function sameOrigin(request: NextRequest): boolean {
   const origin = request.headers.get('origin');
@@ -28,8 +28,11 @@ export async function POST(request: NextRequest) {
       ...(body as SchemeGenerationInput),
       priorities: priorities.data,
     };
-    const result = await generateSchemeProposals(input);
-    return NextResponse.json({ ok: true, ...result });
+    void input;
+    return NextResponse.json({
+      ok: false,
+      error: 'Direct generation is disabled. Start the persisted Taskmaster workflow so model budgets, deterministic checks, repair and approval are enforced.',
+    }, { status: 409 });
   } catch (error) {
     return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'Scheme generation failed.' }, { status: 500 });
   }
