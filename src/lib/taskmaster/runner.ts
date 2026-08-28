@@ -56,7 +56,6 @@ async function recordSchemaAccepted(
   await repository.recordProviderUsage(runId, {
     modelOutputsSchemaAccepted: (usage?.modelOutputsSchemaAccepted || 0) + 1,
     outcome: validatedStrategies ? 'VALIDATED_STRATEGIES' : (usage?.outcome || 'OUTPUT_INVALID'),
-    failureCode: null,
   });
 }
 
@@ -143,6 +142,10 @@ function auditTaskmaster(run: TaskmasterRunRecord, event: string): void {
     modelOutputsReceived: run.providerUsage.modelOutputsReceived,
     modelOutputsSchemaAccepted: run.providerUsage.modelOutputsSchemaAccepted,
     failureCode: run.providerUsage.failureCode,
+    transportFailureCode: run.providerUsage.transportFailureCode,
+    adkFailureCode: run.providerUsage.adkFailureCode,
+    candidateFailureCode: run.providerUsage.candidateFailureCode,
+    schemaValidationFailureCode: run.providerUsage.schemaValidationFailureCode,
   }));
 }
 
@@ -206,7 +209,7 @@ export async function executeTaskmasterRun(
             plan = await withProviderBudget(executionRun.runId, repository, () => runAdkPlan(executionRun.input, context, {
               runId: executionRun.runId,
               correlationId: executionRun.correlationId,
-            }));
+            }), 'ADK_PLANNING');
             await recordSchemaAccepted(repository, executionRun.runId);
             modelCalls += 1;
           } else {
@@ -241,7 +244,7 @@ export async function executeTaskmasterRun(
             });
           },
           onSchemaAccepted: () => recordSchemaAccepted(repository!, executionRun.runId, true),
-        }));
+        }), 'SCHEME_GENERATION');
         modelCalls += 1;
         if (modelGeneration.modelCalled) context.proposals = modelGeneration.proposals;
         const providerUsage = (await repository.getProviderUsage(run.runId)) || run.providerUsage;
@@ -336,7 +339,12 @@ export async function executeTaskmasterRun(
       if (error instanceof ProviderAdapterError) {
         const recorded = await repository.getProviderUsage(run.runId);
         await repository.recordProviderUsage(run.runId, {
-          failureCode: error.code,
+          failureCode: recorded?.failureCode || error.code,
+          ...(!recorded?.failureCode && ['NON_SUCCESS_HTTP', 'EMPTY_RESPONSE_BODY', 'INVALID_RESPONSE_ENVELOPE', 'PROVIDER_TIMEOUT', 'PROVIDER_CONNECTION_INTERRUPTED'].includes(error.code)
+            ? { transportFailureCode: error.code }
+            : error.code === 'SCHEMA_INVALID_OUTPUT'
+              ? { schemaValidationFailureCode: error.code }
+              : { candidateFailureCode: error.code }),
           outcome: (recorded?.modelOutputsReceived || 0) > 0 ? 'OUTPUT_INVALID' : 'REQUEST_FAILED',
         });
       }

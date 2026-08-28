@@ -148,6 +148,15 @@ export interface TaskmasterProviderUsage {
   modelOutputsSchemaAccepted: number;
   repairRequests: number;
   outcome: 'NO_REQUEST' | 'REQUEST_FAILED' | 'OUTPUT_INVALID' | 'VALIDATED_STRATEGIES';
+  /** First authoritative provider or transport boundary failure. */
+  transportFailureCode?: import('./provider-adapter').ProviderFailureCode | null;
+  /** ADK orchestration observation, kept separate from provider transport. */
+  adkFailureCode?: 'ADK_EMPTY_EVENT_STREAM' | 'ADK_EXECUTION_FAILED' | null;
+  /** Candidate extraction or content failure after the provider boundary. */
+  candidateFailureCode?: import('./provider-adapter').ProviderFailureCode | null;
+  /** SitePilot schema validation failure after candidate parsing. */
+  schemaValidationFailureCode?: 'SCHEMA_INVALID_OUTPUT' | null;
+  /** Compatibility field: the earliest authoritative failure, never a later overwrite. */
   failureCode?: import('./provider-adapter').ProviderFailureCode | null;
   lastResponseMetadata?: import('./provider-adapter').SafeProviderResponseMetadata;
   promptTokens: number;

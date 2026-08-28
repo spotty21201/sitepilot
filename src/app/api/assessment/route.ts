@@ -293,8 +293,8 @@ export async function POST(request: NextRequest) {
             httpOptions: { apiVersion: 'v1' },
             responseMimeType: 'application/json',
             responseSchema: planningAssessmentResponseSchema as unknown as Schema,
-            ...(Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
-              ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
+            ...(Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) > 0
+              ? { maxOutputTokens: Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) }
               : {}),
           },
         });

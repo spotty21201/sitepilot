@@ -479,7 +479,11 @@ export async function generateSchemeProposals(
 
   try {
     const { ai, model, provider } = createAiClient();
-    const maxOutputTokens = Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0);
+    const maxOutputTokens = Number(process.env.TASKMASTER_SCHEME_MAX_OUTPUT_TOKENS || 8192);
+    const programProperties = {
+      retail: { type: 'NUMBER' }, office: { type: 'NUMBER' }, residential: { type: 'NUMBER' },
+      hotel: { type: 'NUMBER' }, publicRealmAmenities: { type: 'NUMBER' },
+    };
     const responseSchema = {
       type: 'ARRAY',
       items: {
@@ -490,7 +494,7 @@ export async function generateSchemeProposals(
           existingAssetScope: { type: 'STRING' }, existingGfaRetainedM2: { type: 'NUMBER' }, existingGfaRemovedM2: { type: 'NUMBER' }, proposedMassRoles: { type: 'ARRAY', items: { type: 'STRING' } },
           podiumStoreys: { type: 'INTEGER' }, towerStoreys: { type: 'INTEGER' }, alternativeStoreys: { type: 'INTEGER' },
           floorToFloorAssumptions: { type: 'OBJECT', properties: { podium: { type: 'NUMBER' }, tower: { type: 'NUMBER' }, alternative: { type: 'NUMBER' } } },
-          programGFAByUse: { type: 'OBJECT' }, programSharePct: { type: 'OBJECT' }, setbacks: { type: 'OBJECT', properties: { front: { type: 'NUMBER' }, rear: { type: 'NUMBER' }, sideLeft: { type: 'NUMBER' }, sideRight: { type: 'NUMBER' } } }, footprintIntent: { type: 'STRING' }, publicRealmIntent: { type: 'STRING' },
+          programGFAByUse: { type: 'OBJECT', properties: programProperties, required: Object.keys(programProperties) }, programSharePct: { type: 'OBJECT', properties: programProperties, required: Object.keys(programProperties) }, setbacks: { type: 'OBJECT', properties: { front: { type: 'NUMBER' }, rear: { type: 'NUMBER' }, sideLeft: { type: 'NUMBER' }, sideRight: { type: 'NUMBER' } } }, footprintIntent: { type: 'STRING' }, publicRealmIntent: { type: 'STRING' },
           landscapedPermeableKDHIntent: { type: 'STRING' }, accessServicingConcept: { type: 'STRING' }, phasingConcept: { type: 'STRING' }, operationalContinuityConcept: { type: 'STRING' },
           commercialPremise: { type: 'STRING' }, planningRiskPosture: { type: 'STRING' }, planningResponse: { type: 'STRING' }, targetGFA: { type: 'NUMBER' },
           ownerPrioritiesAddressed: { type: 'ARRAY', items: { type: 'STRING' } }, assumptionsIntroduced: { type: 'ARRAY', items: { type: 'STRING' } },
@@ -524,7 +528,7 @@ export async function generateSchemeProposals(
       response = await ai.models.generateContent({
         model,
         contents: `Repair this invalid SitePilot proposal set once. Return only a schema-valid JSON array of exactly three materially different proposals. Do not add calculated planning totals. Failure class: ${error.code}. Candidate: ${response.text || '[]'}`,
-        config: requestConfig,
+        config: { ...requestConfig, maxOutputTokens: Number(process.env.TASKMASTER_REPAIR_MAX_OUTPUT_TOKENS || 4096) },
       });
       validation = validateCandidate(response.text);
     }

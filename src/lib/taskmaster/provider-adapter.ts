@@ -27,6 +27,10 @@ export interface SafeProviderResponseMetadata {
   responseBytes?: number;
   requestDurationMs: number;
   requestId?: string;
+  providerErrorCode?: number;
+  providerErrorStatus?: string;
+  providerErrorReason?: string;
+  providerErrorDomain?: string;
   responseId?: string;
   modelVersion?: string;
   candidateCount?: number;
@@ -37,6 +41,33 @@ export interface SafeProviderResponseMetadata {
   toolUsePromptTokens?: number;
   thoughtTokens?: number;
   totalTokens?: number;
+}
+
+/** Extract only documented, non-sensitive fields from a Vertex error envelope. */
+export function safeVertexErrorMetadata(body: string): Pick<SafeProviderResponseMetadata,
+  'providerErrorCode' | 'providerErrorStatus' | 'providerErrorReason' | 'providerErrorDomain'> {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const error = (parsed as Record<string, unknown>).error;
+    if (!error || typeof error !== 'object' || Array.isArray(error)) return {};
+    const record = error as Record<string, unknown>;
+    const details = Array.isArray(record.details) ? record.details : [];
+    const errorInfo = details.find((detail) => {
+      if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return false;
+      const type = (detail as Record<string, unknown>)['@type'];
+      return typeof type === 'string' && type.endsWith('google.rpc.ErrorInfo');
+    }) as Record<string, unknown> | undefined;
+    const code = Number(record.code);
+    return {
+      ...(Number.isFinite(code) ? { providerErrorCode: code } : {}),
+      ...(typeof record.status === 'string' && record.status ? { providerErrorStatus: record.status } : {}),
+      ...(typeof errorInfo?.reason === 'string' && errorInfo.reason ? { providerErrorReason: errorInfo.reason } : {}),
+      ...(typeof errorInfo?.domain === 'string' && errorInfo.domain ? { providerErrorDomain: errorInfo.domain } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 const SAFE_MESSAGES: Record<ProviderFailureCode, string> = {

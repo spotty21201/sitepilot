@@ -92,8 +92,54 @@ describe('Vertex response boundary classifications', () => {
       modelOutputsReceived: 0,
       outcome: 'REQUEST_FAILED',
       failureCode: 'NON_SUCCESS_HTTP',
+      transportFailureCode: 'NON_SUCCESS_HTTP',
       lastResponseMetadata: { httpStatus: 503, contentType: 'text/plain', responseBytes: 20, requestId: 'safe-request-id' },
     });
+  });
+
+  it('preserves Vertex HTTP 400 when ADK consumes the transport error and later reports an empty event stream', async () => {
+    const repository = new InMemoryTaskmasterRunRepository();
+    const run = createTaskmasterRun(input, input.objective, 'adapter-adk-empty-after-http-400');
+    await repository.create(run);
+    vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const privateMessage = 'Request schema contained private opportunity content';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 400,
+        status: 'INVALID_ARGUMENT',
+        message: privateMessage,
+        details: [{
+          '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+          reason: 'INVALID_REQUEST_SCHEMA',
+          domain: 'aiplatform.googleapis.com',
+          metadata: { privateField: privateMessage },
+        }],
+      },
+    }), { status: 400, headers: { 'content-type': 'application/json', 'x-goog-request-id': 'vertex-request-400' } })));
+
+    await expect(withProviderBudget(run.runId, repository, async () => {
+      // This mirrors ADK 2.0.0 consuming its fetch failure before yielding an
+      // empty stream, after which SitePilot's candidate parser sees no text.
+      await fetch('https://aiplatform.googleapis.com/v1/projects/p/locations/global/publishers/google/models/m:generateContent').catch(() => undefined);
+      throw new ProviderAdapterError('CANDIDATE_NO_TEXT', { runId: run.runId, correlationId: run.correlationId });
+    }, 'ADK_PLANNING')).rejects.toMatchObject({ code: 'NON_SUCCESS_HTTP' });
+
+    const usage = await repository.getProviderUsage(run.runId);
+    expect(usage).toMatchObject({
+      failureCode: 'NON_SUCCESS_HTTP',
+      transportFailureCode: 'NON_SUCCESS_HTTP',
+      adkFailureCode: 'ADK_EMPTY_EVENT_STREAM',
+      candidateFailureCode: 'CANDIDATE_NO_TEXT',
+      lastResponseMetadata: {
+        httpStatus: 400,
+        providerErrorCode: 400,
+        providerErrorStatus: 'INVALID_ARGUMENT',
+        providerErrorReason: 'INVALID_REQUEST_SCHEMA',
+        providerErrorDomain: 'aiplatform.googleapis.com',
+        requestId: 'vertex-request-400',
+      },
+    });
+    expect(JSON.stringify(usage)).not.toContain(privateMessage);
   });
 
   it.each([

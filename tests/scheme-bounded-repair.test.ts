@@ -53,6 +53,12 @@ describe('bounded proposal repair', () => {
     expect(request.config.httpOptions).toEqual({ apiVersion: 'v1' });
     expect(request.config.responseMimeType).toBe('application/json');
     expect(request.config.responseSchema).toMatchObject({ type: 'ARRAY' });
+    expect(request.config.maxOutputTokens).toBe(8192);
+    expect(request.config.responseSchema.items.properties.programGFAByUse).toMatchObject({
+      type: 'OBJECT',
+      required: ['retail', 'office', 'residential', 'hotel', 'publicRealmAmenities'],
+    });
+    expect(request.config.responseSchema.items.properties.programGFAByUse.properties).toHaveProperty('retail');
     expect(request.config).not.toHaveProperty('responseJsonSchema');
     expect(onSchemaAccepted).toHaveBeenCalledTimes(1);
   });

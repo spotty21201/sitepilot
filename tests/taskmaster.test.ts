@@ -187,6 +187,11 @@ describe('Taskmaster bounded workflow', () => {
     expect(agent.name).toBe('sitepilot_taskmaster');
     expect(agent.tools).toHaveLength(0);
     expect(agent.generateContentConfig).toMatchObject({ httpOptions: { apiVersion: 'v1' } });
+    expect(agent.generateContentConfig).toMatchObject({ maxOutputTokens: 4096 });
+    expect(agent.outputSchema).toMatchObject({
+      type: 'OBJECT',
+      properties: { steps: { items: { properties: { input: { properties: { proposalId: { type: 'STRING' } } } } } } },
+    });
     expect(process.env.TASKMASTER_ALLOW_LIVE_MODEL).not.toBe('true');
   });
 });

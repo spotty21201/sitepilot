@@ -4,9 +4,20 @@ import {
   ProviderAdapterError,
   analyzeVertexEnvelope,
   classifyConnectionFailure,
+  safeVertexErrorMetadata,
   type ProviderRunIdentifiers,
   type SafeProviderResponseMetadata,
 } from './provider-adapter';
+
+export type ProviderExecutionStage = 'ADK_PLANNING' | 'SCHEME_GENERATION';
+
+function failureLayerPatch(code: NonNullable<TaskmasterProviderUsage['failureCode']>): Partial<TaskmasterProviderUsage> {
+  if (['NON_SUCCESS_HTTP', 'EMPTY_RESPONSE_BODY', 'INVALID_RESPONSE_ENVELOPE', 'PROVIDER_TIMEOUT', 'PROVIDER_CONNECTION_INTERRUPTED'].includes(code)) {
+    return { transportFailureCode: code };
+  }
+  if (code === 'SCHEMA_INVALID_OUTPUT') return { schemaValidationFailureCode: code };
+  return { candidateFailureCode: code };
+}
 
 // Vertex can use the global endpoint (`aiplatform.googleapis.com`), a
 // regional endpoint (`asia-southeast2-aiplatform.googleapis.com`) or a
@@ -88,7 +99,8 @@ async function recordResponse(
     successfulProviderRequests: (current?.successfulProviderRequests || 0) + (options.httpSuccess ? 1 : 0),
     modelOutputsReceived: (current?.modelOutputsReceived || 0) + (options.outputReceived ? 1 : 0),
     outcome: options.outputReceived ? 'OUTPUT_INVALID' : 'REQUEST_FAILED',
-    failureCode: options.failureCode ?? null,
+    failureCode: current?.failureCode || options.failureCode || null,
+    ...(options.failureCode ? failureLayerPatch(options.failureCode) : {}),
     promptTokens: (current?.promptTokens || 0) + (metadata.promptTokens || 0),
     candidateTokens: (current?.candidateTokens || 0) + (metadata.candidateTokens || 0),
     toolUsePromptTokens: (current?.toolUsePromptTokens || 0) + (metadata.toolUsePromptTokens || 0),
@@ -109,12 +121,18 @@ async function recordResponse(
  * GenAI SDK both use fetch, so internal turns and repair calls cannot bypass
  * the same persisted request reservation.
  */
-export async function withProviderBudget<T>(runId: string, repository: TaskmasterRunRepository, work: () => Promise<T>): Promise<T> {
+export async function withProviderBudget<T>(
+  runId: string,
+  repository: TaskmasterRunRepository,
+  work: () => Promise<T>,
+  stage?: ProviderExecutionStage,
+): Promise<T> {
   const previousFetch = globalThis.fetch;
   const run = await repository.get(runId);
   const identifiers: ProviderRunIdentifiers = { runId, correlationId: run?.correlationId || 'not-recorded' };
   const maxRequests = Math.max(1, numberEnv('TASKMASTER_MAX_PROVIDER_REQUESTS', 8));
   const maxTokens = Math.max(0, numberEnv('TASKMASTER_MAX_TOTAL_TOKENS', 32768));
+  let firstProviderFailure: ProviderAdapterError | undefined;
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
     const parsed = new URL(url);
@@ -137,6 +155,7 @@ export async function withProviderBudget<T>(runId: string, repository: Taskmaste
         responseBytes: new TextEncoder().encode(body).byteLength,
         requestDurationMs: Date.now() - started,
         requestId: response.headers.get('x-goog-request-id') || response.headers.get('x-request-id') || undefined,
+        ...(!response.ok ? safeVertexErrorMetadata(body) : {}),
       };
       safeResponseLog(identifiers, baseMetadata);
       await recordResponse(runId, repository, reservation.requestNumber, baseMetadata, {
@@ -146,13 +165,15 @@ export async function withProviderBudget<T>(runId: string, repository: Taskmaste
         failureCode: response.ok ? undefined : 'NON_SUCCESS_HTTP',
       });
       if (!response.ok) {
-        throw new ProviderAdapterError('NON_SUCCESS_HTTP', identifiers, baseMetadata);
+        firstProviderFailure ||= new ProviderAdapterError('NON_SUCCESS_HTTP', identifiers, baseMetadata);
+        throw firstProviderFailure;
       }
       try {
         const analysis = analyzeVertexEnvelope(body, baseMetadata, identifiers);
         await recordResponse(runId, repository, reservation.requestNumber, analysis.metadata, { responseReceived: false, httpSuccess: false, outputReceived: analysis.modelOutputReceived, countDuration: false });
       } catch (error) {
         if (error instanceof ProviderAdapterError) {
+          firstProviderFailure ||= error;
           await recordResponse(runId, repository, reservation.requestNumber, error.safeMetadata || baseMetadata, { responseReceived: false, httpSuccess: false, outputReceived: false, countDuration: false, failureCode: error.code });
         }
         throw error;
@@ -163,11 +184,30 @@ export async function withProviderBudget<T>(runId: string, repository: Taskmaste
       const code = classifyConnectionFailure(error);
       const metadata: SafeProviderResponseMetadata = { requestDurationMs: Date.now() - started };
       await recordResponse(runId, repository, reservation.requestNumber, metadata, { responseReceived: false, httpSuccess: false, outputReceived: false, failureCode: code });
-      throw new ProviderAdapterError(code, identifiers, metadata);
+      firstProviderFailure ||= new ProviderAdapterError(code, identifiers, metadata);
+      throw firstProviderFailure;
     }
   };
   try {
-    return await work();
+    try {
+      const result = await work();
+      // Some orchestration layers consume fetch failures and complete with an
+      // empty event stream. Never allow that to turn a failed request into an
+      // apparently successful provider execution.
+      if (firstProviderFailure) throw firstProviderFailure;
+      return result;
+    } catch (error) {
+      if (stage === 'ADK_PLANNING') {
+        await repository.recordProviderUsage(runId, {
+          adkFailureCode: error instanceof ProviderAdapterError && error.code === 'CANDIDATE_NO_TEXT'
+            ? 'ADK_EMPTY_EVENT_STREAM'
+            : 'ADK_EXECUTION_FAILED',
+          ...(error instanceof ProviderAdapterError ? failureLayerPatch(error.code) : {}),
+        });
+      }
+      if (firstProviderFailure) throw firstProviderFailure;
+      throw error;
+    }
   } finally {
     globalThis.fetch = previousFetch;
   }

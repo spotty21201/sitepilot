@@ -86,7 +86,7 @@ function adkPlanSchema(): Record<string, unknown> {
             id: { type: 'STRING' },
             tool: { type: 'STRING', enum: ['get_opportunity_context', 'get_site_and_planning_inputs', 'list_assumptions_and_missing_information', 'calculate_buildable_envelope', 'simulate_development_scheme', 'compare_development_schemes', 'get_scheme_planning_checks', 'prepare_scheme_proposals'] },
             purpose: { type: 'STRING' },
-            input: { type: 'OBJECT' },
+            input: { type: 'OBJECT', properties: { proposalId: { type: 'STRING', enum: ['A', 'B', 'C'] } } },
           },
           required: ['id', 'tool', 'purpose', 'input'],
         },
@@ -118,8 +118,8 @@ export async function buildAdkTaskmasterAgent(input: TaskmasterInput, context: T
       // ADK 2.0.0 uses @google/genai's v1beta1 default unless the supported
       // per-request HTTP option is set. Keep the hosted boundary on stable v1.
       httpOptions: { apiVersion: 'v1' },
-      ...(Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS || 0) > 0
-        ? { maxOutputTokens: Number(process.env.TASKMASTER_MAX_OUTPUT_TOKENS) }
+      ...(Number(process.env.TASKMASTER_ADK_MAX_OUTPUT_TOKENS || 4096) > 0
+        ? { maxOutputTokens: Number(process.env.TASKMASTER_ADK_MAX_OUTPUT_TOKENS || 4096) }
         : {}),
     },
     outputSchema: adkPlanSchema() as unknown as Schema,
