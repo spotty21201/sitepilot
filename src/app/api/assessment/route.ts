@@ -110,6 +110,7 @@ function recomputeScheme(body: AssessmentRequestBody, scenario: AssessmentScenar
     maxHeightMeters: body.zoningLimits?.maxHeightMeters,
     maxFloors: floorLimit.kind === 'HEIGHT_DERIVED_LEGAL_MAXIMUM' ? floorLimit.floorCount ?? undefined : undefined,
     zoningName: body.zoningLimits?.zoneName || body.zoningLimits?.zoneCode,
+    frontageLength: body.frontageLength,
   });
   const targetGFA = scenario.proposal?.targetGFA ?? metrics.totalGFA;
   const varianceGFA = Math.round((metrics.totalGFA - targetGFA) * 100) / 100;

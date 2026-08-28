@@ -77,6 +77,33 @@ describe('AI Planning Assessment API & Security Suite', () => {
     expect(body.userAuthenticated).toBe(false);
   });
 
+  it('uses the supplied frontage when recomputing the authoritative setback envelope', async () => {
+    const setbacks = { front: 10, rear: 8, sideLeft: 6, sideRight: 6 };
+    const mass = {
+      id: 'frontage-regression-mass', name: 'Frontage regression mass', type: 'GENERAL',
+      footprintArea: 1000, floors: 2, floorToFloorHeight: 4, height: 8, gfa: 2000,
+      program: 'MIXED_USE', position: { x: 0, y: 0, z: 0 },
+      dimensions: { width: 20, length: 100, height: 8 },
+    };
+    const req = new NextRequest('http://localhost:3000/api/assessment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', origin: 'http://localhost:3000', host: 'localhost:3000' },
+      body: JSON.stringify({
+        scenarioId: 'frontage-regression', scenarioName: 'Frontage regression', grossSiteArea: 12000,
+        frontageLength: 100, setbacks, masses: [mass],
+        zoningLimits: { maxFAR: 7, maxCoveragePct: 50, maxHeightMeters: 180, setbacks },
+      }),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('WITHIN_SUPPLIED_STUDY_ENVELOPE');
+    expect(body.decision).not.toContain('encroaches into Front Setback');
+    expect(body.deterministicAssessment.schemes[0].evidence)
+      .toContainEqual(expect.objectContaining({ key: 'frontage-regression.setbacks', value: 'No encroachment' }));
+  });
+
   it('correctly assesses non-compliant height overrun scenario (Scenario C: 12 Storeys)', async () => {
     const req = new NextRequest('http://localhost:3000/api/assessment', {
       method: 'POST',
