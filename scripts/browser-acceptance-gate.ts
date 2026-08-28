@@ -341,7 +341,7 @@ async function runAcceptanceGate() {
             'Provisional planning assumptions pending formal municipal zoning certificate (RDTR / KRK).'
           ],
           recommendedAction: 'Obtain official RDTR zoning certificate before contract signing.',
-          model: 'gemini-3.6-flash (Mocked UI Acceptance Test)',
+          model: 'gemini-3.7-flash (Mocked UI Acceptance Test)',
           generatedAt: new Date().toISOString(),
           accessPath: 'same_origin_browser',
           userAuthenticated: false,

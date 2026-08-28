@@ -24,10 +24,9 @@ export function getAiConfig(): AiConfig {
   const location = process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || process.env.GCP_REGION || 'asia-southeast2';
   
   // Repository-wide configured model; live authenticated inference is verified separately.
-  // Use the broadly available GA Vertex model for the hackathon release.
-  // Newer model families can require project allowlisting or organization
-  // policy changes and must be promoted only after a separate live probe.
-  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  // Use the owner-selected GA Vertex model for the hackathon release. Hosted
+  // promotion remains gated on a successful live request in this project.
+  const model = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 
   if (projectId) {
     return {

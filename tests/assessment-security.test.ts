@@ -175,7 +175,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
       json: async () => ({
         ok: true,
         authenticated: true,
-        model: 'gemini-3.6-flash',
+        model: 'gemini-3.7-flash',
         project: 'project-528f858c-325a-45aa-ac0',
         vertexLocation: 'global',
         revision: 'sitepilot-vertex-00002-v60',
@@ -204,7 +204,7 @@ describe('SitePilot Planning Assessment & Security Verification Suite', () => {
     expect(callOptions.headers['Authorization']).toBe('Bearer strong-server-secret-prod-999');
     
     // Check strict provenance
-    expect(data.model).toContain('gemini-3.6-flash (Cloud Run / Vertex AI)');
+    expect(data.model).toContain('gemini-3.7-flash (Cloud Run / Vertex AI)');
     expect(data.accessPath).toBe('authorized_server');
     expect(data.userAuthenticated).toBe(false);
     expect(data.backendAuthenticated).toBe(true);

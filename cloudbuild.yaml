@@ -65,7 +65,7 @@ substitutions:
   _REPO_NAME: 'sitepilot-repo'
   _SERVICE_NAME: 'sitepilot'
   _SERVICE_ACCOUNT: 'sitepilot-runner'
-  _GEMINI_MODEL: 'gemini-3.6-flash'
+  _GEMINI_MODEL: 'gemini-3.7-flash'
 
 options:
   logging: CLOUD_LOGGING_ONLY
