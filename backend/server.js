@@ -10,7 +10,7 @@ const { GoogleGenAI } = require('@google/genai');
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'project-528f858c-325a-45aa-ac0';
 const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'global';
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 const REVISION = process.env.K_REVISION || 'sitepilot-vertex-local';
 const SERVICE_NAME = process.env.K_SERVICE || 'sitepilot-vertex';
 

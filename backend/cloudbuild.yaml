@@ -40,7 +40,7 @@ steps:
       - '--timeout=120s'
       - '--service-account=${_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com'
       - '--set-secrets=SITEPILOT_SERVER_SECRET=sitepilot-server-secret:latest'
-      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-2.5-flash,NODE_ENV=production'
+      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,GEMINI_MODEL=gemini-3.6-flash,NODE_ENV=production'
 
 substitutions:
   _REGION: 'asia-southeast2'

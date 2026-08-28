@@ -12,7 +12,7 @@ describe('Cloud Run Backend Authorization & Integrity Test Suite', () => {
     process.env.SITEPILOT_SERVER_SECRET = TEST_SECRET;
     process.env.GOOGLE_CLOUD_PROJECT = 'project-528f858c-325a-45aa-ac0';
     process.env.GOOGLE_CLOUD_LOCATION = 'global';
-    process.env.GEMINI_MODEL = 'gemini-2.5-flash';
+    process.env.GEMINI_MODEL = 'gemini-3.6-flash';
     process.env.K_REVISION = 'sitepilot-vertex-test-rev';
 
     // Clear module cache and require server
@@ -85,7 +85,7 @@ describe('Cloud Run Backend Authorization & Integrity Test Suite', () => {
     expect(resRoot.status).toBe(200);
     const dataRoot = await resRoot.json();
     expect(dataRoot.status).toBe('ready');
-    expect(dataRoot.model).toBe('gemini-2.5-flash');
+    expect(dataRoot.model).toBe('gemini-3.6-flash');
     expect(dataRoot.project).toBe('project-528f858c-325a-45aa-ac0');
     expect(dataRoot.vertex_location).toBe('global');
 

@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const REQUIRED_CLOUD_RUN_MODEL = 'gemini-2.5-flash';
+const REQUIRED_CLOUD_RUN_MODEL = 'gemini-3.6-flash';
 const REQUIRED_CLOUD_RUN_PROJECT = 'project-528f858c-325a-45aa-ac0';
 const REQUIRED_CLOUD_RUN_LOCATION = 'global';
 

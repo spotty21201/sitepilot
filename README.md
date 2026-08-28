@@ -34,7 +34,7 @@ The geometry engine, planning figures, comparison views, Executive Brief, Source
 
 The New Opportunity flow asks the user to confirm priorities before preparing three studies, including existing-asset approach, development yield, public realm, program mix, phasing, planning-risk tolerance, investment horizon, and whether a clearly labelled stretch study is allowed.
 
-The committed application includes a structured proposal path through `@google/genai`. In the verified local build no provider credentials were configured, so the UI honestly labels the result **Study templates—not model-generated**. The configured release identifier is `gemini-2.5-flash`; live paid inference must still pass the hosted acceptance gate before promotion. When a permitted provider is configured, the server returns the provider and model metadata with the proposals rather than implying a model call that did not happen.
+The committed application includes a structured proposal path through `@google/genai`. In the verified local build no provider credentials were configured, so the UI honestly labels the result **Study templates—not model-generated**. The configured release identifier is `gemini-3.6-flash`; live paid inference must still pass the hosted acceptance gate before promotion. When a permitted provider is configured, the server returns the provider and model metadata with the proposals rather than implying a model call that did not happen.
 
 The boundary is deliberate:
 

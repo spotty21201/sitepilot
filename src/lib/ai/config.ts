@@ -27,7 +27,7 @@ export function getAiConfig(): AiConfig {
   // Use the broadly available GA Vertex model for the hackathon release.
   // Newer model families can require project allowlisting or organization
   // policy changes and must be promoted only after a separate live probe.
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
   if (projectId) {
     return {

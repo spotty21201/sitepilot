@@ -93,7 +93,7 @@ async function recordResponse(
     providerRequests: Math.max(current?.providerRequests || 0, reservationNumber),
     provider: 'VERTEX_AI',
     location: process.env.VERTEX_AI_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || 'global',
-    requestedModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    requestedModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
     actualModel: metadata.modelVersion || current?.actualModel,
     providerResponses: (current?.providerResponses || 0) + (options.responseReceived ? 1 : 0),
     successfulProviderRequests: (current?.successfulProviderRequests || 0) + (options.httpSuccess ? 1 : 0),
