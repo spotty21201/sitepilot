@@ -14,29 +14,29 @@ describe('Google GenAI & Vertex AI Integration Suite', () => {
     process.env = originalEnv;
   });
 
-  it('configures Vertex AI with the repository model gemini-3.7-flash when GOOGLE_CLOUD_PROJECT is set', () => {
+  it('configures Vertex AI with the release model gemini-2.5-flash when GOOGLE_CLOUD_PROJECT is set', () => {
     process.env.GOOGLE_CLOUD_PROJECT = 'sitepilot-hackathon-proj';
     process.env.GOOGLE_CLOUD_LOCATION = 'asia-southeast2';
-    process.env.GEMINI_MODEL = 'gemini-3.7-flash';
+    process.env.GEMINI_MODEL = 'gemini-2.5-flash';
 
     const config = getAiConfig();
     expect(config.provider).toBe('VERTEX_AI');
     expect(config.projectId).toBe('sitepilot-hackathon-proj');
     expect(config.location).toBe('asia-southeast2');
-    expect(config.model).toBe('gemini-3.7-flash');
+    expect(config.model).toBe('gemini-2.5-flash');
 
     const clientInfo = createAiClient();
     expect(clientInfo.provider).toBe('VERTEX_AI');
-    expect(clientInfo.model).toBe('gemini-3.7-flash');
+    expect(clientInfo.model).toBe('gemini-2.5-flash');
     expect(clientInfo.ai).toBeDefined();
     expect(clientInfo.ai.vertexai).toBe(true);
   });
 
-  it('defaults to verified Gemini 3.7 Flash model when GEMINI_MODEL is not explicitly set', () => {
+  it('defaults to the release Gemini 2.5 Flash model when GEMINI_MODEL is not explicitly set', () => {
     delete process.env.GEMINI_MODEL;
     const config = getAiConfig();
-    expect(config.model).toBe('gemini-3.7-flash');
-    expect(config.model).not.toBe('gemini-2.5-flash');
+    expect(config.model).toBe('gemini-2.5-flash');
+    expect(config.model).not.toBe('gemini-3.7-flash');
   });
 
   it('configures Gemini API when GEMINI_API_KEY is set and no GCP project', () => {

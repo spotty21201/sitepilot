@@ -158,7 +158,7 @@ describe('AI Planning Assessment API & Security Suite', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true, status: 200,
       json: async () => ({
-        ok: true, authenticated: true, model: 'gemini-3.7-flash', project: 'project-528f858c-325a-45aa-ac0',
+        ok: true, authenticated: true, model: 'gemini-2.5-flash', project: 'project-528f858c-325a-45aa-ac0',
         vertexLocation: 'global', revision: 'synthetic-revision', correlationId: 'corr-assessment',
         usage: { promptTokens: 10, candidateTokens: 20, totalTokens: 30 },
         response: JSON.stringify({
