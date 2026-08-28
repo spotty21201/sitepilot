@@ -59,6 +59,20 @@ async function recordSchemaAccepted(
   });
 }
 
+export function providerFailureUsagePatch(
+  errorCode: ProviderAdapterError['code'],
+  recordedFailureCode?: TaskmasterRunRecord['providerUsage']['failureCode'],
+): Partial<TaskmasterRunRecord['providerUsage']> {
+  if (recordedFailureCode) return { failureCode: recordedFailureCode };
+  if (['NON_SUCCESS_HTTP', 'EMPTY_RESPONSE_BODY', 'INVALID_RESPONSE_ENVELOPE', 'PROVIDER_TIMEOUT', 'PROVIDER_CONNECTION_INTERRUPTED'].includes(errorCode)) {
+    return { failureCode: errorCode, transportFailureCode: errorCode };
+  }
+  if (errorCode === 'SCHEMA_INVALID_OUTPUT') {
+    return { failureCode: errorCode, schemaValidationFailureCode: errorCode };
+  }
+  return { failureCode: errorCode, candidateFailureCode: errorCode };
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -339,12 +353,7 @@ export async function executeTaskmasterRun(
       if (error instanceof ProviderAdapterError) {
         const recorded = await repository.getProviderUsage(run.runId);
         await repository.recordProviderUsage(run.runId, {
-          failureCode: recorded?.failureCode || error.code,
-          ...(!recorded?.failureCode && ['NON_SUCCESS_HTTP', 'EMPTY_RESPONSE_BODY', 'INVALID_RESPONSE_ENVELOPE', 'PROVIDER_TIMEOUT', 'PROVIDER_CONNECTION_INTERRUPTED'].includes(error.code)
-            ? { transportFailureCode: error.code }
-            : error.code === 'SCHEMA_INVALID_OUTPUT'
-              ? { schemaValidationFailureCode: error.code }
-              : { candidateFailureCode: error.code }),
+          ...providerFailureUsagePatch(error.code, recorded?.failureCode),
           outcome: (recorded?.modelOutputsReceived || 0) > 0 ? 'OUTPUT_INVALID' : 'REQUEST_FAILED',
         });
       }

@@ -9,7 +9,7 @@ import {
 } from '@/lib/taskmaster/provider-adapter';
 import { InMemoryTaskmasterRunRepository } from '@/lib/taskmaster/repository';
 import { withProviderBudget } from '@/lib/taskmaster/provider-budget';
-import { createTaskmasterRun } from '@/lib/taskmaster/runner';
+import { createTaskmasterRun, providerFailureUsagePatch } from '@/lib/taskmaster/runner';
 import { createStudyTemplateProposals, schemeProposalArraySchema, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
 
 const identifiers = { runId: 'tm-provider-fixture', correlationId: 'corr-provider-fixture' };
@@ -140,6 +140,16 @@ describe('Vertex response boundary classifications', () => {
       },
     });
     expect(JSON.stringify(usage)).not.toContain(privateMessage);
+
+    // The runner's terminal catch must preserve the already-recorded layer
+    // observations instead of copying the transport code into candidate state.
+    await repository.recordProviderUsage(run.runId, providerFailureUsagePatch('NON_SUCCESS_HTTP', usage?.failureCode));
+    expect(await repository.getProviderUsage(run.runId)).toMatchObject({
+      failureCode: 'NON_SUCCESS_HTTP',
+      transportFailureCode: 'NON_SUCCESS_HTTP',
+      adkFailureCode: 'ADK_EMPTY_EVENT_STREAM',
+      candidateFailureCode: 'CANDIDATE_NO_TEXT',
+    });
   });
 
   it.each([
