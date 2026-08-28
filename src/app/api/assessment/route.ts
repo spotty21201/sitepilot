@@ -17,7 +17,9 @@ import {
 import { apiModeEnabled, proxyTaskmasterRequest, taskmasterApiEnabled } from '@/lib/taskmaster/vercel-proxy';
 import { createAiClient } from '@/lib/ai/gemini';
 import { getAiConfig } from '@/lib/ai/config';
+import { consumeAssessmentAllowance } from '@/lib/taskmaster/rate-limit';
 import type { Schema } from '@google/genai';
+import { randomUUID } from 'node:crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -209,13 +211,16 @@ export async function POST(request: NextRequest) {
 
     const bodyText = await request.text();
     if (taskmasterApiEnabled()) {
+      const session = request.cookies.get('sitepilot_session')?.value || randomUUID();
       const response = await proxyTaskmasterRequest(request, '/api/assessment', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: bodyText,
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-sitepilot-session': session }, body: bodyText,
       });
-      return new NextResponse(await response.text(), {
+      const result = new NextResponse(await response.text(), {
         status: response.status,
         headers: { 'content-type': response.headers.get('content-type') || 'application/json' },
       });
+      if (!request.cookies.get('sitepilot_session')) result.cookies.set('sitepilot_session', session, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 });
+      return result;
     }
 
     let body: AssessmentRequestBody;
@@ -259,11 +264,23 @@ export async function POST(request: NextRequest) {
       schemes: deterministicSchemes,
     };
 
-    const liveAssessmentAllowed = apiMode
+    const liveAssessmentConfigured = apiMode
       && process.env.ASSESSMENT_FORCE_FALLBACK !== 'true'
       && process.env.TASKMASTER_ALLOW_LIVE_MODEL === 'true'
       && Number(process.env.TASKMASTER_MAX_MODEL_CALLS || 0) > 0
       && getAiConfig().provider !== 'LOCAL_DEVELOPMENT';
+    let liveAssessmentAllowed = liveAssessmentConfigured;
+    if (liveAssessmentConfigured) {
+      try {
+        const allowance = await consumeAssessmentAllowance(request.headers.get('x-sitepilot-session') || 'anonymous-session');
+        liveAssessmentAllowed = allowance.allowed;
+        if (!allowance.allowed) disclosure = allowance.reason || 'The live assessment allowance is exhausted; a deterministic summary was used.';
+      } catch {
+        liveAssessmentAllowed = false;
+        disclosure = 'The live assessment allowance could not be reserved; a deterministic summary was used.';
+        console.warn('[SitePilot Assessment API] Live allowance reservation unavailable; deterministic summary used.');
+      }
+    }
 
     if (liveAssessmentAllowed) {
       providerRequests = 1;

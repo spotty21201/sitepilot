@@ -22,9 +22,10 @@ export async function POST(request: NextRequest) {
   try {
     const bodyText = await request.text();
     if (taskmasterApiEnabled()) {
-      const response = await proxyTaskmasterRequest(request, '/api/taskmaster/runs', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sitepilot-session': request.cookies.get('sitepilot_session')?.value || randomUUID() }, body: bodyText });
+      const session = request.cookies.get('sitepilot_session')?.value || randomUUID();
+      const response = await proxyTaskmasterRequest(request, '/api/taskmaster/runs', { method: 'POST', headers: { 'content-type': 'application/json', 'x-sitepilot-session': session }, body: bodyText });
       const result = new NextResponse(await response.text(), { status: response.status, headers: { 'content-type': response.headers.get('content-type') || 'application/json' } });
-      if (!request.cookies.get('sitepilot_session')) result.cookies.set('sitepilot_session', request.headers.get('x-sitepilot-session') || randomUUID(), { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 });
+      if (!request.cookies.get('sitepilot_session')) result.cookies.set('sitepilot_session', session, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 });
       return result;
     }
     const body = JSON.parse(bodyText) as { goal?: string; idempotencyKey?: string; input?: unknown };

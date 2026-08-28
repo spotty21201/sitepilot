@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { POST } from '@/app/api/assessment/route';
 import { NextRequest } from 'next/server';
 import { GOLDEN_PROJECT } from '@/lib/mock-data/golden-project';
+import { resetRateLimitStateForTests } from '@/lib/taskmaster/rate-limit';
 
 describe('AI Planning Assessment API & Security Suite', () => {
   const originalEnv = process.env;
@@ -9,6 +10,7 @@ describe('AI Planning Assessment API & Security Suite', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
+    resetRateLimitStateForTests();
   });
 
   afterEach(() => {
@@ -212,5 +214,44 @@ describe('AI Planning Assessment API & Security Suite', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(result.aiAssessment).toMatchObject({ modelCalled: false, providerRequests: 0, providerResponses: 0, totalTokens: 0 });
     expect(result.aiAssessment.disclosure).toBe('Deterministic study summary — no model request made');
+  });
+
+  it('returns a deterministic summary with zero provider accounting when the live allowance is exhausted', async () => {
+    process.env.TASKMASTER_API_MODE = 'true';
+    process.env.TASKMASTER_ALLOW_LIVE_MODEL = 'true';
+    process.env.TASKMASTER_MAX_MODEL_CALLS = '1';
+    process.env.TASKMASTER_FIRESTORE_ENABLED = 'false';
+    process.env.ASSESSMENT_DAILY_LIVE_LIMIT = '0';
+    process.env.GOOGLE_CLOUD_PROJECT = 'synthetic-project';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const scenario = GOLDEN_PROJECT.scenarios[0];
+    const request = new NextRequest('http://localhost:3000/api/assessment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', authorization: 'Bearer synthetic-id-token', 'x-sitepilot-session': 'rate-limited-session' },
+      body: JSON.stringify({
+        scenarioId: scenario.id,
+        scenarioName: scenario.name,
+        grossSiteArea: GOLDEN_PROJECT.site.grossSiteArea,
+        frontageLength: GOLDEN_PROJECT.site.frontageLength,
+        setbacks: scenario.assumptionsUsed.setbacks,
+        masses: scenario.masses,
+      }),
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(result.aiAssessment).toMatchObject({
+      modelCalled: false,
+      providerRequests: 0,
+      providerResponses: 0,
+      modelOutputsReceived: 0,
+      modelOutputsSchemaAccepted: 0,
+      repairRequests: 0,
+      promptTokens: 0,
+      candidateTokens: 0,
+      totalTokens: 0,
+      disclosure: 'The live assessment allowance is exhausted; a deterministic summary was used.',
+    });
   });
 });
