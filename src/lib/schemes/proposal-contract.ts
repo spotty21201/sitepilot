@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { ConfirmedSchemeInputSnapshot, ExistingAssetStrategy, Project, SchemeProposal } from '@/types';
 import { getAiConfig } from '@/lib/ai/config';
-import { createAiClient } from '@/lib/ai/gemini';
+import { createAiClient, hostedGenerationCompatibility } from '@/lib/ai/gemini';
 import { ProviderAdapterError, isRepairEligible, parseStructuredCandidate, type ProviderRunIdentifiers } from '@/lib/taskmaster/provider-adapter';
 
 export const schemePrioritiesSchema = z.object({
@@ -479,7 +479,7 @@ export async function generateSchemeProposals(
 
   try {
     const { ai, model, provider } = createAiClient();
-    const maxOutputTokens = Number(process.env.TASKMASTER_SCHEME_MAX_OUTPUT_TOKENS || 8192);
+    const maxOutputTokens = Number(process.env.TASKMASTER_SCHEME_MAX_OUTPUT_TOKENS || 4096);
     const programProperties = {
       retail: { type: 'NUMBER' }, office: { type: 'NUMBER' }, residential: { type: 'NUMBER' },
       hotel: { type: 'NUMBER' }, publicRealmAmenities: { type: 'NUMBER' },
@@ -504,7 +504,7 @@ export async function generateSchemeProposals(
       },
     };
     const requestConfig = {
-      httpOptions: { apiVersion: 'v1' },
+      ...hostedGenerationCompatibility(model),
       responseMimeType: 'application/json',
       ...(Number.isFinite(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
       responseSchema,

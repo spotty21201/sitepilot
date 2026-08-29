@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { getAiConfig } from '@/lib/ai/config';
-import { createAiClient, extractDocumentFindings } from '@/lib/ai/gemini';
+import { createAiClient, extractDocumentFindings, hostedGenerationCompatibility } from '@/lib/ai/gemini';
 
 describe('Google GenAI & Vertex AI Integration Suite', () => {
   const originalEnv = process.env;
@@ -37,6 +37,13 @@ describe('Google GenAI & Vertex AI Integration Suite', () => {
     const config = getAiConfig();
     expect(config.model).toBe('gemini-3.7-flash');
     expect(config.model).not.toBe('gemini-3.6-flash');
+  });
+
+  it('uses stable v1, one provider attempt, and Gemini 3.7 thinking-level compatibility', () => {
+    expect(hostedGenerationCompatibility('gemini-3.7-flash')).toEqual({
+      httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } },
+      thinkingConfig: { thinkingLevel: 'LOW' },
+    });
   });
 
   it('configures Gemini API when GEMINI_API_KEY is set and no GCP project', () => {

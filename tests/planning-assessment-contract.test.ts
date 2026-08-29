@@ -3,6 +3,7 @@ import type { DeterministicSchemeAssessment, PlanningAssessment } from '@/types'
 import {
   assessmentIsCurrent,
   assessmentPrompt,
+  buildAssessmentQuestionHash,
   buildSimulationResultHash,
   createDeterministicAiSummary,
   validateAiPlanningAssessment,
@@ -91,12 +92,14 @@ describe('post-simulation advisory assessment contract', () => {
     const binding = {
       opportunityInputHash: 'input-1', sourceStudyVersion: 'Study version 1', activeSchemeId: 'a',
       canonicalRevisionIds: { a: 'rev-a', b: 'rev-b', c: 'rev-c' }, simulationResultHash: buildSimulationResultHash(input),
+      questionHash: buildAssessmentQuestionHash('Should continuity lead?'),
     };
     const assessment = { binding } as unknown as PlanningAssessment;
     expect(assessmentIsCurrent(assessment, binding)).toBe(true);
     expect(assessmentIsCurrent(assessment, { ...binding, activeSchemeId: 'b' })).toBe(false);
     expect(assessmentIsCurrent(assessment, { ...binding, canonicalRevisionIds: { ...binding.canonicalRevisionIds, b: 'rev-b2' } })).toBe(false);
     expect(assessmentIsCurrent(assessment, { ...binding, simulationResultHash: 'changed' })).toBe(false);
+    expect(assessmentIsCurrent(assessment, { ...binding, questionHash: buildAssessmentQuestionHash('Different question') })).toBe(false);
   });
 
   it('creates an honest zero-request fallback and keeps KDH language explicit', () => {

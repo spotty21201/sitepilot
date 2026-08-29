@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { DevelopmentScenario, SiteGeometry, PlanningAssessment, Project } from '@/types';
+import { buildAssessmentQuestionHash } from '@/lib/assessment/planning-assessment';
 import { checkSetbackEncroachments, exportToColladaDAE, getCanonicalParcelBounds } from '@/lib/geometry/engine';
 import { deriveScenarioFloorLimit, getScenarioFloorLimit, getScenarioFloorToFloorHeight } from '@/lib/opportunity/canonical-opportunity';
 import {
@@ -128,22 +129,18 @@ export function ScenarioControls({
   const [downloadedToast, setDownloadedToast] = useState<string | null>(null);
   const [showXmlModal, setShowXmlModal] = useState(false);
   const [rawXml, setRawXml] = useState('');
-  const [prevScenarioId, setPrevScenarioId] = useState(activeScenarioId);
-  const [assessment, setAssessment] = useState<PlanningAssessment | null>(project?.planningAssessment ?? null);
+  const [generatedAssessment, setGeneratedAssessment] = useState<PlanningAssessment | null>(null);
   const [assessedSnapshot, setAssessedSnapshot] = useState<string | null>(null);
   const [isLoadingAssessment, setIsLoadingAssessment] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
-  const [investorQuery, setInvestorQuery] = useState('');
+  const [investorQueryOverride, setInvestorQueryOverride] = useState<string | null>(null);
   
   const modalRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
 
-  if (activeScenarioId !== prevScenarioId) {
-    setPrevScenarioId(activeScenarioId);
-    setAssessmentError(null);
-  }
-
   const activeScenario = scenarios.find(s => s.id === activeScenarioId) || scenarios[0];
+  const assessment = project?.planningAssessment ?? generatedAssessment;
+  const investorQuery = investorQueryOverride ?? assessment?.question ?? '';
   const metrics = activeScenario.metrics;
   const currentSetback = activeScenario.assumptionsUsed.setbacks.front;
   const currentSideSetback = activeScenario.assumptionsUsed.setbacks.sideLeft;
@@ -297,7 +294,6 @@ export function ScenarioControls({
 
   const getCurrentSnapshot = useCallback(() => {
     return JSON.stringify({
-      activeScenarioId,
       opportunityInputHash: project?.confirmedSchemeInput?.inputHash,
       studyVersion: project?.confirmedSchemeInput?.studyVersion,
       planning: project?.zoningLimits,
@@ -310,7 +306,7 @@ export function ScenarioControls({
         proposal: scenario.proposal ? { targetGFA: scenario.proposal.targetGFA, asset: scenario.proposal.existingAssetDecision, program: scenario.proposal.programGFAByUse } : undefined,
       })),
     });
-  }, [activeScenarioId, project?.confirmedSchemeInput?.inputHash, project?.confirmedSchemeInput?.studyVersion, project?.zoningLimits, scenarios, site.landscapedPermeableAreaM2]);
+  }, [project?.confirmedSchemeInput?.inputHash, project?.confirmedSchemeInput?.studyVersion, project?.zoningLimits, scenarios, site.landscapedPermeableAreaM2]);
 
   const baseFloors = activeScenario.originalMasses 
     ? Math.max(...activeScenario.originalMasses.map(m => m.floors), 1)
@@ -320,22 +316,30 @@ export function ScenarioControls({
     : metrics.totalGFA;
 
   const assessmentBindingStale = Boolean(assessment && (
-    assessment.binding.activeSchemeId !== activeScenarioId
-    || assessment.binding.opportunityInputHash !== (project?.confirmedSchemeInput?.inputHash || 'not-recorded')
+    assessment.binding.opportunityInputHash !== (project?.confirmedSchemeInput?.inputHash || 'not-recorded')
     || assessment.binding.sourceStudyVersion !== (project?.confirmedSchemeInput?.studyVersion || 'not-recorded')
     || scenarios.some((scenario) => assessment.binding.canonicalRevisionIds[scenario.id] !== (scenario.canonicalRevision?.revisionId || `unversioned-${scenario.id}`))
   ));
   const isAssessmentStale = Boolean(assessment && (assessmentBindingStale || (assessedSnapshot && assessedSnapshot !== getCurrentSnapshot())));
 
+  useEffect(() => {
+    if (!assessment || !isAssessmentStale || assessment.stale) return;
+    const staleAssessment = { ...assessment, stale: true };
+    onAssessmentPrepared?.(staleAssessment);
+  }, [assessment, isAssessmentStale, onAssessmentPrepared]);
+
   const handleGenerateAssessment = async (overrideQuery?: string) => {
-    if (assessment && !isAssessmentStale) {
+    const queryToSend = overrideQuery !== undefined ? overrideQuery : investorQuery;
+    const questionHash = buildAssessmentQuestionHash(queryToSend);
+    if (assessment && !isAssessmentStale
+      && assessment.binding.activeSchemeId === activeScenarioId
+      && assessment.binding.questionHash === questionHash) {
       setAssessmentError(null);
       return;
     }
     setIsLoadingAssessment(true);
     setAssessmentError(null);
     const snapshot = getCurrentSnapshot();
-    const queryToSend = overrideQuery !== undefined ? overrideQuery : investorQuery;
 
     try {
       const res = await fetch('/api/assessment', {
@@ -343,6 +347,7 @@ export function ScenarioControls({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           scenarioId: activeScenario.id,
+          projectId: project?.id,
           scenarioName: activeScenario.name,
           grossSiteArea: site.grossSiteArea,
           frontageLength: site.frontageLength,
@@ -383,7 +388,7 @@ export function ScenarioControls({
           ? data.error
           : 'The assessment could not be prepared. Try again later.');
       }
-      setAssessment(data);
+      setGeneratedAssessment(data);
       setAssessedSnapshot(snapshot);
       onAssessmentPrepared?.(data);
     } catch (err) {
@@ -848,7 +853,7 @@ export function ScenarioControls({
               <input
                 type="text"
                 value={investorQuery}
-                onChange={(e) => setInvestorQuery(e.target.value)}
+                onChange={(e) => setInvestorQueryOverride(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isLoadingAssessment) {
                     e.preventDefault();
@@ -879,7 +884,7 @@ export function ScenarioControls({
                   key={chip}
                   type="button"
                   onClick={() => {
-                    setInvestorQuery(chip);
+                    setInvestorQueryOverride(chip);
                     handleGenerateAssessment(chip);
                   }}
                   disabled={isLoadingAssessment}
@@ -965,7 +970,7 @@ export function ScenarioControls({
               <div className="rounded-[var(--radius-control)] border border-[var(--status-investigation)] bg-[var(--status-investigation-surface)] p-2 space-y-1.5">
                 <div className="flex flex-wrap items-center justify-between gap-1 text-[9px] text-[var(--text-muted)]">
                   <strong className="text-[var(--status-investigation)]">{assessment.aiAssessment.disclosure}</strong>
-                  <span>{assessment.aiAssessment.modelCalled ? assessment.model : 'No accepted model output'} · source revision {assessment.binding.canonicalRevisionIds[activeScenario.id] || 'not recorded'}</span>
+                  <span>{assessment.aiAssessment.provider} · {assessment.aiAssessment.modelCalled ? assessment.model : 'No accepted model output'} · {assessment.aiAssessment.providerRequests} requests / {assessment.aiAssessment.successfulProviderRequests} successful · {assessment.aiAssessment.modelOutputsSchemaAccepted} accepted · {assessment.aiAssessment.totalTokens.toLocaleString()} tokens · source revision {assessment.binding.canonicalRevisionIds[activeScenario.id] || 'not recorded'}</span>
                 </div>
                 <p className="text-[11px] leading-relaxed text-[var(--text-primary)]">{assessment.aiAssessment.activeSchemeAssessment.executiveInterpretation}</p>
                 <dl className="space-y-1 text-[10px] text-[var(--text-secondary)]">

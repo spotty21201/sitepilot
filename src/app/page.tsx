@@ -118,14 +118,9 @@ function markUnacceptedSchemesStale(rawProject: Project): Project {
     : rawProject;
 }
 
-function getInitialCases(): CaseSummary[] {
-  if (typeof window !== 'undefined') {
-    try {
-      return listCases();
-    } catch {
-      // Fallback
-    }
-  }
+export function getHydrationSafeInitialCases(): CaseSummary[] {
+  // This must be identical during SSR and the browser's first render. Stored
+  // cases are loaded after mount by the hydration effect below.
   return [{
     id: GOLDEN_PROJECT.id,
     name: GOLDEN_PROJECT.name,
@@ -152,7 +147,7 @@ export default function SitePilotDecisionRoom() {
   const [schemeGenerationProgress, setSchemeGenerationProgress] = useState<string | null>(null);
   const [taskmasterRunState, setTaskmasterRunState] = useState<string | null>(null);
   const [isSchemeReviewOpen, setIsSchemeReviewOpen] = useState(false);
-  const [casesList, setCasesList] = useState<CaseSummary[]>(getInitialCases);
+  const [casesList, setCasesList] = useState<CaseSummary[]>(getHydrationSafeInitialCases);
   const projectRef = useRef(project);
   const spatialLabOpenTimerRef = useRef<number | null>(null);
   const taskmasterPollTimerRef = useRef<number | null>(null);
@@ -825,6 +820,7 @@ export default function SitePilotDecisionRoom() {
           </section>
           <section className="col-span-1 lg:col-span-3 min-h-[600px] lg:h-full overflow-hidden">
             <ScenarioControls
+              key={`spatial-lab-controls:${project.id}`}
               site={{ ...project.site, setbacks: activeScenario.assumptionsUsed.setbacks, projectName: project.name, address: project.location.address }}
               project={project}
               scenarios={project.scenarios}
@@ -888,6 +884,7 @@ export default function SitePilotDecisionRoom() {
         {/* Right Column: Scenarios & Development Metrics (3 cols) */}
         <section className="col-span-1 lg:col-span-3 min-h-[480px] lg:h-full overflow-hidden">
           <ScenarioControls
+            key={`decision-room-controls:${project.id}`}
             site={{ 
               ...project.site, 
               setbacks: activeScenario.assumptionsUsed.setbacks,

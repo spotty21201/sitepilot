@@ -1,4 +1,6 @@
 # SitePilot — Product Requirements Document
+
+> Historical product-direction document. It includes deferred concepts and is not evidence of the implemented hackathon scope. The current demonstrated product is defined by `README.md`, `docs/HACKATHON_COMPLIANCE.md`, and the tested source.
 ## Intelligent Site Due Diligence, Development Analysis & Early Design Workspace
 
 **Version:** 1.0  

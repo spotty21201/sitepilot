@@ -370,7 +370,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   Generation will be bound to this exact snapshot, its study version, and input hash. SitePilot remains authoritative for geometry and planning figures.
                 </p>
               </div>
-              <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Confirmed opportunity summary">
+              <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="group" aria-label="Confirmed opportunity summary">
                 {reviewRows.map((row) => (
                   <div key={row.label} className="rounded-[var(--radius-control)] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2">
                     <dt className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">{row.label}</dt>
@@ -379,7 +379,7 @@ export function NewCaseModal({ isOpen, onClose, onCreateCase }: NewCaseModalProp
                   </div>
                 ))}
               </dl>
-              <div className="flex flex-wrap gap-1.5" aria-label="Return to edit intake section">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Return to edit intake section">
                 {([['SITE', 'Edit site'], ['EXISTING', 'Edit existing asset'], ['ZONING', 'Edit planning'], ['VALUATION', 'Edit commercials']] as const).map(([tab, label]) => (
                   <button key={tab} type="button" className="button-secondary px-2 py-1 text-[9px]" onClick={() => { setActiveTab(tab); setShowPriorityConfirmation(false); }}>{label}</button>
                 ))}

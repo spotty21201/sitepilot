@@ -98,6 +98,10 @@ export function hashAssessmentValue(value: unknown): string {
   return `assessment-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
 
+export function buildAssessmentQuestionHash(question: string | undefined): string {
+  return hashAssessmentValue((question || '').trim().replace(/\s+/g, ' '));
+}
+
 export function buildSimulationResultHash(schemes: DeterministicSchemeAssessment[]): string {
   return hashAssessmentValue(schemes.map((scheme) => ({
     schemeId: scheme.schemeId,
@@ -123,13 +127,14 @@ export function buildSimulationResultHash(schemes: DeterministicSchemeAssessment
 
 export function assessmentIsCurrent(
   assessment: PlanningAssessment | undefined,
-  binding: Pick<PlanningAssessment['binding'], 'opportunityInputHash' | 'sourceStudyVersion' | 'canonicalRevisionIds' | 'simulationResultHash' | 'activeSchemeId'>,
+  binding: Pick<PlanningAssessment['binding'], 'opportunityInputHash' | 'sourceStudyVersion' | 'canonicalRevisionIds' | 'simulationResultHash' | 'activeSchemeId' | 'questionHash'>,
 ): boolean {
-  if (!assessment) return false;
+  if (!assessment || assessment.stale) return false;
   return assessment.binding.opportunityInputHash === binding.opportunityInputHash
     && assessment.binding.sourceStudyVersion === binding.sourceStudyVersion
     && assessment.binding.simulationResultHash === binding.simulationResultHash
     && assessment.binding.activeSchemeId === binding.activeSchemeId
+    && assessment.binding.questionHash === binding.questionHash
     && stable(assessment.binding.canonicalRevisionIds) === stable(binding.canonicalRevisionIds);
 }
 

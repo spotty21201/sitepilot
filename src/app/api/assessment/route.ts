@@ -10,12 +10,13 @@ import { deriveScenarioFloorLimit } from '@/lib/opportunity/canonical-opportunit
 import {
   assessmentPrompt,
   buildSimulationResultHash,
+  buildAssessmentQuestionHash,
   createDeterministicAiSummary,
   planningAssessmentResponseSchema,
   validateAiPlanningAssessment,
 } from '@/lib/assessment/planning-assessment';
 import { apiModeEnabled, proxyTaskmasterRequest, taskmasterApiEnabled } from '@/lib/taskmaster/vercel-proxy';
-import { createAiClient } from '@/lib/ai/gemini';
+import { createAiClient, hostedGenerationCompatibility } from '@/lib/ai/gemini';
 import { getAiConfig } from '@/lib/ai/config';
 import { consumeAssessmentAllowance } from '@/lib/taskmaster/rate-limit';
 import type { Schema } from '@google/genai';
@@ -51,6 +52,7 @@ interface AssessmentScenarioInput {
 }
 
 interface AssessmentRequestBody extends AssessmentScenarioInput {
+  projectId?: string;
   grossSiteArea: number;
   frontageLength?: number;
   landscapedPermeableAreaM2?: number;
@@ -237,6 +239,8 @@ export async function POST(request: NextRequest) {
     const active = deterministicSchemes.find((scheme) => scheme.schemeId === activeSchemeId) || deterministicSchemes[0];
     const generatedAt = new Date().toISOString();
     const simulationResultHash = buildSimulationResultHash(deterministicSchemes);
+    const normalizedQuestion = body.userQuery?.trim().replace(/\s+/g, ' ') || '';
+    const questionHash = buildAssessmentQuestionHash(normalizedQuestion);
     const fallback = createDeterministicAiSummary(deterministicSchemes, active.schemeId);
     let acceptedAi = fallback;
     let modelCalled = false;
@@ -244,10 +248,15 @@ export async function POST(request: NextRequest) {
     let providerResponses = 0;
     let modelOutputsReceived = 0;
     let modelOutputsSchemaAccepted = 0;
-    const repairRequests = 0;
+    let repairRequests = 0;
+    let successfulProviderRequests = 0;
     let promptTokens = 0;
     let candidateTokens = 0;
+    let toolUsePromptTokens = 0;
+    let thoughtTokens = 0;
     let totalTokens = 0;
+    let provider = 'LOCAL_DEVELOPMENT';
+    let failureClassification: string | undefined;
     let disclosure = 'Deterministic study summary — no model request made';
     let model = 'Template deterministic summary';
     let backendAuthenticated = false;
@@ -283,31 +292,48 @@ export async function POST(request: NextRequest) {
     }
 
     if (liveAssessmentAllowed) {
-      providerRequests = 1;
-      const { ai, model: configuredModel, provider } = createAiClient();
-      try {
-        const response = await ai.models.generateContent({
-          model: configuredModel,
-          contents: assessmentPrompt(evidencePackage, body.userQuery),
-          config: {
-            httpOptions: { apiVersion: 'v1' },
-            responseMimeType: 'application/json',
-            responseSchema: planningAssessmentResponseSchema as unknown as Schema,
-            ...(Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) > 0
-              ? { maxOutputTokens: Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) }
-              : {}),
-          },
-        });
-        providerResponses = 1;
+      const { ai, model: configuredModel, provider: configuredProvider } = createAiClient();
+      // Record the configured provider even when transport or validation fails;
+      // modelCalled remains reserved for an accepted model output.
+      provider = configuredProvider;
+      model = configuredModel;
+      const requestConfig = {
+        ...hostedGenerationCompatibility(configuredModel),
+        responseMimeType: 'application/json',
+        responseSchema: planningAssessmentResponseSchema as unknown as Schema,
+        ...(Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) > 0
+          ? { maxOutputTokens: Number(process.env.ASSESSMENT_MAX_OUTPUT_TOKENS || 4096) }
+          : {}),
+      };
+      const requestAssessment = async (contents: string) => {
+        providerRequests += 1;
+        const response = await ai.models.generateContent({ model: configuredModel, contents, config: requestConfig });
+        providerResponses += 1;
+        successfulProviderRequests += 1;
         const text = response.text;
-        if (text?.trim()) modelOutputsReceived = 1;
-        const candidate = safeJsonCandidate(text);
-        acceptedAi = validateAiPlanningAssessment(candidate, deterministicSchemes, active.schemeId);
+        if (text?.trim()) modelOutputsReceived += 1;
+        promptTokens += response.usageMetadata?.promptTokenCount || 0;
+        candidateTokens += response.usageMetadata?.candidatesTokenCount || 0;
+        toolUsePromptTokens += response.usageMetadata?.toolUsePromptTokenCount || 0;
+        thoughtTokens += response.usageMetadata?.thoughtsTokenCount || 0;
+        totalTokens += response.usageMetadata?.totalTokenCount || 0;
+        return text;
+      };
+      try {
+        let text = await requestAssessment(assessmentPrompt(evidencePackage, body.userQuery));
+        try {
+          acceptedAi = validateAiPlanningAssessment(safeJsonCandidate(text), deterministicSchemes, active.schemeId);
+        } catch (validationError) {
+          const nonEmptyOutput = Boolean(text?.trim());
+          if (!nonEmptyOutput || process.env.TASKMASTER_ALLOW_MODEL_REPAIR !== 'true') throw validationError;
+          repairRequests = 1;
+          text = await requestAssessment(`${assessmentPrompt(evidencePackage, body.userQuery)}\n\nThe previous non-empty JSON output did not satisfy the server contract. Repair it once. Return only the required JSON; do not add metrics or evidence keys outside the supplied package.`);
+          acceptedAi = validateAiPlanningAssessment(safeJsonCandidate(text), deterministicSchemes, active.schemeId);
+        }
         modelOutputsSchemaAccepted = 1;
         modelCalled = true;
         disclosure = 'AI assessment grounded in SitePilot results';
-        model = configuredModel;
-        backendAuthenticated = provider === 'VERTEX_AI';
+        backendAuthenticated = configuredProvider === 'VERTEX_AI';
         provenance = {
           model: configuredModel,
           project: getAiConfig().projectId || 'not-recorded',
@@ -315,10 +341,8 @@ export async function POST(request: NextRequest) {
           revision: process.env.K_REVISION,
           correlationId: request.headers.get('x-sitepilot-correlation-id') || undefined,
         };
-        promptTokens = response.usageMetadata?.promptTokenCount || 0;
-        candidateTokens = response.usageMetadata?.candidatesTokenCount || 0;
-        totalTokens = response.usageMetadata?.totalTokenCount || promptTokens + candidateTokens;
       } catch (error) {
+        failureClassification = modelOutputsReceived > 0 ? 'ASSESSMENT_STRUCTURED_OUTPUT_REJECTED' : 'ASSESSMENT_PROVIDER_OR_EMPTY_RESPONSE';
         console.error('[SitePilot Assessment API] Model assessment was not accepted.', { code: error instanceof Error ? error.name : 'ASSESSMENT_PROVIDER_FAILURE' });
         disclosure = providerResponses > 0
           ? 'Deterministic study summary — model response not accepted'
@@ -337,6 +361,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: `Cloud Run Vertex AI service error (HTTP ${response.status}).`, ok: false }, { status: response.status });
       }
       providerResponses = 1;
+      successfulProviderRequests = 1;
+      provider = 'VERTEX_AI';
       const data: Record<string, unknown> = await response.json();
       if (data.ok !== true || data.authenticated !== true || data.model !== REQUIRED_CLOUD_RUN_MODEL || data.project !== REQUIRED_CLOUD_RUN_PROJECT
         || data.vertexLocation !== REQUIRED_CLOUD_RUN_LOCATION || typeof data.revision !== 'string' || !data.revision
@@ -351,6 +377,8 @@ export async function POST(request: NextRequest) {
       promptTokens = typeof usage.promptTokens === 'number' ? usage.promptTokens : 0;
       candidateTokens = typeof usage.candidateTokens === 'number' ? usage.candidateTokens : 0;
       totalTokens = typeof usage.totalTokens === 'number' ? usage.totalTokens : promptTokens + candidateTokens;
+      toolUsePromptTokens = typeof usage.toolUsePromptTokens === 'number' ? usage.toolUsePromptTokens : 0;
+      thoughtTokens = typeof usage.thoughtTokens === 'number' ? usage.thoughtTokens : 0;
       try {
         const candidate = safeJsonCandidate(data.response);
         modelOutputsReceived = 1;
@@ -365,21 +393,25 @@ export async function POST(request: NextRequest) {
     } else if (!apiMode && !cloudRunUrl && process.env.NODE_ENV === 'production') return NextResponse.json({ error: 'Production deployment requires private Taskmaster routing.', ok: false }, { status: 500 });
 
     const assessment: PlanningAssessment = {
+      caseId: body.projectId || body.projectName || body.caseName || 'not-recorded',
       scenarioId: active.schemeId, scenarioName: active.schemeName, status: active.status, decision: active.decision,
       supportingEvidence: active.evidence.slice(0, 4).map((item) => `${item.label}: ${item.value}`),
-      identifiedRisks: active.risks, recommendedAction: active.recommendedAction, model, generatedAt, accessPath,
+      identifiedRisks: active.risks, recommendedAction: active.recommendedAction, model, generatedAt,
+      ...(normalizedQuestion ? { question: normalizedQuestion } : {}), accessPath,
       userAuthenticated: false, backendAuthenticated, provenance,
       deterministicAssessment: { authoritative: true, schemes: deterministicSchemes },
       aiAssessment: {
-        advisory: true, modelCalled, disclosure, schemeComments: acceptedAi.schemeComments,
-        activeSchemeAssessment: acceptedAi.activeSchemeAssessment, providerRequests, providerResponses,
+        advisory: true, provider, modelCalled, disclosure, schemeComments: acceptedAi.schemeComments,
+        activeSchemeAssessment: acceptedAi.activeSchemeAssessment, providerRequests, successfulProviderRequests, providerResponses,
         modelOutputsReceived, modelOutputsSchemaAccepted, repairRequests, promptTokens, candidateTokens, totalTokens,
+        toolUsePromptTokens, thoughtTokens, ...(failureClassification ? { failureClassification } : {}),
       },
       binding: {
         opportunityInputHash: body.opportunityInputHash || 'not-recorded', sourceStudyVersion: body.sourceStudyVersion || 'not-recorded',
         canonicalRevisionIds: Object.fromEntries(deterministicSchemes.map((scheme) => [scheme.schemeId, scheme.sourceRevisionId])),
-        simulationResultHash, activeSchemeId: active.schemeId, generatedAt,
+        simulationResultHash, activeSchemeId: active.schemeId, questionHash, generatedAt,
       },
+      stale: false,
     };
     return NextResponse.json(assessment, { status: 200 });
   } catch (error) {

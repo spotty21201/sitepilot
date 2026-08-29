@@ -5,19 +5,19 @@
 
 steps:
   # Step 1: Install Dependencies
-  - name: 'node:20-alpine'
+  - name: 'node:22-alpine'
     id: 'install-deps'
     entrypoint: 'npm'
     args: ['ci']
 
   # Step 2: Quality Gate — Repository-Wide Lint
-  - name: 'node:20-alpine'
+  - name: 'node:22-alpine'
     id: 'lint-check'
     entrypoint: 'npx'
     args: ['eslint', 'src/']
 
   # Step 3: Quality Gate — Automated Unit & Integration Tests
-  - name: 'node:20-alpine'
+  - name: 'node:22-alpine'
     id: 'unit-tests'
     entrypoint: 'npx'
     args: ['vitest', 'run']
@@ -51,20 +51,20 @@ steps:
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot:${COMMIT_SHA}'
       - '--region=${_REGION}'
       - '--platform=managed'
-      - '--allow-unauthenticated'
+      - '--no-allow-unauthenticated'
       - '--min-instances=0'
-      - '--max-instances=2'
+      - '--max-instances=1'
       - '--memory=1Gi'
       - '--cpu=1'
       - '--timeout=120s'
       - '--service-account=${_SERVICE_ACCOUNT}@${PROJECT_ID}.iam.gserviceaccount.com'
-      - '--set-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${_REGION},GEMINI_MODEL=${_GEMINI_MODEL},NODE_ENV=production'
+      - '--update-env-vars=GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${_REGION},VERTEX_AI_LOCATION=global,GEMINI_MODEL=${_GEMINI_MODEL},NODE_ENV=production,TASKMASTER_API_MODE=true'
 
 substitutions:
   _REGION: 'asia-southeast2'
   _REPO_NAME: 'sitepilot-repo'
-  _SERVICE_NAME: 'sitepilot'
-  _SERVICE_ACCOUNT: 'sitepilot-runner'
+  _SERVICE_NAME: 'sitepilot-taskmaster'
+  _SERVICE_ACCOUNT: 'sitepilot-taskmaster-runtime'
   _GEMINI_MODEL: 'gemini-3.7-flash'
 
 options:

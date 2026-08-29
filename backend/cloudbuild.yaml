@@ -1,5 +1,6 @@
 # ==============================================================================
-# Google Cloud Build CI/CD Pipeline for SitePilot Cloud Run Backend
+# Legacy standalone Vertex gateway build. This is not the current Taskmaster
+# deployment path; it remains private if manually deployed for compatibility.
 # ==============================================================================
 
 steps:
@@ -32,9 +33,9 @@ steps:
       - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/sitepilot-vertex:${COMMIT_SHA}'
       - '--region=${_REGION}'
       - '--platform=managed'
-      - '--allow-unauthenticated'
+      - '--no-allow-unauthenticated'
       - '--min-instances=0'
-      - '--max-instances=2'
+      - '--max-instances=1'
       - '--memory=1Gi'
       - '--cpu=1'
       - '--timeout=120s'

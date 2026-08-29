@@ -596,6 +596,7 @@ export interface ActiveSchemeAiAssessment {
 }
 
 export interface PlanningAssessment {
+  caseId: string;
   scenarioId: string;
   scenarioName: string;
   status: 'WITHIN_SUPPLIED_STUDY_ENVELOPE' | 'NON_COMPLIANT_HEIGHT' | 'NON_COMPLIANT_FAR' | 'NON_COMPLIANT_COVERAGE' | 'NON_COMPLIANT_SETBACK' | 'NON_COMPLIANT_OUT_OF_BOUNDS' | 'COLLISION_DETECTED' | 'WARNING';
@@ -605,6 +606,7 @@ export interface PlanningAssessment {
   recommendedAction: string;
   model: string;
   generatedAt: string;
+  question?: string;
   accessPath: 'same_origin_browser' | 'authorized_server';
   userAuthenticated: boolean;
   backendAuthenticated: boolean;
@@ -621,18 +623,23 @@ export interface PlanningAssessment {
   };
   aiAssessment: {
     advisory: true;
+    provider: string;
     modelCalled: boolean;
     disclosure: string;
     schemeComments: AiSchemeComment[];
     activeSchemeAssessment: ActiveSchemeAiAssessment;
     providerRequests: number;
+    successfulProviderRequests: number;
     providerResponses: number;
     modelOutputsReceived: number;
     modelOutputsSchemaAccepted: number;
     repairRequests: number;
     promptTokens: number;
     candidateTokens: number;
+    toolUsePromptTokens: number;
+    thoughtTokens: number;
     totalTokens: number;
+    failureClassification?: string;
   };
   binding: {
     opportunityInputHash: string;
@@ -640,6 +647,7 @@ export interface PlanningAssessment {
     canonicalRevisionIds: Record<string, string>;
     simulationResultHash: string;
     activeSchemeId: string;
+    questionHash: string;
     generatedAt: string;
   };
   stale?: boolean;

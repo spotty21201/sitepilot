@@ -8,9 +8,23 @@
  * - Explicit error reporting without silent fallback in production
  */
 
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import { Finding, EvidenceClassification, EvidenceCategory } from '@/types';
 import { getAiConfig } from './config';
+
+/**
+ * Stable, single-attempt generation settings shared by every hosted Gemini
+ * stage. Gemini 3.7 Flash requires the discrete thinking-level contract; a
+ * low level leaves the bounded output allowance available for visible JSON.
+ */
+export function hostedGenerationCompatibility(model: string) {
+  return {
+    httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } },
+    ...(model === 'gemini-3.7-flash'
+      ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+      : {}),
+  };
+}
 
 /**
  * Initialize Google GenAI client based on environment

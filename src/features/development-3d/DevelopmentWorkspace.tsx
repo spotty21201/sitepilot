@@ -650,7 +650,7 @@ export function DevelopmentWorkspace({
           ) : (
             /* 2D Cadastral SVG View with Normalized Non-Colliding Legend */
             <div className="w-full h-full flex flex-col items-center justify-center p-4 bg-[var(--bg-primary)]">
-              <svg viewBox={planViewBox} className="w-full flex-1 max-w-2xl drop-shadow-2xl" aria-label={`Illustrative rectangular site plan fronting ${streetName}`}>
+              <svg viewBox={planViewBox} className="w-full flex-1 max-w-2xl drop-shadow-2xl" role="img" aria-label={`Illustrative rectangular site plan fronting ${streetName}`}>
                 <rect data-study-road-width="20" x={bounds.minX - planPadding / 2} y={bounds.maxY} width={bounds.width + planPadding} height={planRoadDepth} fill="#252a31" stroke="#3b424d" strokeWidth="0.8" />
                 <text x="0" y={bounds.maxY + planRoadDepth * 0.62} fill="#c9a96a" fontSize={Math.max(3, Math.min(5, bounds.width / 24))} textAnchor="middle" letterSpacing="0.5" fontWeight="bold">
                   {`${streetName.toUpperCase()} · FRONTAGE ${bounds.width}M`}

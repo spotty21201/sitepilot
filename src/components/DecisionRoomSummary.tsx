@@ -52,7 +52,7 @@ export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoo
       <div className="p-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-tertiary)]">
         <div className="flex items-center gap-2">
           <Compass className="w-4 h-4 text-[var(--status-evidence)]" />
-          <h3 className="type-section-title">Executive Decision Brief</h3>
+          <h2 className="type-section-title">Executive Decision Brief</h2>
         </div>
         <div className="flex items-center gap-1 text-xs">
           <button type="button" onClick={() => window.print()} className="button-secondary p-1.5" aria-label="Print Executive Brief"><Printer className="h-3.5 w-3.5" /></button>
@@ -62,10 +62,15 @@ export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoo
         </div>
       </div>
 
-      <div className="p-3.5 flex-1 overflow-y-auto space-y-3.5">
+      <div
+        className="p-3.5 flex-1 overflow-y-auto space-y-3.5"
+        role="region"
+        aria-label="Executive decision brief details"
+        tabIndex={0}
+      >
         <section className="surface-inspector space-y-2 p-3" aria-label="Opportunity and parcel summary">
           <div>
-            <h4 className="text-xs font-semibold text-[var(--text-primary)]">{report.opportunity}</h4>
+            <h3 className="text-xs font-semibold text-[var(--text-primary)]">{report.opportunity}</h3>
             <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">{report.address}</p>
           </div>
           <div className="grid grid-cols-3 gap-2 border-y border-[var(--border-subtle)] py-2 text-center font-mono">
@@ -77,7 +82,7 @@ export function DecisionRoomSummary({ project, selectedScenarioId }: DecisionRoo
         </section>
 
         <section className="surface-inspector p-3" aria-label="Planning limits and options comparison">
-          <div className="flex items-center justify-between gap-2"><h4 className="text-xs font-semibold text-[var(--text-primary)]">Options A, B & C</h4><span className="type-metadata">{report.currentOption} selected</span></div>
+          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-[var(--text-primary)]">Options A, B & C</h3><span className="type-metadata">{report.currentOption} selected</span></div>
           <p className="mt-1 text-[10px] text-[var(--text-muted)]">Height {report.planning.maxHeight} · FAR {report.planning.maxFAR} · KDB {report.planning.maxCoverage} · KDH {report.planning.minOpenSpace} · {project.site.landscapedPermeableAreaM2 === undefined ? 'KDH not demonstrated' : 'landscaped/permeable area entered'}</p>
           <div className="mt-2 space-y-1.5">
             {report.options.map((option) => (

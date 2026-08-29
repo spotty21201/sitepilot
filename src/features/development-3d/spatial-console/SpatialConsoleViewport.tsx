@@ -225,7 +225,7 @@ export function SpatialConsoleViewport({
       data-envelope-kind={snapshot.site.zoningHeightLimitMeters === null ? 'footprint-only' : 'volume'}
       data-envelope-height={snapshot.site.zoningHeightLimitMeters ?? 'not-provided'}
     >
-      <div ref={surfaceRef} className={styles.surface} aria-label="Editable Spatial Console viewport" tabIndex={0} />
+      <div ref={surfaceRef} className={styles.surface} role="region" aria-label="Editable Spatial Console viewport" tabIndex={0} />
       <div className={styles.vignette} />
 
       <div className={styles.status} title={snapshot.compliance.summary}>
@@ -238,7 +238,7 @@ export function SpatialConsoleViewport({
         </div>
       </div>
 
-      <div className={styles.northIndicator} aria-label={northAngle === null
+      <div className={styles.northIndicator} role="img" aria-label={northAngle === null
         ? 'North orientation unavailable in the current view'
         : `North indicator, ${northAngle.toFixed(1)} degrees clockwise from screen up`}
       >
@@ -250,7 +250,7 @@ export function SpatialConsoleViewport({
         <span>{northAngle === null ? 'N AXIS' : 'N'}</span>
       </div>
 
-      <div className={styles.streetLabel} aria-label={`Twenty metre study road and setback context for ${snapshot.site.streetName}`}>
+      <div className={styles.streetLabel} role="note" aria-label={`Twenty metre study road and setback context for ${snapshot.site.streetName}`}>
         <span>20 m study road</span>
         <strong>Front {snapshot.site.setbacks.front} m · sides {snapshot.site.setbacks.sideLeft}/{snapshot.site.setbacks.sideRight} m · rear {snapshot.site.setbacks.rear} m · Context not yet verified</strong>
       </div>
@@ -267,7 +267,7 @@ export function SpatialConsoleViewport({
 
       {pointedMass && <div className={styles.massTooltip} role="status">{hoveredMassId ? 'Selectable' : 'Selected'} · <strong>{pointedMass.name}</strong> · {pointedMass.type.toLowerCase()}</div>}
 
-      <div className={styles.cameraDock} aria-label="Spatial Console camera controls">
+      <div className={styles.cameraDock} role="group" aria-label="Spatial Console camera controls">
         <div className={styles.cameraPresets} role="group" aria-label="Standard views">
           {(['TOP', 'ISO'] as const).map((preset) => (
             <button
@@ -385,7 +385,7 @@ export function SpatialConsoleViewport({
         ))}
       </div>
 
-      <div className={styles.interactionLayer} aria-label="Spatial editing interaction layer">
+      <div className={styles.interactionLayer} role="group" aria-label="Spatial editing interaction layer">
         <div className={styles.gizmoRegion} data-interaction-region="gizmos" aria-hidden="true" />
         <div className={styles.previewDimensionsRegion} data-interaction-region="preview-dimensions" aria-hidden="true">
           {feedback.phase === 'preview' && feedback.result.snapshot && (
@@ -421,7 +421,7 @@ export function SpatialConsoleViewport({
         onClearSelection={() => onSelectMass(null)}
       />
 
-      <div className={styles.scale} aria-label={`Scale bar ${scale.label}`}>
+      <div className={styles.scale} role="img" aria-label={`Scale bar ${scale.label}`}>
         <span className={styles.scaleTrack} style={{ width: scale.pixels }} />
         <span>{scale.label}</span>
       </div>
@@ -437,7 +437,7 @@ export function SpatialConsoleViewport({
           <span aria-hidden="true">≡</span> Legend
         </button>
         {legendOpen && (
-          <div className={styles.legendPanel} aria-label="Spatial legend">
+          <div className={styles.legendPanel} role="region" aria-label="Spatial legend">
             <span><i className={styles.siteKey} />Site boundary</span>
             <span><i className={styles.envelopeKey} />{snapshot.site.zoningHeightLimitMeters === null ? 'Buildable footprint; height not provided' : `Study envelope to ${snapshot.site.zoningHeightLimitMeters} m`}</span>
             <span><i className={styles.massingKey} />Active scenario massing</span>

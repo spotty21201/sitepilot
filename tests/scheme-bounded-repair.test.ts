@@ -7,6 +7,7 @@ vi.mock('@/lib/ai/config', () => ({
 }));
 vi.mock('@/lib/ai/gemini', () => ({
   createAiClient: () => ({ ai: { models: { generateContent: provider.generateContent } }, model: 'gemini-test', provider: 'VERTEX_AI' }),
+  hostedGenerationCompatibility: () => ({ httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } }),
 }));
 
 import { createStudyTemplateProposals, generateSchemeProposals, type SchemeGenerationInput } from '@/lib/schemes/proposal-contract';
@@ -50,10 +51,10 @@ describe('bounded proposal repair', () => {
     await generateSchemeProposals(input, { onSchemaAccepted });
     expect(provider.generateContent).toHaveBeenCalledTimes(1);
     const request = provider.generateContent.mock.calls[0][0];
-    expect(request.config.httpOptions).toEqual({ apiVersion: 'v1' });
+    expect(request.config.httpOptions).toEqual({ apiVersion: 'v1', retryOptions: { attempts: 1 } });
     expect(request.config.responseMimeType).toBe('application/json');
     expect(request.config.responseSchema).toMatchObject({ type: 'ARRAY' });
-    expect(request.config.maxOutputTokens).toBe(8192);
+    expect(request.config.maxOutputTokens).toBe(4096);
     expect(request.config.responseSchema.items.properties.programGFAByUse).toMatchObject({
       type: 'OBJECT',
       required: ['retail', 'office', 'residential', 'hotel', 'publicRealmAmenities'],
