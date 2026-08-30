@@ -6,6 +6,12 @@ SitePilot turns a confirmed development opportunity into three comparable spatia
 
 > This feature-branch build is not merged to `main` and has not been submitted to the hackathon.
 
+## Demo video
+
+[![Watch the SitePilot demo on YouTube](https://img.youtube.com/vi/FwUcc0RxXLA/maxresdefault.jpg)](https://youtu.be/FwUcc0RxXLA)
+
+**[Watch the SitePilot demo on YouTube](https://youtu.be/FwUcc0RxXLA)**
+
 ![SitePilot Decision Room and Spatial Console.](docs/readme/sitepilot-hero.png)
 
 ## Current workflow
@@ -83,7 +89,7 @@ Live Vertex inference is server-only and opt-in. Never place Google credentials 
 - The public inference path is quota-limited and preserves deterministic fallback.
 - The repository has no root project license. The owner must select and add an appropriate license before submission; no license is assumed here.
 - Entrant eligibility, project-newness, third-party/AI-provider rights, team details, and final submission attestations remain owner-controlled factual confirmations.
-- The demo video and Devpost text are prepared in `docs/` but are not published or submitted.
+- The Devpost text is prepared in `docs/` but is not published or submitted.
 
 See [hackathon readiness](docs/HACKATHON_COMPLIANCE.md), the [Devpost draft](docs/DEVPOST_DRAFT.md), and the [four-minute demo plan](docs/DEMO_VIDEO_PLAN.md).
 
