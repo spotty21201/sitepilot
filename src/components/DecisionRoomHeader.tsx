@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { Project, CaseSummary } from '@/types';
 import { 
   MapPin, 
@@ -17,6 +18,7 @@ import {
   Box,
   PencilRuler,
   LoaderCircle,
+  BookOpen,
 } from 'lucide-react';
 
 interface DecisionRoomHeaderProps {
@@ -318,6 +320,16 @@ export function DecisionRoomHeader({
 
       {/* Right: Recommendation Status, Confidence, Readiness & Spatial Lab */}
       <div className="flex items-center gap-2.5 lg:gap-4 shrink-0">
+        <Link
+          href="/guide"
+          aria-label="Open the illustrated SitePilot guide"
+          title="Open the illustrated SitePilot guide"
+          className="button-secondary flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold transition-colors"
+        >
+          <BookOpen className="h-3.5 w-3.5 text-[var(--status-evidence)]" />
+          <span className="hidden xl:inline">Guide</span>
+        </Link>
+
         <button
           type="button"
           onClick={onOpenSpatialLab}
