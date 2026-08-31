@@ -2,9 +2,8 @@
 
 SitePilot turns a confirmed development opportunity into three comparable spatial strategies while keeping AI interpretation separate from calculated planning truth.
 
-**[Open the hackathon testing build](https://sitepilot-hackathon.vercel.app)**
-
-> This feature-branch build is not merged to `main` and has not been submitted to the hackathon.
+**[Open the public hackathon build](https://sitepilot-hackathon.vercel.app)** ·
+**[View the Devpost submission](https://devpost.com/software/sitepilot-yromc5)**
 
 ## Demo video
 
@@ -64,12 +63,41 @@ Unsupported or deferred product claims include user document upload, three speci
 
 ## Run and verify locally
 
-Requires Node.js 22 or newer.
+### Requirements
+
+- Node.js 22.22.2 LTS
+- npm, as bundled with Node.js
+- Git
+- No Google Cloud credentials or Gemini API key for the default local path
+
+### Clean-clone quick start
 
 ```bash
+git clone https://github.com/spotty21201/sitepilot.git
+cd sitepilot
 npm ci
 npm run dev
 ```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+Do not create an environment file for the default local test. With no AI or
+Google Cloud variables configured, SitePilot runs in safe local mode:
+
+- the intake, comparison, deterministic simulation, review, and export
+  surfaces remain available;
+- Taskmaster identifies the provider as `LOCAL_DEVELOPMENT`;
+- runtime evidence reports `modelCalled=false`;
+- strategy generation uses explicitly labelled template schemes and assessment
+  uses deterministic evidence;
+- no Gemini, Vertex AI, Firestore, or Cloud Tasks request is made.
+
+The visible fallback disclosure is:
+
+> Template schemes used. No model request was made; SitePilot calculated and
+> validated all planning figures deterministically.
+
+### Verification
 
 ```bash
 npm test
@@ -79,7 +107,43 @@ npm run build
 git diff --check
 ```
 
-Live Vertex inference is server-only and opt-in. Never place Google credentials or model flags in `NEXT_PUBLIC_*` variables. The production architecture uses Cloud Run ADC and private invocation.
+Each command should exit successfully. The production build can then be tested
+with:
+
+```bash
+npm start
+```
+
+### Optional live Gemini test
+
+Live inference is opt-in and makes external, potentially billable requests.
+For local Gemini API development, create `.env.local` containing only:
+
+```dotenv
+TASKMASTER_ALLOW_LIVE_MODEL=true
+GEMINI_API_KEY=your-key
+GEMINI_MODEL=gemini-3.7-flash
+```
+
+On a successful live run, runtime evidence should report:
+
+- provider `GEMINI_API`;
+- model `gemini-3.7-flash`;
+- `modelCalled=true`;
+- non-zero provider and token accounting.
+
+If the provider is unavailable or its allowance is exhausted, SitePilot returns
+the disclosed template/deterministic fallback and does not claim that Gemini
+was called.
+
+Never commit `.env.local`, expose credentials through `NEXT_PUBLIC_*`
+variables, or copy `.env.example` unchanged: it contains placeholders for the
+full deployment configuration.
+
+The hosted Vertex AI architecture uses private Cloud Run, runtime
+service-account ADC, Cloud Tasks, and Firestore. See
+[Google Cloud deployment](docs/GOOGLE_CLOUD_DEPLOYMENT.md) for its environment
+requirements and security boundaries.
 
 ## Current limitations and owner gates
 
@@ -87,12 +151,15 @@ Live Vertex inference is server-only and opt-in. Never place Google credentials 
 - User-supplied planning and commercial figures remain unverified unless their provenance says otherwise.
 - Browser-local case persistence is not account-backed, collaborative, or suitable for confidential production data.
 - The public inference path is quota-limited and preserves deterministic fallback.
-- The repository has no root project license. The owner must select and add an appropriate license before submission; no license is assumed here.
+- A configured provider or model name is not proof of live inference. Use the
+  runtime `modelCalled`, provider, model, and token evidence.
 - Entrant eligibility, project-newness, third-party/AI-provider rights, team details, and final submission attestations remain owner-controlled factual confirmations.
-- The Devpost text is prepared in `docs/` but is not published or submitted.
 
-See [hackathon readiness](docs/HACKATHON_COMPLIANCE.md), the [Devpost draft](docs/DEVPOST_DRAFT.md), and the [four-minute demo plan](docs/DEMO_VIDEO_PLAN.md).
+See [hackathon readiness](docs/HACKATHON_COMPLIANCE.md), the
+[Devpost submission source](docs/DEVPOST_DRAFT.md), and the
+[four-minute demo plan](docs/DEMO_VIDEO_PLAN.md).
 
-## Provenance
+## License
 
-The owner conceived and directed SitePilot. Kimi, Antigravity, Codex, and other AI assistants supported design, implementation, review, and testing under the owner’s direction; they are not represented as human contributors or legal owners. Third-party packages, fonts, and tools remain subject to their own licenses.
+SitePilot is licensed under the [MIT License](LICENSE). Third-party packages,
+fonts, assets, and tools remain subject to their respective licenses.
